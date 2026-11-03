@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
-	<!-- Keep the UpgradeCode unchanged: MajorUpgrade uses it to remove earlier installs
-	     (including the old Civil3DStyleManager.bundle folder) before installing this version. -->
-	<Product Id="*" Name="C3D Pro Tools" Language="1033" Version="1.1.0.0" Manufacturer="Mohamed Elgarhy" UpgradeCode="f1e2d3c4-b5a6-4789-8c9d-0e1f2a3b4c5d">
-		<Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+	<!-- Keep the UpgradeCode unchanged: MajorUpgrade uses it to remove earlier installs (the WiX v3 x86 packages up to 1.1.0
+	     included, and the old Civil3DStyleManager.bundle folder) before installing this version. -->
+	<Package Name="C3D Pro Tools" Language="1033" Version="1.1.0.0" Manufacturer="Mohamed Elgarhy" UpgradeCode="f1e2d3c4-b5a6-4789-8c9d-0e1f2a3b4c5d"
+	         InstallerVersion="500" Scope="perMachine" Compressed="yes">
 
 		<!-- AllowSameVersionUpgrades: a rebuild keeps Version 1.1.0.0, so without it the new MSI installs beside the old one
 		     and Windows Installer keeps the old C3D_Pro_Tools.dll (same file version = not replaced). With it, the old
@@ -16,48 +16,46 @@
 			<ComponentGroupRef Id="PluginComponents" />
 			<ComponentGroupRef Id="NavisworksComponents" />
 		</Feature>
-	</Product>
+	</Package>
 
 	<Fragment>
 		<!-- Installs to: C:\ProgramData\Autodesk\ApplicationPlugins\C3DProTools.bundle\Contents -->
-		<Directory Id="TARGETDIR" Name="SourceDir">
-			<Directory Id="CommonAppDataFolder">
-				<Directory Id="AutodeskFolder" Name="Autodesk">
-					<!-- Navisworks loads per-machine add-ins from C:\ProgramData\Autodesk\Navisworks Manage 2026\Plugins\<Name>\<Name>.dll -->
-					<Directory Id="NavisManageFolder" Name="Navisworks Manage 2026">
-						<Directory Id="NavisPluginsFolder" Name="Plugins">
-							<Directory Id="NavisAddinFolder" Name="C3DProTools.Navis" />
-						</Directory>
+		<StandardDirectory Id="CommonAppDataFolder">
+			<Directory Id="AutodeskFolder" Name="Autodesk">
+				<!-- Navisworks loads per-machine add-ins from C:\ProgramData\Autodesk\Navisworks Manage 2026\Plugins\<Name>\<Name>.dll -->
+				<Directory Id="NavisManageFolder" Name="Navisworks Manage 2026">
+					<Directory Id="NavisPluginsFolder" Name="Plugins">
+						<Directory Id="NavisAddinFolder" Name="C3DProTools.Navis" />
 					</Directory>
-					<Directory Id="ApplicationPluginsFolder" Name="ApplicationPlugins">
-						<Directory Id="BundleFolder" Name="C3DProTools.bundle">
-							<Directory Id="ContentsFolder" Name="Contents" />
-						</Directory>
+				</Directory>
+				<Directory Id="ApplicationPluginsFolder" Name="ApplicationPlugins">
+					<Directory Id="BundleFolder" Name="C3DProTools.bundle">
+						<Directory Id="ContentsFolder" Name="Contents" />
 					</Directory>
 				</Directory>
 			</Directory>
-		</Directory>
+		</StandardDirectory>
 	</Fragment>
 
 	<Fragment>
 		<ComponentGroup Id="PluginComponents">
 
 			<!-- Component 1: The PackageContents.xml file -->
-			<Component Id="PackageContentsXml" Guid="*" Directory="BundleFolder">
-				<File Id="PackageContentsFile" Name="PackageContents.xml" Source="$(var.ProjectDir)PackageContents.xml" KeyPath="yes" />
+			<Component Id="PackageContentsXml" Directory="BundleFolder">
+				<File Id="PackageContentsFile" Name="PackageContents.xml" Source="$(sys.SOURCEFILEDIR)PackageContents.xml" KeyPath="yes" />
 			</Component>
 
-			<!-- Component 2: The compiled plugin, taken from the C3D_Pro_Tools build output -->
-			<Component Id="PluginDLL" Guid="*" Directory="ContentsFolder">
-				<File Id="DllFile" Name="C3D_Pro_Tools.dll" Source="$(var.ProjectDir)..\C3D_Pro_Tools\bin\$(var.Configuration)\net10.0-windows\C3D_Pro_Tools.dll" KeyPath="yes" />
+			<!-- Component 2: The compiled plugin, from the C3D_Pro_Tools project's build output -->
+			<Component Id="PluginDLL" Directory="ContentsFolder">
+				<File Id="DllFile" Name="C3D_Pro_Tools.dll" Source="$(var.C3D_Pro_Tools.TargetPath)" KeyPath="yes" />
 			</Component>
 
 		</ComponentGroup>
 
 		<!-- Navisworks Manage 2026 add-in: answers the Civil 3D Navisworks Import over a local link. -->
 		<ComponentGroup Id="NavisworksComponents">
-			<Component Id="NavisAddinDLL" Guid="*" Directory="NavisAddinFolder">
-				<File Id="NavisDllFile" Name="C3DProTools.Navis.dll" Source="$(var.ProjectDir)..\C3DProTools.Navis\bin\$(var.Configuration)\net48\C3DProTools.Navis.dll" KeyPath="yes" />
+			<Component Id="NavisAddinDLL" Directory="NavisAddinFolder">
+				<File Id="NavisDllFile" Name="C3DProTools.Navis.dll" Source="$(var.C3DProTools.Navis.TargetPath)" KeyPath="yes" />
 			</Component>
 		</ComponentGroup>
 	</Fragment>

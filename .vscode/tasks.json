@@ -1,7 +1,7 @@
 {
     // Run with Ctrl+Shift+B (default build) or Terminal > Run Task...
-    // The installer tasks run build.ps1, which uses Visual Studio's own MSBuild.exe, because the WiX v3
-    // installer project cannot be built by the `dotnet` CLI that VS Code uses by default.
+    // The installer tasks run build.ps1, which builds everything (the WiX v5 installer included) with
+    // the `dotnet` CLI and then runs the tests.
     "version": "2.0.0",
     "tasks": [
         {
