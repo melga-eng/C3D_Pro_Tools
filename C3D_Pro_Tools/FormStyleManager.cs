@@ -1013,27 +1013,8 @@ namespace C3DProTools
             {
                 _lblUsers.Text = $"Used by  ({item.Uses:N0})";
                 const int limit = 400;
-                using (Transaction tr = _session.Db.TransactionManager.StartOpenCloseTransaction())
-                {
-                    foreach (ObjectId id in item.EntityUsers.Concat(item.OtherReferrers).Take(limit))
-                    {
-                        string kind = id.ObjectClass?.Name ?? "", name = "", where = "";
-                        try
-                        {
-                            DBObject obj = tr.GetObject(id, OpenMode.ForRead);
-                            kind = obj.GetType().Name.Replace("TableRecord", "");
-                            name = StyleCatalog.ReadString(obj, "Name") ?? "";
-                            if (obj is Entity ent)
-                            {
-                                if (name.Length == 0) name = "Layer " + ent.Layer;
-                                where = SpaceName(tr, ent.OwnerId);
-                            }
-                            else where = "Style / setting";
-                        }
-                        catch (Exception) { name = "<" + id.Handle + ">"; }
-                        _lvUsers.Items.Add(new ListViewItem(new[] { kind, name, where }) { Tag = id });
-                    }
-                }
+                foreach ((ObjectId id, string kind, string name, string where) in _session.DescribeUsers(item, limit))
+                    _lvUsers.Items.Add(new ListViewItem(new[] { kind, name, where }) { Tag = id });
                 if (item.Uses > limit) _lvUsers.Items.Add(new ListViewItem(new[] { $"… {item.Uses - limit:N0} more", "", "" }));
             }
             else _lblUsers.Text = "Used by";
@@ -1086,26 +1067,12 @@ namespace C3DProTools
 
         private void ZoomToIds(IEnumerable<ObjectId> ids)
         {
-            if (!CanUseView()) return;
-            int other = 0, shown = 0;
-            Extents3d? ext = null;
+            if (!CanUseView() || _session == null) return;
+            Extents3d? ext;
+            int shown, other;
             using (_doc.LockDocument())
-            using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
             {
-                ObjectId space = _doc.Database.CurrentSpaceId;
-                foreach (ObjectId id in ids)
-                {
-                    if (!(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
-                    if (ent.OwnerId != space) { other++; continue; }
-                    try
-                    {
-                        Extents3d e = ent.GeometricExtents;
-                        if (ext.HasValue) { Extents3d x = ext.Value; x.AddExtents(e); ext = x; } else ext = e;
-                        shown++;
-                    }
-                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                }
-                tr.Commit();
+                (ext, shown, other) = _session.ExtentsInCurrentSpace(ids);
                 if (ext.HasValue) ViewHelper.ZoomTo(ext.Value, 1.25, 5.0);
             }
             SetStatus(ext.HasValue ? $"Zoomed to {shown} object(s)" + (other > 0 ? $"; {other} more are in other layouts or blocks." : ".")
@@ -1114,22 +1081,8 @@ namespace C3DProTools
 
         private void SelectUsers(List<StyleItem> items)
         {
-            if (items.Count == 0 || !CanUseView()) return;
-            ObjectId space = _doc.Database.CurrentSpaceId;
-            List<ObjectId> here = new List<ObjectId>();
-            int other = 0;
-            using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
-            {
-                foreach (ObjectId id in items.SelectMany(i => i.EntityUsers).Distinct())
-                {
-                    try
-                    {
-                        if (tr.GetObject(id, OpenMode.ForRead).OwnerId == space) here.Add(id); else other++;
-                    }
-                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                }
-                tr.Commit();
-            }
+            if (items.Count == 0 || !CanUseView() || _session == null) return;
+            (List<ObjectId> here, int other) = _session.UsersInCurrentSpace(items);
             try
             {
                 using (_doc.LockDocument()) _doc.Editor.SetImpliedSelection(here.ToArray());
@@ -1485,7 +1438,7 @@ namespace C3DProTools
                 if (openSource != null)
                 {
                     source = openSource.Database;
-                    using (Transaction tr = source.TransactionManager.StartTransaction()) { items = StyleCatalog.Build(source, tr); tr.Commit(); }
+                    items = StyleSession.ItemsOf(source);
                 }
                 else
                 {

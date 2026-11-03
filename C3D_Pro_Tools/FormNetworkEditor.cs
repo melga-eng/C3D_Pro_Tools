@@ -28,7 +28,8 @@ namespace C3DProTools
         private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…" };
 
         private readonly NetworkEditorSettings _s = NetworkEditorSettings.Load();
-        private readonly List<ObjectId> _pipes = new List<ObjectId>();
+        /// <summary>The chosen pipes and parts, and the reads made on them; the form shows and edits it.</summary>
+        private readonly NetworkEditorSession _session = new NetworkEditorSession();
         private readonly Dictionary<string, ObjectId> _networks = new Dictionary<string, ObjectId>();
         /// <summary>The network the part choosers open on (the first chosen gravity pipe's).</summary>
         private ObjectId _partNetwork = ObjectId.Null;
@@ -89,8 +90,7 @@ namespace C3DProTools
         private readonly Label _lblSwapSel = ToolUi.Note(""), _lblSwapSummary = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(8, 9, 3, 3) };
         private readonly ComboBox _cbSwapSet = ToolUi.Combo(260);
         private List<SwapGroup> _swapGroups = new List<SwapGroup>();
-        /// <summary>Structures, fittings and appurtenances chosen as they are (pipes are in <see cref="_pipes"/>).</summary>
-        private readonly List<ObjectId> _parts = new List<ObjectId>();
+        /// <summary>Structures, fittings and appurtenances chosen as they are (pipes are in <see cref="_session.Pipes"/>).</summary>
         // Pressure to gravity
         private readonly PartChooser _gPart = new PartChooser(DomainType.Pipe);
         private readonly TextBox _txtGNet = new TextBox { Width = 240 };
@@ -98,7 +98,7 @@ namespace C3DProTools
         /// <param name="pipes">Pipes to start with (e.g. just made by another tool); null = none.</param>
         public FormNetworkEditor(IEnumerable<ObjectId> pipes = null)
         {
-            if (pipes != null) _pipes.AddRange(pipes);
+            if (pipes != null) _session.Pipes.AddRange(pipes);
             Text = "C3D Pro Tools - Network Editor";
             Font = StyleUi.Base;
             BackColor = StyleUi.Surface;
@@ -169,7 +169,7 @@ namespace C3DProTools
             bar.Controls.Add(_cbNetwork);
             bar.Controls.Add(StyleUi.Secondary("Add", (s, e) => AddNetwork()));
             bar.Controls.Add(StyleUi.Secondary("Show", (s, e) => ShowPipes()));
-            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _pipes.Clear(); _parts.Clear(); UpdatePipeSummary(); }));
+            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _session.Pipes.Clear(); _session.Parts.Clear(); UpdatePipeSummary(); }));
             bar.Controls.Add(_lblPipes);
             return bar;
         }
@@ -379,7 +379,7 @@ namespace C3DProTools
             Dictionary<string, SwapTarget> keep = _swapGroups.Where(g => g.Target != null).ToDictionary(g => $"{g.Kind}|{g.Family}|{g.Size}", g => g.Target, StringComparer.OrdinalIgnoreCase);
             Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
             using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                _swapGroups = PartSwap.Collect(tr, _pipes, _parts, _chkSwapStructures.Checked, _chkSwapFittings.Checked);
+                _swapGroups = PartSwap.Collect(tr, _session.Pipes, _session.Parts, _chkSwapStructures.Checked, _chkSwapFittings.Checked);
             foreach (SwapGroup g in _swapGroups) if (keep.TryGetValue($"{g.Kind}|{g.Family}|{g.Size}", out SwapTarget t)) g.Target = t;
             ResolveSwap(_swapGroups);
             FillSwapGrid();
@@ -614,7 +614,7 @@ namespace C3DProTools
             ObjectId net = ObjectId.Null;
             Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
             using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                foreach (ObjectId id in _pipes)
+                foreach (ObjectId id in _session.Pipes)
                     if (!id.IsErased && tr.GetObject(id, OpenMode.ForRead) is Pipe p) { net = p.NetworkId; break; }
             if (net == _partNetwork && !force) return;
             _partNetwork = net;
@@ -749,24 +749,8 @@ namespace C3DProTools
         }
 
         /// <summary>The copies' outside width and height: the chosen part's, else the first chosen gravity pipe's.</summary>
-        private bool CopyOutside(out double width, out double height)
-        {
-            width = height = 0;
-            if (_rbChosenSize.Checked && _parPart.Pick is PartPick pick && pick.InnerHeight > 0)
-            {
-                width = height = pick.InnerHeight + 2 * Math.Max(0, pick.Wall);
-                return true;
-            }
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                foreach (ObjectId id in _pipes)
-                {
-                    if (id.IsErased) continue;
-                    if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) { width = CoverRoute.OuterWidthOf(p); height = CoverRoute.OuterHeightOf(p); return width > 0; }
-                    if (tr.GetObject(id, OpenMode.ForRead) is PressurePipe pp) { width = height = pp.OuterDiameter; return width > 0; }
-                }
-            return false;
-        }
+        private bool CopyOutside(out double width, out double height) =>
+            _session.CopyOutside(_rbChosenSize.Checked ? _parPart.Pick : null, out width, out height);
 
         // =====================================================================================
         // Chambers and spans
@@ -805,27 +789,14 @@ namespace C3DProTools
         private string SpanWarning(IEnumerable<ObjectId> pipes)
         {
             if (!_chkSpanWarn.Checked || !ToolUi.TryNumber(_txtMaxSpan, out double span) || span <= 0) return "";
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            try
-            {
-                using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                    return NetworkChecks.SpanWarning(tr, pipes.Where(id => !id.IsErased).ToList(), span);
-            }
-            catch (Exception ex) { return "The spans could not be checked: " + ex.Message; }
+            return NetworkEditorSession.SpanWarning(pipes, span);
         }
 
         private void RunChecks()
         {
-            if (_pipes.Count == 0) { MessageBox.Show(this, "Choose some pipes first.", Text); return; }
+            if (_session.Pipes.Count == 0) { MessageBox.Show(this, "Choose some pipes first.", Text); return; }
             if (!CheckLimits(out double skew, out double span)) return;
-            List<ChamberEntryIssue> issues;
-            string spans;
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-            {
-                issues = NetworkChecks.CheckEntries(tr, _pipes.Where(id => !id.IsErased).ToList(), skew);
-                spans = span > 0 ? NetworkChecks.SpanWarning(tr, _pipes.Where(id => !id.IsErased).ToList(), span) : "";
-            }
+            (List<ChamberEntryIssue> issues, string spans) = _session.Audit(skew, span);
             string spanText = spans.Length > 0 ? spans : span > 0 ? $"Every span is within {span:0.00} m." : "";
             if (issues.Count == 0)
             {
@@ -852,28 +823,13 @@ namespace C3DProTools
         // Choosing pipes
         // =====================================================================================
 
-        private (int gravity, int pressure) CountPipes()
-        {
-            int g = 0, p = 0;
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                foreach (ObjectId id in _pipes)
-                {
-                    if (id.IsErased) continue;
-                    DBObject obj = tr.GetObject(id, OpenMode.ForRead);
-                    if (obj is Pipe) g++; else if (obj is PressurePipe) p++;
-                }
-            return (g, p);
-        }
-
         private void UpdatePipeSummary()
         {
-            _pipes.RemoveAll(id => id.IsErased || !id.IsValid);
-            _parts.RemoveAll(id => id.IsErased || !id.IsValid);
+            _session.Prune();
             UpdatePartContexts();
-            (int g, int p) = CountPipes();
-            _lblPipes.Text = (_pipes.Count == 0 ? "No pipes chosen yet." : $"{g} gravity and {p} pressure pipe(s) chosen.") +
-                             (_parts.Count > 0 ? $" Also {_parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts)." : "");
+            (int g, int p) = _session.CountPipes();
+            _lblPipes.Text = (_session.Pipes.Count == 0 ? "No pipes chosen yet." : $"{g} gravity and {p} pressure pipe(s) chosen.") +
+                             (_session.Parts.Count > 0 ? $" Also {_session.Parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts)." : "");
             if (_nav.Selected == ASwap) RefreshSwap();
             RefreshConduitSection();
             int a = _nav.Selected;
@@ -894,14 +850,14 @@ namespace C3DProTools
             {
                 PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect pipes (gravity or pressure); structures, fittings and appurtenances are taken for Swap parts: " });
                 if (psr.Status != PromptStatus.OK) return;
-                _pipes.Clear();
-                _parts.Clear();
+                _session.Pipes.Clear();
+                _session.Parts.Clear();
                 using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
                     foreach (ObjectId id in psr.Value.GetObjectIds())
                     {
                         DBObject obj = tr.GetObject(id, OpenMode.ForRead);
-                        if (obj is Pipe || obj is PressurePipe) _pipes.Add(id);
-                        else if (obj is Structure || obj is PressureFitting || obj is PressureAppurtenance) _parts.Add(id);
+                        if (obj is Pipe || obj is PressurePipe) _session.Pipes.Add(id);
+                        else if (obj is Structure || obj is PressureFitting || obj is PressureAppurtenance) _session.Parts.Add(id);
                     }
             }
             finally { Show(); UpdatePipeSummary(); }
@@ -915,8 +871,8 @@ namespace C3DProTools
             {
                 PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect any pipe, structure or fitting of each network: " });
                 if (psr.Status != PromptStatus.OK) return;
-                _pipes.Clear();
-                _parts.Clear();
+                _session.Pipes.Clear();
+                _session.Parts.Clear();
                 int count = 0;
                 using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
                 {
@@ -930,7 +886,7 @@ namespace C3DProTools
                     foreach (ObjectId netId in nets) AddNetworkParts(tr, netId);
                     count = nets.Count;
                 }
-                acDoc.Editor.WriteMessage($"\n{count} network(s), {_pipes.Count} pipe(s) chosen.");
+                acDoc.Editor.WriteMessage($"\n{count} network(s), {_session.Pipes.Count} pipe(s) chosen.");
             }
             finally { Show(); UpdatePipeSummary(); }
         }
@@ -968,9 +924,9 @@ namespace C3DProTools
                     }
                 }
                 if (paths == 0) return;
-                _pipes.Clear();
-                _parts.Clear();
-                _pipes.AddRange(chosen);
+                _session.Pipes.Clear();
+                _session.Parts.Clear();
+                _session.Pipes.AddRange(chosen);
             }
             finally { Show(); UpdatePipeSummary(); }
         }
@@ -988,17 +944,17 @@ namespace C3DProTools
         {
             DBObject net = tr.GetObject(netId, OpenMode.ForRead);
             ObjectIdCollection pipes = net is Network n ? n.GetPipeIds() : net is PressurePipeNetwork pn ? pn.GetPipeIds() : new ObjectIdCollection();
-            foreach (ObjectId id in pipes) if (!_pipes.Contains(id)) _pipes.Add(id);
+            foreach (ObjectId id in pipes) if (!_session.Pipes.Contains(id)) _session.Pipes.Add(id);
             List<ObjectId> others = new List<ObjectId>();
             if (net is Network gn) others.AddRange(gn.GetStructureIds().Cast<ObjectId>());
             else if (net is PressurePipeNetwork pnet) { others.AddRange(pnet.GetFittingIds().Cast<ObjectId>()); others.AddRange(pnet.GetAppurtenanceIds().Cast<ObjectId>()); }
-            HashSet<ObjectId> have = new HashSet<ObjectId>(_parts);
-            foreach (ObjectId id in others) if (have.Add(id)) _parts.Add(id);
+            HashSet<ObjectId> have = new HashSet<ObjectId>(_session.Parts);
+            foreach (ObjectId id in others) if (have.Add(id)) _session.Parts.Add(id);
         }
 
         private void ShowPipes()
         {
-            if (_pipes.Count == 0) return;
+            if (_session.Pipes.Count == 0) return;
             Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
             Hide();
             try
@@ -1007,7 +963,7 @@ namespace C3DProTools
                 {
                     Extents3d? ext = null;
                     using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                        foreach (ObjectId id in _pipes)
+                        foreach (ObjectId id in _session.Pipes)
                         {
                             List<Point3d> path = PathOf(tr.GetObject(id, OpenMode.ForRead));
                             if (path == null) continue;
@@ -1016,7 +972,7 @@ namespace C3DProTools
                         }
                     if (ext.HasValue) ViewHelper.ZoomTo(ext.Value, 1.2, 20.0);
                     acDoc.Editor.UpdateScreen();
-                    acDoc.Editor.GetString(new PromptStringOptions($"\n{_pipes.Count} chosen pipe(s) highlighted. Press Enter to return: ") { AllowSpaces = true });
+                    acDoc.Editor.GetString(new PromptStringOptions($"\n{_session.Pipes.Count} chosen pipe(s) highlighted. Press Enter to return: ") { AllowSpaces = true });
                 }
             }
             finally { Show(); }
@@ -1039,19 +995,9 @@ namespace C3DProTools
             return null;
         }
 
-        private List<ObjectId> GravityPipes()
-        {
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                return _pipes.Where(id => !id.IsErased && tr.GetObject(id, OpenMode.ForRead) is Pipe).ToList();
-        }
+        private List<ObjectId> GravityPipes() => _session.GravityPipes();
 
-        private List<ObjectId> PressurePipes()
-        {
-            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
-            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                return _pipes.Where(id => !id.IsErased && tr.GetObject(id, OpenMode.ForRead) is PressurePipe).ToList();
-        }
+        private List<ObjectId> PressurePipes() => _session.PressurePipes();
 
         // =====================================================================================
         // Running a task
@@ -1195,7 +1141,7 @@ namespace C3DProTools
                 MessageBox.Show(this, "Enter the offsets as numbers separated by commas, for example -0.4, -0.2, 0, 0.2, 0.4.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (_pipes.Count == 0) { MessageBox.Show(this, "Choose some pipes first.", Text); return; }
+            if (_session.Pipes.Count == 0) { MessageBox.Show(this, "Choose some pipes first.", Text); return; }
             int perPipe = h.Count * v.Count - (h.Any(x => Math.Abs(x) < 1e-9) && v.Any(x => Math.Abs(x) < 1e-9) ? 1 : 0);
             if (perPipe <= 0) { MessageBox.Show(this, "Every offset is the source position itself; nothing would be copied.", Text); return; }
             NetworkEditOps.ParallelOptions o = new NetworkEditOps.ParallelOptions
@@ -1211,10 +1157,10 @@ namespace C3DProTools
                 if (!ToolUi.TryNumber(_txtParBoxL, out o.BoxLength) || !ToolUi.TryNumber(_txtParBoxW, out o.BoxWidth) || o.BoxLength <= 0 || o.BoxWidth <= 0)
                 { MessageBox.Show(this, "Enter the box's length and width as positive numbers.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             }
-            if (MessageBox.Show(this, $"Create {perPipe} cop{(perPipe == 1 ? "y" : "ies")} of each of the {_pipes.Count} chosen pipe(s) ({perPipe * _pipes.Count} new pipes)" +
+            if (MessageBox.Show(this, $"Create {perPipe} cop{(perPipe == 1 ? "y" : "ies")} of each of the {_session.Pipes.Count} chosen pipe(s) ({perPipe * _session.Pipes.Count} new pipes)" +
                                       (o.SameNetwork ? " in their own networks?" : $" in the new network \"{o.NewNetworkName}\"?"), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
-            NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplyParallel(tr, CivilApplication.ActiveDocument, acDoc.Database, new List<ObjectId>(_pipes), o, ed));
+            NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplyParallel(tr, CivilApplication.ActiveDocument, acDoc.Database, new List<ObjectId>(_session.Pipes), o, ed));
             Report($"Created {c.Created} copies of {c.Done} pipe(s).", c, c.Joined > 0 ? $"Copy ends connected to structures: {c.Joined}" : "");
         }
 

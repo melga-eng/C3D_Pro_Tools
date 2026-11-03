@@ -48,18 +48,11 @@ namespace C3DProTools
         private const int CCheck = 0, CName = 1, CAction = 2, CSize = 3, CPart = 4, CDev = 5, CConf = 6, CNetwork = 7, CResult = 8;
         private static readonly string[] ActionNames = { "Pipe", "Box culvert", "Structure", "3D solid", "Skip" };
 
-        private readonly NavisImportSettings _settings = NavisImportSettings.Load();
-        private readonly List<ImportCandidate> _rows = new List<ImportCandidate>();
-        private readonly Dictionary<ImportCandidate, RowOutcome> _plan = new Dictionary<ImportCandidate, RowOutcome>();
-        private readonly Dictionary<ImportCandidate, RowOutcome> _done = new Dictionary<ImportCandidate, RowOutcome>();
-        private readonly HashSet<ImportCandidate> _ticked = new HashSet<ImportCandidate>();
-        /// <summary>Family and size the user picked for a row; the automatic match never replaces these.</summary>
-        private readonly Dictionary<ImportCandidate, (ObjectId family, ObjectId size)> _overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>();
-        private HashSet<string> _existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The rows, plans, chosen parts, transform and bound drawing: everything but the controls.</summary>
+        private readonly NavisImportSession _session = new NavisImportSession();
         private readonly List<(string pipe, string label)> _instances = new List<(string, string)>();
         private string _chip = "All";
         private bool _loading, _busy;
-        private string _sourceDocument = "";
         private readonly TransientMarkers _markers = new TransientMarkers();
         /// <summary>Cancelled when the window closes, so a Navisworks request still waiting is given up.</summary>
         private readonly System.Threading.CancellationTokenSource _life = new System.Threading.CancellationTokenSource();
@@ -68,8 +61,6 @@ namespace C3DProTools
         private readonly Button _btnCancelGet = StyleUi.Secondary("Cancel");
         // Navisworks → drawing: turn (°) about the origin, then shift (m).
         private readonly TextBox _txtDx = ToolUi.Number(0, 80), _txtDy = ToolUi.Number(0, 80), _txtDz = ToolUi.Number(0, 60), _txtRot = ToolUi.Number(0, 55);
-        /// <summary>The drawing the matched parts, chosen parts (overrides) and "already imported" marks belong to.</summary>
-        private Document _doc;
 
         private readonly Label _lblLink = new Label { AutoSize = true, ForeColor = StyleUi.HeaderMuted, Margin = new Padding(2, 0, 3, 0) };
         private readonly ComboBox _cbInstance = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, Margin = new Padding(3, 9, 3, 3) };
@@ -129,7 +120,7 @@ namespace C3DProTools
             Controls.Add(BuildHeader());
             Controls.Add(BuildFooter());
             Controls.Add(strip);
-            _optionsPanel.Visible = _settings.OptionsVisible;
+            _optionsPanel.Visible = _session.Settings.OptionsVisible;
             UpdateOptionsToggle();
 
             _txtSearch.TextChanged += (s, e) => FillGrid();
@@ -150,8 +141,8 @@ namespace C3DProTools
             {
                 FillSurfaces();
                 // Asked at the start: how sizes the catalog lacks are made (Method A, Method B or nearest size).
-                if (_settings.AskSizeMode) ChooseSizeMode();
-                else if (_settings.SizeMode == (int)CatalogMode.AnySize) SetUpAnySize(false);
+                if (_session.Settings.AskSizeMode) ChooseSizeMode();
+                else if (_session.Settings.SizeMode == (int)CatalogMode.AnySize) SetUpAnySize(false);
                 await FindInstances();
             };
             Activated += (s, e) => FillSurfaces();
@@ -272,8 +263,8 @@ namespace C3DProTools
                 if (e.KeyCode == Keys.Space && g.CurrentCell?.ColumnIndex != CCheck && g.CurrentCell?.ColumnIndex != CAction)
                 {
                     List<ImportCandidate> sel = SelectedRows();
-                    bool on = !sel.All(r => _ticked.Contains(r));
-                    foreach (ImportCandidate r in sel) { if (on) _ticked.Add(r); else _ticked.Remove(r); }
+                    bool on = !sel.All(r => _session.Ticked.Contains(r));
+                    foreach (ImportCandidate r in sel) { if (on) _session.Ticked.Add(r); else _session.Ticked.Remove(r); }
                     RefreshTicks();
                     e.Handled = e.SuppressKeyPress = true;
                 }
@@ -282,8 +273,8 @@ namespace C3DProTools
             {
                 if (e.ColumnIndex != CCheck) return;
                 List<ImportCandidate> visible = VisibleRows();
-                bool on = !visible.All(r => _ticked.Contains(r));
-                foreach (ImportCandidate r in visible) { if (on) _ticked.Add(r); else _ticked.Remove(r); }
+                bool on = !visible.All(r => _session.Ticked.Contains(r));
+                foreach (ImportCandidate r in visible) { if (on) _session.Ticked.Add(r); else _session.Ticked.Remove(r); }
                 RefreshTicks();
             };
             g.DataError += (s, e) => e.ThrowException = false;
@@ -293,8 +284,8 @@ namespace C3DProTools
             menu.Items.Add("Choose Civil 3D part…", null, (s, e) => ChoosePart());
             menu.Items.Add("Back to automatic part", null, (s, e) => ClearOverrides(SelectedRows()));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Tick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _ticked.Add(r); RefreshTicks(); });
-            menu.Items.Add("Untick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _ticked.Remove(r); RefreshTicks(); });
+            menu.Items.Add("Tick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _session.Ticked.Add(r); RefreshTicks(); });
+            menu.Items.Add("Untick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _session.Ticked.Remove(r); RefreshTicks(); });
             menu.Items.Add(new ToolStripSeparator());
             foreach (string a in ActionNames)
             {
@@ -424,8 +415,8 @@ namespace C3DProTools
             TableLayoutPanel parts = Grid2(("Parts list", _txtPartsList));
             parts.Controls.Add(_chkDrawingLists, 0, 1);
             parts.SetColumnSpan(_chkDrawingLists, 2);
-            _chkDrawingLists.Checked = _settings.SearchDrawingLists;
-            _chkDrawingLists.CheckedChanged += (s, e) => { if (_plan.Count > 0) RunPlan(false); };
+            _chkDrawingLists.Checked = _session.Settings.SearchDrawingLists;
+            _chkDrawingLists.CheckedChanged += (s, e) => { if (_session.Plan.Count > 0) RunPlan(false); };
             StyleCard cParts = new StyleCard("Parts", "", parts);
 
             FlowLayoutPanel shift = ToolUi.Inline(Small("X"), _txtDx, Small("Y"), _txtDy, Small("Z"), _txtDz, Small("turn"), _txtRot, Small("°"));
@@ -461,25 +452,25 @@ namespace C3DProTools
             row.Controls.Add(cNets, 1, 0);
             row.Controls.Add(cOpts, 2, 0);
 
-            _txtPartsList.Text = _settings.PartsListName;
-            _cbGrouping.SelectedIndex = Math.Max(0, Math.Min(2, _settings.Grouping));
-            _txtPrefix.Text = _settings.Prefix;
-            _chkConnect.Checked = _settings.ConnectToStructures;
-            _cbExisting.SelectedIndex = Math.Max(0, Math.Min(2, _settings.Existing));
-            _txtSolidLayer.Text = _settings.SolidLayer;
-            _numMaxError.Value = Math.Max(1, Math.Min(1000, _settings.MaxPartErrorMm));
-            _cbNoSize.SelectedIndex = Math.Max(0, Math.Min(1, _settings.NoSizeMode));
-            _numMaxError.ValueChanged += (s, e) => { if (_plan.Count > 0) RunPlan(false); };
-            _cbNoSize.SelectedIndexChanged += (s, e) => { if (_plan.Count > 0) RunPlan(false); };
+            _txtPartsList.Text = _session.Settings.PartsListName;
+            _cbGrouping.SelectedIndex = Math.Max(0, Math.Min(2, _session.Settings.Grouping));
+            _txtPrefix.Text = _session.Settings.Prefix;
+            _chkConnect.Checked = _session.Settings.ConnectToStructures;
+            _cbExisting.SelectedIndex = Math.Max(0, Math.Min(2, _session.Settings.Existing));
+            _txtSolidLayer.Text = _session.Settings.SolidLayer;
+            _numMaxError.Value = Math.Max(1, Math.Min(1000, _session.Settings.MaxPartErrorMm));
+            _cbNoSize.SelectedIndex = Math.Max(0, Math.Min(1, _session.Settings.NoSizeMode));
+            _numMaxError.ValueChanged += (s, e) => { if (_session.Plan.Count > 0) RunPlan(false); };
+            _cbNoSize.SelectedIndexChanged += (s, e) => { if (_session.Plan.Count > 0) RunPlan(false); };
             _cbGrouping.SelectedIndexChanged += (s, e) => RefreshNetworks();
             _txtPrefix.TextChanged += (s, e) => RefreshNetworks();
             _txtPartsList.Leave += (s, e) => InvalidatePlan();
-            _txtDx.Text = ToolUi.Format(_settings.TransformDx);
-            _txtDy.Text = ToolUi.Format(_settings.TransformDy);
-            _txtDz.Text = ToolUi.Format(_settings.TransformDz);
-            _txtRot.Text = ToolUi.Format(_settings.TransformRotationDeg);
+            _txtDx.Text = ToolUi.Format(_session.Settings.TransformDx);
+            _txtDy.Text = ToolUi.Format(_session.Settings.TransformDy);
+            _txtDz.Text = ToolUi.Format(_session.Settings.TransformDz);
+            _txtRot.Text = ToolUi.Format(_session.Settings.TransformRotationDeg);
             foreach (TextBox box in new[] { _txtDx, _txtDy, _txtDz, _txtRot })
-                box.TextChanged += (s, e) => { if (_rows.Count > 0) SetStatus("The shift is used when the selection is read: click \"Get selection from Navisworks\" again.", true); };
+                box.TextChanged += (s, e) => { if (_session.Rows.Count > 0) SetStatus("The shift is used when the selection is read: click \"Get selection from Navisworks\" again.", true); };
             return row;
         }
 
@@ -517,7 +508,7 @@ namespace C3DProTools
             _btnOptions = StyleUi.Secondary("Options", (s, e) =>
             {
                 _optionsPanel.Visible = !_optionsPanel.Visible;
-                _settings.OptionsVisible = _optionsPanel.Visible;
+                _session.Settings.OptionsVisible = _optionsPanel.Visible;
                 UpdateOptionsToggle();
             });
             _btnOptions.Anchor = AnchorStyles.Left;
@@ -535,30 +526,30 @@ namespace C3DProTools
         private void UpdateOptionsToggle()
         {
             // The window may not be shown yet (then every child reports hidden), so the saved choice decides the text.
-            if (_btnOptions != null) _btnOptions.Text = _settings.OptionsVisible ? "⚙  Hide options  ▾" : "⚙  Show options  ▴";
+            if (_btnOptions != null) _btnOptions.Text = _session.Settings.OptionsVisible ? "⚙  Hide options  ▾" : "⚙  Show options  ▴";
         }
 
         private void RestoreLayout()
         {
-            Size = new Size(Math.Max(MinimumSize.Width, _settings.WindowWidth), Math.Max(MinimumSize.Height, _settings.WindowHeight));
+            Size = new Size(Math.Max(MinimumSize.Width, _session.Settings.WindowWidth), Math.Max(MinimumSize.Height, _session.Settings.WindowHeight));
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             StartPosition = FormStartPosition.Manual;
-            if (_settings.WindowX >= 0 && Screen.AllScreens.Any(sc => sc.WorkingArea.Contains(_settings.WindowX + 50, _settings.WindowY + 20)))
-                Location = new Point(_settings.WindowX, _settings.WindowY);
+            if (_session.Settings.WindowX >= 0 && Screen.AllScreens.Any(sc => sc.WorkingArea.Contains(_session.Settings.WindowX + 50, _session.Settings.WindowY + 20)))
+                Location = new Point(_session.Settings.WindowX, _session.Settings.WindowY);
             else
             {
                 Width = Math.Min(Width, area.Width - 40);
                 Height = Math.Min(Height, area.Height - 40);
                 Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
             }
-            if (_settings.Maximized) WindowState = FormWindowState.Maximized;
+            if (_session.Settings.Maximized) WindowState = FormWindowState.Maximized;
             Shown += (s, e) =>
             {
                 try
                 {
                     _split.Panel1MinSize = 420;
                     _split.Panel2MinSize = 300;
-                    _split.SplitterDistance = Math.Max(420, Math.Min(_split.Width - 300, _split.Width - _settings.DetailsWidth));
+                    _split.SplitterDistance = Math.Max(420, Math.Min(_split.Width - 300, _split.Width - _session.Settings.DetailsWidth));
                 }
                 catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             };
@@ -566,49 +557,34 @@ namespace C3DProTools
 
         private void SaveLayout()
         {
-            _settings.Maximized = WindowState == FormWindowState.Maximized;
+            _session.Settings.Maximized = WindowState == FormWindowState.Maximized;
             Rectangle b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-            _settings.WindowX = b.X; _settings.WindowY = b.Y; _settings.WindowWidth = b.Width; _settings.WindowHeight = b.Height;
-            _settings.DetailsWidth = _split.Width - _split.SplitterDistance;
+            _session.Settings.WindowX = b.X; _session.Settings.WindowY = b.Y; _session.Settings.WindowWidth = b.Width; _session.Settings.WindowHeight = b.Height;
+            _session.Settings.DetailsWidth = _split.Width - _split.SplitterDistance;
             CaptureOptions();
-            _settings.Save();
+            _session.Settings.Save();
         }
 
         private void CaptureOptions()
         {
-            _settings.PartsListName = string.IsNullOrWhiteSpace(_txtPartsList.Text) ? "Navis Import" : _txtPartsList.Text.Trim();
-            _settings.Grouping = _cbGrouping.SelectedIndex;
-            _settings.Prefix = _txtPrefix.Text;
-            _settings.ConnectToStructures = _chkConnect.Checked;
-            _settings.Existing = _cbExisting.SelectedIndex;
-            _settings.SolidLayer = string.IsNullOrWhiteSpace(_txtSolidLayer.Text) ? "NAVIS-SOLIDS" : _txtSolidLayer.Text.Trim();
-            _settings.SurfaceName = (_cbSurface.SelectedItem as Choice)?.Text ?? "";
-            _settings.MaxPartErrorMm = (int)_numMaxError.Value;
-            _settings.NoSizeMode = Math.Max(0, _cbNoSize.SelectedIndex);
-            _settings.SearchDrawingLists = _chkDrawingLists.Checked;
+            _session.Settings.PartsListName = string.IsNullOrWhiteSpace(_txtPartsList.Text) ? "Navis Import" : _txtPartsList.Text.Trim();
+            _session.Settings.Grouping = _cbGrouping.SelectedIndex;
+            _session.Settings.Prefix = _txtPrefix.Text;
+            _session.Settings.ConnectToStructures = _chkConnect.Checked;
+            _session.Settings.Existing = _cbExisting.SelectedIndex;
+            _session.Settings.SolidLayer = string.IsNullOrWhiteSpace(_txtSolidLayer.Text) ? "NAVIS-SOLIDS" : _txtSolidLayer.Text.Trim();
+            _session.Settings.SurfaceName = (_cbSurface.SelectedItem as Choice)?.Text ?? "";
+            _session.Settings.MaxPartErrorMm = (int)_numMaxError.Value;
+            _session.Settings.NoSizeMode = Math.Max(0, _cbNoSize.SelectedIndex);
+            _session.Settings.SearchDrawingLists = _chkDrawingLists.Checked;
             NavisTransform t = ReadTransform();
-            _settings.TransformDx = t.Dx; _settings.TransformDy = t.Dy; _settings.TransformDz = t.Dz; _settings.TransformRotationDeg = t.RotationDeg;
+            _session.Settings.TransformDx = t.Dx; _session.Settings.TransformDy = t.Dy; _session.Settings.TransformDz = t.Dz; _session.Settings.TransformRotationDeg = t.RotationDeg;
         }
 
         private NavisImportOptions Options()
         {
             CaptureOptions();
-            return new NavisImportOptions
-            {
-                PartsListName = _settings.PartsListName,
-                Grouping = (NetworkGrouping)Math.Max(0, _settings.Grouping),
-                Prefix = _settings.Prefix,
-                SingleNetworkName = (_settings.Prefix ?? "").Trim().Length > 0 ? _settings.Prefix + "Import" : "NAVIS - Import",
-                SurfaceId = (_cbSurface.SelectedItem as Choice)?.Value is ObjectId id ? id : ObjectId.Null,
-                ConnectToStructures = _settings.ConnectToStructures,
-                Existing = (ExistingMode)Math.Max(0, _settings.Existing),
-                SolidLayer = _settings.SolidLayer,
-                MaxPartError = _settings.MaxPartErrorMm / 1000.0,
-                SolidWhenNoSize = _settings.NoSizeMode == 0,
-                SearchDrawingLists = _settings.SearchDrawingLists,
-                Mode = (CatalogMode)Math.Max(0, Math.Min(2, _settings.SizeMode)),
-                Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(_overrides)
-            };
+            return _session.Options((_cbSurface.SelectedItem as Choice)?.Value is ObjectId id ? id : ObjectId.Null);
         }
 
         // =====================================================================================
@@ -626,13 +602,7 @@ namespace C3DProTools
         /// </summary>
         private bool Bind(Document doc)
         {
-            if (doc == _doc) return false;
-            bool hadChoices = _overrides.Count > 0;
-            _overrides.Clear();
-            _plan.Clear();
-            _done.Clear();
-            _doc = doc;
-            _existing = doc == null ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : NavisImporter.ExistingGuids(doc);
+            if (!_session.Bind(doc, out bool hadChoices)) return false;
             if (hadChoices) SetStatus("Another drawing is active: the parts you chose belonged to the previous drawing and were cleared.", true);
             return true;
         }
@@ -645,7 +615,7 @@ namespace C3DProTools
                 if (IsDisposed) return;
                 // The preview belongs to the drawing it was drawn in.
                 if (_markers.Owner != null && _markers.Owner != e.Document) _markers.Clear();
-                if (!Bind(e.Document) || _rows.Count == 0) return;
+                if (!Bind(e.Document) || _session.Rows.Count == 0) return;
                 try { RunPlan(false); }
                 catch (Exception ex) { SetStatus("Part matching failed: " + ex.Message, true); }
             }));
@@ -655,11 +625,7 @@ namespace C3DProTools
         {
             // While the drawing still exists: its preview markers are erased from it now.
             if (_markers.Owner == e.Document) _markers.Clear();
-            if (_doc != e.Document) return;
-            _doc = null;
-            _overrides.Clear();
-            _plan.Clear();
-            _done.Clear();
+            if (!_session.Unbind(e.Document)) return;
             if (!IsDisposed && IsHandleCreated) BeginInvoke(new Action(() => { if (!IsDisposed) RefreshRows(); }));
         }
 
@@ -749,24 +715,11 @@ namespace C3DProTools
             if (!response.Ok) { SetStatus(response.Error, true); return; }
             if (response.Elements.Count == 0) { SetStatus("Nothing is selected in Navisworks (or the selection has no geometry).", true); return; }
 
-            _sourceDocument = response.Document;
-            _rows.Clear(); _plan.Clear(); _done.Clear(); _ticked.Clear(); _overrides.Clear();
-            NavisTransform transform = ReadTransform();
-            foreach (NavisElement e in response.Elements)
-            {
-                ImportCandidate c;
-                try
-                {
-                    c = NavisInterpreter.Read(e);
-                    transform.Apply(c);
-                }
-                catch (Exception ex) { c = new ImportCandidate { Source = e, Name = e.Name, Guid = e.Guid, Detected = ImportKind.Solid, Action = ImportKind.Solid }; c.Notes.Add("Could not be read: " + ex.Message); }
-                _rows.Add(c);
-                if (c.Action != ImportKind.Skip) _ticked.Add(c);
-            }
+            _session.Transform = ReadTransform();
+            _session.Load(response);
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             Bind(doc);
-            _existing = doc == null ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : NavisImporter.ExistingGuids(doc);
+            _session.RefreshExisting(doc);
             _lblLink.Text = $"● {Path.GetFileName(response.Document)}  ·  {response.Elements.Count} item(s) read in {sw.Elapsed.TotalSeconds:0.0} s";
             FillGrid();
             if (response.Warnings.Count > 0) SetStatus(string.Join("  ", response.Warnings.Take(3)), true);
@@ -815,19 +768,19 @@ namespace C3DProTools
                 case "Structure": return c.Action == ImportKind.Structure;
                 case "Solid": return c.Action == ImportKind.Solid;
                 case "Review": return NeedsReview(c);
-                case "Already imported": return _existing.Contains(c.Guid ?? "");
-                case "Checked": return _ticked.Contains(c);
+                case "Already imported": return _session.Existing.Contains(c.Guid ?? "");
+                case "Checked": return _session.Ticked.Contains(c);
                 default: return true;
             }
         }
 
         private bool NeedsReview(ImportCandidate c) =>
-            c.Confidence != ImportConfidence.High || (_plan.TryGetValue(c, out RowOutcome p) && (p.Failed || p.PartDeviation > NavisInterpreter.HighTolerance));
+            c.Confidence != ImportConfidence.High || (_session.Plan.TryGetValue(c, out RowOutcome p) && (p.Failed || p.PartDeviation > NavisInterpreter.HighTolerance));
 
         private List<ImportCandidate> VisibleRows()
         {
             string q = _txtSearch.Text.Trim();
-            return _rows.Where(c => Matches(c, _chip) && (q.Length == 0 || c.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0
+            return _session.Rows.Where(c => Matches(c, _chip) && (q.Length == 0 || c.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0
                 || c.SizeText.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0 || (c.Network ?? "").IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
         }
 
@@ -844,7 +797,7 @@ namespace C3DProTools
                 row.Tag = c;
                 FillRow(row, c, o);
             }
-            foreach (StyleChip chip in _chips.Values) chip.Count = _rows.Count(c => Matches(c, chip.Kind));
+            foreach (StyleChip chip in _chips.Values) chip.Count = _session.Rows.Count(c => Matches(c, chip.Kind));
             if (current != null)
                 foreach (DataGridViewRow r in _grid.Rows)
                     if (r.Tag == current) { _grid.CurrentCell = r.Cells[CName]; break; }
@@ -855,12 +808,12 @@ namespace C3DProTools
 
         private void FillRow(DataGridViewRow row, ImportCandidate c, NavisImportOptions o)
         {
-            row.Cells[CCheck].Value = _ticked.Contains(c);
+            row.Cells[CCheck].Value = _session.Ticked.Contains(c);
             row.Cells[CName].Value = c.Name;
             row.Cells[CAction].Value = ActionName(c.Action);
             row.Cells[CSize].Value = c.SizeText;
             bool smart = c.Action != ImportKind.Solid && c.Action != ImportKind.Skip;
-            if (_plan.TryGetValue(c, out RowOutcome p))
+            if (_session.Plan.TryGetValue(c, out RowOutcome p))
             {
                 row.Cells[CPart].Value = c.Action == ImportKind.Solid ? "Exact 3D solid" : c.Action == ImportKind.Skip ? ""
                     : p.Status == "Catalog size to add" ? $"＋ {p.Family} · {p.Size}"
@@ -876,7 +829,7 @@ namespace C3DProTools
                 row.Cells[CDev].Value = "";
             }
             row.Cells[CNetwork].Value = smart ? NavisImporter.NetworkFor(c, o) : c.Action == ImportKind.Solid ? o.SolidLayer : "";
-            row.Cells[CResult].Value = _done.TryGetValue(c, out RowOutcome d) ? d.Status : _existing.Contains(c.Guid ?? "") ? "Already imported" : "";
+            row.Cells[CResult].Value = _session.Done.TryGetValue(c, out RowOutcome d) ? d.Status : _session.Existing.Contains(c.Guid ?? "") ? "Already imported" : "";
             row.DefaultCellStyle.ForeColor = c.Action == ImportKind.Skip ? StyleUi.Muted : StyleUi.Text;
         }
 
@@ -885,7 +838,7 @@ namespace C3DProTools
             _loading = true;
             NavisImportOptions o = Options();
             foreach (DataGridViewRow r in _grid.Rows) if (r.Tag is ImportCandidate c) FillRow(r, c, o);
-            foreach (StyleChip chip in _chips.Values) chip.Count = _rows.Count(c => Matches(c, chip.Kind));
+            foreach (StyleChip chip in _chips.Values) chip.Count = _session.Rows.Count(c => Matches(c, chip.Kind));
             _loading = false;
             UpdateSummary();
             ShowDetails(CurrentRow());
@@ -902,9 +855,9 @@ namespace C3DProTools
         private void RefreshTicks()
         {
             _loading = true;
-            foreach (DataGridViewRow r in _grid.Rows) if (r.Tag is ImportCandidate c) r.Cells[CCheck].Value = _ticked.Contains(c);
+            foreach (DataGridViewRow r in _grid.Rows) if (r.Tag is ImportCandidate c) r.Cells[CCheck].Value = _session.Ticked.Contains(c);
             _loading = false;
-            if (_chips.TryGetValue("Checked", out StyleChip chip)) chip.Count = _ticked.Count;
+            if (_chips.TryGetValue("Checked", out StyleChip chip)) chip.Count = _session.Ticked.Count;
             UpdateSummary();
         }
 
@@ -913,8 +866,8 @@ namespace C3DProTools
             if (_loading || e.RowIndex < 0 || !(_grid.Rows[e.RowIndex].Tag is ImportCandidate c)) return;
             if (e.ColumnIndex == CCheck)
             {
-                if (_grid.Rows[e.RowIndex].Cells[CCheck].Value is bool b && b) _ticked.Add(c); else _ticked.Remove(c);
-                if (_chips.TryGetValue("Checked", out StyleChip chip)) chip.Count = _ticked.Count;
+                if (_grid.Rows[e.RowIndex].Cells[CCheck].Value is bool b && b) _session.Ticked.Add(c); else _session.Ticked.Remove(c);
+                if (_chips.TryGetValue("Checked", out StyleChip chip)) chip.Count = _session.Ticked.Count;
                 UpdateSummary();
             }
             else if (e.ColumnIndex == CAction)
@@ -931,14 +884,14 @@ namespace C3DProTools
             {
                 if (!CanBe(c, kind)) { refused.Add(c.Name); continue; }
                 // A pipe part cannot be used for a structure (or the other way round), so a pick for the old kind is dropped.
-                if (c.Action != kind) _overrides.Remove(c);
+                if (c.Action != kind) _session.Overrides.Remove(c);
                 c.Action = kind;
-                if (kind == ImportKind.Skip) _ticked.Remove(c); else _ticked.Add(c);
-                _plan.Remove(c);
+                if (kind == ImportKind.Skip) _session.Ticked.Remove(c); else _session.Ticked.Add(c);
+                _session.Plan.Remove(c);
             }
             RefreshRows();
             if (refused.Count > 0) SetStatus($"{refused.Count} row(s) cannot be imported that way (no measured shape for it): {string.Join(", ", refused.Take(4))}", true);
-            if (rows.Any(r => !_plan.ContainsKey(r) && r.Action != ImportKind.Solid && r.Action != ImportKind.Skip)) RunPlan(false);
+            if (rows.Any(r => !_session.Plan.ContainsKey(r) && r.Action != ImportKind.Solid && r.Action != ImportKind.Skip)) RunPlan(false);
         }
 
         /// <summary>Smart parts need a measured shape of that kind; a solid or skip is always possible.</summary>
@@ -968,7 +921,7 @@ namespace C3DProTools
             if (e.RowIndex < 0 || (e.ColumnIndex != CConf && e.ColumnIndex != CResult)) return;
             if (!(_grid.Rows[e.RowIndex].Tag is ImportCandidate c)) return;
             string pill = e.ColumnIndex == CConf
-                ? (c.Action == ImportKind.Skip ? "" : NeedsReview(c) ? (c.Confidence == ImportConfidence.Low || (_plan.TryGetValue(c, out RowOutcome p) && p.Failed) ? "Low" : "Medium") : "High")
+                ? (c.Action == ImportKind.Skip ? "" : NeedsReview(c) ? (c.Confidence == ImportConfidence.Low || (_session.Plan.TryGetValue(c, out RowOutcome p) && p.Failed) ? "Low" : "Medium") : "High")
                 : (e.FormattedValue as string ?? "");
             e.PaintBackground(e.CellBounds, (e.State & DataGridViewElementStates.Selected) != 0);
             if (pill.Length > 0)
@@ -997,7 +950,7 @@ namespace C3DProTools
             return list;
         }
 
-        private List<ImportCandidate> TickedRows() => _rows.Where(r => _ticked.Contains(r) && r.Action != ImportKind.Skip).ToList();
+        private List<ImportCandidate> TickedRows() => _session.Rows.Where(r => _session.Ticked.Contains(r) && r.Action != ImportKind.Skip).ToList();
 
         private static string ActionName(ImportKind k) => k == ImportKind.Pipe ? "Pipe" : k == ImportKind.Box ? "Box culvert" : k == ImportKind.Structure ? "Structure" : k == ImportKind.Solid ? "3D solid" : "Skip";
 
@@ -1020,7 +973,7 @@ namespace C3DProTools
         {
             yield return c.Action == ImportKind.Pipe ? "Pipe" : c.Action == ImportKind.Box ? "Box" : c.Action == ImportKind.Structure ? "Structure" : c.Action == ImportKind.Solid ? "Solid" : "Skip";
             if (c.Action != ImportKind.Skip) yield return NeedsReview(c) ? "Medium" : "High";
-            if (_existing.Contains(c.Guid ?? "")) yield return "Already imported";
+            if (_session.Existing.Contains(c.Guid ?? "")) yield return "Already imported";
         }
 
         private void ShowDetails(ImportCandidate c)
@@ -1030,8 +983,8 @@ namespace C3DProTools
             _lvCompare.Items.Clear();
             if (c == null)
             {
-                _detName.Text = _rows.Count == 0 ? "Nothing loaded yet" : "Select a row";
-                _detSub.Text = _rows.Count == 0 ? "Select pipes, culverts, duct banks or structures in Navisworks, then click \"Get selection from Navisworks\"." : "";
+                _detName.Text = _session.Rows.Count == 0 ? "Nothing loaded yet" : "Select a row";
+                _detSub.Text = _session.Rows.Count == 0 ? "Select pipes, culverts, duct banks or structures in Navisworks, then click \"Get selection from Navisworks\"." : "";
                 _detNotes.Text = "";
                 _lvCompare.EndUpdate();
                 _lvProps.Items.Clear();
@@ -1040,7 +993,7 @@ namespace C3DProTools
             }
             _detName.Text = c.Name;
             _detSub.Text = $"{c.Origin} · {c.Source.ClassDisplayName} ({c.Source.ClassName}) · layer {c.Layer}" + (string.IsNullOrEmpty(c.Source.SourceFile) ? "" : $" · {c.Source.SourceFile}");
-            _plan.TryGetValue(c, out RowOutcome plan);
+            _session.Plan.TryGetValue(c, out RowOutcome plan);
             string mm(double m) => m > 0 ? ImportCandidate.Mm(m) + " mm" : "";
             void Row(string what, string navis, string measured, string part) => _lvCompare.Items.Add(new ListViewItem(new[] { what, navis, measured, part }));
             if (c.Action == ImportKind.Pipe || c.Action == ImportKind.Box)
@@ -1070,7 +1023,7 @@ namespace C3DProTools
 
             List<string> notes = new List<string>(c.Notes);
             if (plan != null && plan.Detail.Length > 0) notes.Add(plan.Detail);
-            if (_done.TryGetValue(c, out RowOutcome d) && d.Detail.Length > 0) notes.Add(d.Detail);
+            if (_session.Done.TryGetValue(c, out RowOutcome d) && d.Detail.Length > 0) notes.Add(d.Detail);
             _detNotes.Text = notes.Count == 0 ? "No issues: the properties and the measured model agree." : "• " + string.Join(Environment.NewLine + "• ", notes.Distinct());
             _detNotes.ForeColor = notes.Count == 0 ? Color.FromArgb(21, 128, 61) : StyleUi.Text;
             FillProps();
@@ -1108,8 +1061,8 @@ namespace C3DProTools
 
         private void InvalidatePlan()
         {
-            if (_rows.Count == 0) return;
-            _plan.Clear();
+            if (_session.Rows.Count == 0) return;
+            _session.Plan.Clear();
             RefreshRows();
         }
 
@@ -1118,7 +1071,7 @@ namespace C3DProTools
         {
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             Bind(doc);
-            List<ImportCandidate> rows = _rows.Where(r => r.Action != ImportKind.Skip).ToList();
+            List<ImportCandidate> rows = _session.Rows.Where(r => r.Action != ImportKind.Skip).ToList();
             if (doc == null || rows.Count == 0) return null;
             Cursor = Cursors.WaitCursor;
             SetStatus("Matching Civil 3D parts…");
@@ -1126,7 +1079,7 @@ namespace C3DProTools
             try { report = NavisImporter.Plan(doc, rows, Options()); }
             finally { Cursor = Cursors.Default; }
             if (report.Error.Length > 0) { SetStatus("Part matching failed: " + report.Error, true); return null; }
-            foreach (KeyValuePair<ImportCandidate, RowOutcome> kv in report.Rows) _plan[kv.Key] = kv.Value;
+            foreach (KeyValuePair<ImportCandidate, RowOutcome> kv in report.Rows) _session.Plan[kv.Key] = kv.Value;
             RefreshRows();
             int review = rows.Count(NeedsReview);
             string catalog = report.CatalogAdditions.Count > 0 ? $" {report.CatalogAdditions.Count} size(s) will be added to the catalog on import." : "";
@@ -1137,21 +1090,21 @@ namespace C3DProTools
         }
 
         private string SizeModeText() =>
-            "Missing sizes: " + (_settings.SizeMode == (int)CatalogMode.AnySize ? "Method A" : _settings.SizeMode == (int)CatalogMode.Extend ? "Method B" : "nearest size");
+            "Missing sizes: " + (_session.Settings.SizeMode == (int)CatalogMode.AnySize ? "Method A" : _session.Settings.SizeMode == (int)CatalogMode.Extend ? "Method B" : "nearest size");
 
         /// <summary>Asks how sizes the catalog lacks are made, then sets that route up.</summary>
         private void ChooseSizeMode()
         {
-            using (FormNavisSizeMode f = new FormNavisSizeMode((CatalogMode)_settings.SizeMode, _settings.AskSizeMode))
+            using (FormNavisSizeMode f = new FormNavisSizeMode((CatalogMode)_session.Settings.SizeMode, _session.Settings.AskSizeMode))
             {
                 if (f.ShowDialog(this) != DialogResult.OK) return;
-                _settings.SizeMode = (int)f.Mode;
-                _settings.AskSizeMode = f.AskAgain;
+                _session.Settings.SizeMode = (int)f.Mode;
+                _session.Settings.AskSizeMode = f.AskAgain;
             }
-            _settings.Save();
+            _session.Settings.Save();
             _btnSizeMode.Text = SizeModeText();
-            if (_settings.SizeMode == (int)CatalogMode.AnySize) SetUpAnySize(true);
-            if (_plan.Count > 0) RunPlan(false);
+            if (_session.Settings.SizeMode == (int)CatalogMode.AnySize) SetUpAnySize(true);
+            if (_session.Plan.Count > 0) RunPlan(false);
         }
 
         /// <summary>Method A: makes sure the any-size families are in the catalogs; the first time, Civil 3D must restart to list them.</summary>
@@ -1186,12 +1139,12 @@ namespace C3DProTools
             ImportKind kind = rows[0].Action;
             if (rows.Any(r => r.Action != kind)) { SetStatus("Select rows of one kind (all pipes, all box culverts or all structures) to choose their part together.", true); return; }
 
-            (ObjectId, ObjectId)? current = _overrides.TryGetValue(rows[0], out (ObjectId, ObjectId) o) ? o : ((ObjectId, ObjectId)?)null;
+            (ObjectId, ObjectId)? current = _session.Overrides.TryGetValue(rows[0], out (ObjectId, ObjectId) o) ? o : ((ObjectId, ObjectId)?)null;
             using (FormNavisPartPicker picker = new FormNavisPartPicker(doc, rows, _txtPartsList.Text.Trim(), current))
             {
                 if (picker.ShowDialog(this) != DialogResult.OK) return;
                 if (picker.ClearOverride) { ClearOverrides(rows); return; }
-                foreach (ImportCandidate r in rows) { _overrides[r] = (picker.FamilyId, picker.SizeId); _plan.Remove(r); _ticked.Add(r); }
+                foreach (ImportCandidate r in rows) { _session.Overrides[r] = (picker.FamilyId, picker.SizeId); _session.Plan.Remove(r); _session.Ticked.Add(r); }
             }
             RunPlan(false);
         }
@@ -1199,7 +1152,7 @@ namespace C3DProTools
         private void ClearOverrides(List<ImportCandidate> rows)
         {
             bool any = false;
-            foreach (ImportCandidate r in rows) any |= _overrides.Remove(r);
+            foreach (ImportCandidate r in rows) any |= _session.Overrides.Remove(r);
             if (any) RunPlan(false);
         }
 
@@ -1271,7 +1224,7 @@ namespace C3DProTools
             foreach (ImportCandidate c in rows)
             {
                 RowOutcome p = plan.Rows[c];
-                bool exists = _existing.Contains(c.Guid ?? "");
+                bool exists = _session.Existing.Contains(c.Guid ?? "");
                 string what = c.Action == ImportKind.Solid ? "3D solid" : p.AsSolid ? $"3D solid (no size within {o.MaxPartError * 1000:0} mm)" : (p.Overridden ? "✎ " : "") + $"{p.Family} · {p.Size}";
                 string note = p.Failed ? "No part: " + p.Detail : (exists ? (o.Existing == ExistingMode.Skip ? "Already imported: skipped" : o.Existing == ExistingMode.Replace ? "Replaces the earlier import" : "Imported again") : "")
                               + (c.Barrels.Count > 1 ? $" {c.Barrels.Count} barrels" : "") + (p.PartDeviation > NavisInterpreter.HighTolerance && !p.Failed ? $" {p.PartDeviation * 1000:0} mm off" : "");
@@ -1294,8 +1247,7 @@ namespace C3DProTools
             finally { Cursor = Cursors.Default; }
             if (report.Error.Length > 0) { SetStatus("Import failed and was rolled back: " + report.Error, true); return; }
 
-            foreach (KeyValuePair<ImportCandidate, RowOutcome> kv in report.Rows) { _done[kv.Key] = kv.Value; _plan[kv.Key] = kv.Value; }
-            _existing = NavisImporter.ExistingGuids(doc);
+            _session.Record(report, doc);
             _markers.Clear();
             RefreshRows();
             if (report.CatalogNotes.Count > 0)
@@ -1335,7 +1287,7 @@ namespace C3DProTools
         {
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             if (doc == null) return;
-            string wanted = (_cbSurface.SelectedItem as Choice)?.Text ?? _settings.SurfaceName;
+            string wanted = (_cbSurface.SelectedItem as Choice)?.Text ?? _session.Settings.SurfaceName;
             _cbSurface.Items.Clear();
             _cbSurface.Items.Add(new Choice("(none)", ObjectId.Null));
             try

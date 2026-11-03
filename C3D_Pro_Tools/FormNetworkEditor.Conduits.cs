@@ -190,7 +190,7 @@ namespace C3DProTools
             Database db = AcadApp.DocumentManager.MdiActiveDocument?.Database;
             if (db == null) return;
             using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
-                foreach (ObjectId id in _pipes)
+                foreach (ObjectId id in _session.Pipes)
                 {
                     if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
                     _encName = p.Name;

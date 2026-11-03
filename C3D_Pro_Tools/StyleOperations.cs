@@ -58,6 +58,103 @@ namespace C3DProTools
         public StyleItem Find(ObjectId id) => Items.FirstOrDefault(i => i.Id == id);
 
         public bool PurgeTrusted(StyleItem item) => item.IsCivil ? Scan.CivilPurgeTrusted : Scan.AcadPurgeTrusted;
+
+        /// <summary>The styles of another open drawing (to pull from), read in a transaction of its own.</summary>
+        public static List<StyleItem> ItemsOf(Database source)
+        {
+            using (Transaction tr = source.TransactionManager.StartTransaction())
+            {
+                List<StyleItem> items = StyleCatalog.Build(source, tr);
+                tr.Commit();
+                return items;
+            }
+        }
+
+        /// <summary>What uses a style, for the details panel: each user's kind, name and where it is (at most <paramref name="limit"/>).</summary>
+        public List<(ObjectId id, string kind, string name, string where)> DescribeUsers(StyleItem item, int limit)
+        {
+            List<(ObjectId, string, string, string)> users = new List<(ObjectId, string, string, string)>();
+            using (Transaction tr = Db.TransactionManager.StartOpenCloseTransaction())
+            {
+                foreach (ObjectId id in item.EntityUsers.Concat(item.OtherReferrers).Take(limit))
+                {
+                    string kind = id.ObjectClass?.Name ?? "", name = "", where = "";
+                    try
+                    {
+                        DBObject obj = tr.GetObject(id, OpenMode.ForRead);
+                        kind = obj.GetType().Name.Replace("TableRecord", "");
+                        name = StyleCatalog.ReadString(obj, "Name") ?? "";
+                        if (obj is Entity ent)
+                        {
+                            if (name.Length == 0) name = "Layer " + ent.Layer;
+                            where = SpaceName(tr, ent.OwnerId);
+                        }
+                        else where = "Style / setting";
+                    }
+                    catch (Exception) { name = "<" + id.Handle + ">"; }
+                    users.Add((id, kind, name, where));
+                }
+            }
+            return users;
+        }
+
+        private static string SpaceName(Transaction tr, ObjectId ownerId)
+        {
+            try
+            {
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
+                if (!btr.IsLayout) return "Block " + btr.Name;
+                Layout layout = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+                return layout.ModelType ? "Model" : "Layout " + layout.LayoutName;
+            }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return ""; }
+        }
+
+        /// <summary>The extents of those objects that are in the current space, how many were measured and how many are elsewhere.</summary>
+        public (Extents3d? extents, int shown, int elsewhere) ExtentsInCurrentSpace(IEnumerable<ObjectId> ids)
+        {
+            int other = 0, shown = 0;
+            Extents3d? ext = null;
+            using (Transaction tr = Db.TransactionManager.StartOpenCloseTransaction())
+            {
+                ObjectId space = Db.CurrentSpaceId;
+                foreach (ObjectId id in ids)
+                {
+                    if (!(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
+                    if (ent.OwnerId != space) { other++; continue; }
+                    try
+                    {
+                        Extents3d e = ent.GeometricExtents;
+                        if (ext.HasValue) { Extents3d x = ext.Value; x.AddExtents(e); ext = x; } else ext = e;
+                        shown++;
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
+                tr.Commit();
+            }
+            return (ext, shown, other);
+        }
+
+        /// <summary>The objects using these styles that are in the current space, and how many more are elsewhere.</summary>
+        public (List<ObjectId> here, int elsewhere) UsersInCurrentSpace(IEnumerable<StyleItem> items)
+        {
+            ObjectId space = Db.CurrentSpaceId;
+            List<ObjectId> here = new List<ObjectId>();
+            int other = 0;
+            using (Transaction tr = Db.TransactionManager.StartOpenCloseTransaction())
+            {
+                foreach (ObjectId id in items.SelectMany(i => i.EntityUsers).Distinct())
+                {
+                    try
+                    {
+                        if (tr.GetObject(id, OpenMode.ForRead).OwnerId == space) here.Add(id); else other++;
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
+                tr.Commit();
+            }
+            return (here, other);
+        }
     }
 
     /// <summary>A template (DWT/DWG) read in the background as the company standard.</summary>
