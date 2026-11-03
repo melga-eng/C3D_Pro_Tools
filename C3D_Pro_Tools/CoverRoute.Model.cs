@@ -194,6 +194,21 @@ namespace C3DProTools
         public double MinCoverAt(double s, double general) => ZoneAt(s)?.MinCover ?? general;
 
         /// <summary>
+        /// Adds encasement not drawn in the model (<paramref name="padding"/> on every side) to the route's outside, so cover is
+        /// measured to its top and crossing clearances from its faces. Applied once, before the crossings are found.
+        /// </summary>
+        public void ApplyEncasement(double padding)
+        {
+            if (padding <= 0) return;
+            foreach (RouteSection sec in Sections)
+            {
+                sec.OuterWidth = sec.PlanWidth + 2 * padding;
+                sec.OuterHeight += 2 * padding;
+            }
+            foreach (RoutePipe p in Pipes) p.OuterHeight += 2 * padding;
+        }
+
+        /// <summary>
         /// Adds a cover zone for every stretch of route inside one of the plan polygons (closed polylines of paving, roads...).
         /// A zone runs from the last station before it to the first after it, so its edges are always inside.
         /// </summary>
@@ -257,10 +272,9 @@ namespace C3DProTools
         /// <param name="path">The other pipe's centreline.</param>
         /// <param name="halfWidth">Half the other pipe's outside width, encasement included.</param>
         /// <param name="ofThisPipe">Crossings of this pipe found so far; new ones are added to it and to <see cref="Crossings"/>.</param>
-        /// <param name="routePadding">Encasement added to each side of the route's own outside.</param>
         internal void MarkCrossingBands(IReadOnlyList<(double X, double Y)> plan, IReadOnlyList<(double X, double Y, double Z)> path,
             double halfWidth, double halfHeight, double horizontalClearance, List<RouteCrossing> ofThisPipe, Func<RouteCrossing> create,
-            bool enforceOnParallel = false, double routePadding = 0, Func<int, bool> excluded = null, string name = null)
+            bool enforceOnParallel = false, Func<int, bool> excluded = null, string name = null)
         {
             List<(int r, double z, double edge)> run = new List<(int, double, double)>();
             void Close()
@@ -298,7 +312,7 @@ namespace C3DProTools
             for (int r = 0; r < Records.Count; r++)
             {
                 if (excluded != null && excluded(r)) { Close(); continue; }
-                double touch = Sections[Records[r].Section].PlanWidth / 2.0 + routePadding + halfWidth;
+                double touch = Sections[Records[r].Section].PlanWidth / 2.0 + halfWidth;
                 (double d, double z, double fraction) = CrossingGeometry.Closest(path, plan[r].X, plan[r].Y);
                 // A pipe whose end is what lies near the route (a branch meeting it) is not a crossing there.
                 // edge < 0: the outsides overlap in plan.

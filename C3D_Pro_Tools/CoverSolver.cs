@@ -470,13 +470,17 @@ namespace C3DProTools
 
             // A structure: the bend radius and bend budget start again; levels follow the junction rule.
             JunctionMatchRule rule = _rules.JunctionFor(_o.Mode);
+            double zIn = Z(e.K), dIn = sec.InnerHeight, dOut = nextSec.InnerHeight;
             if (rule == JunctionMatchRule.None)
             {
-                for (int k2 = _kLo[r2]; k2 <= _kHi[r2]; k2++) Mark(r2, k2, layer, e.Cost, e.Bend, e, double.NaN, 0, 0, list);
+                // Free, but the invert steps at most this far up or down through the structure.
+                double step = _rules.FreeStepFor(_o.Mode), invIn = zIn - dIn / 2.0;
+                if (double.IsPositiveInfinity(step))
+                    for (int k2 = _kLo[r2]; k2 <= _kHi[r2]; k2++) Mark(r2, k2, layer, e.Cost, e.Bend, e, double.NaN, 0, 0, list);
+                else MarkBand(r2, invIn - step + dOut / 2.0, invIn + step + dOut / 2.0, layer, e.Cost, e, list);
                 return;
             }
 
-            double zIn = Z(e.K), dIn = sec.InnerHeight, dOut = nextSec.InnerHeight;
             // The matched level less the minimum drop for the turn here; standard drops reach MaxDrop below it.
             double zMax = CoverRules.MaxOutletCentre(rule, zIn, dIn, dOut) - _rules.MinDropFor(_o.Mode, nextSec.DeflectionIn);
             bool unrestricted = _rules.Backdrop == BackdropMode.UnrestrictedDrop;

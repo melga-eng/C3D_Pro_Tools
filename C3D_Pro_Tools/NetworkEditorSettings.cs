@@ -81,6 +81,12 @@ namespace C3DProTools
         public string ParallelFamily { get; set; }
         public string ParallelSize { get; set; }
         public bool ParallelFit { get; set; }
+        public bool ParallelMitre { get; set; } = true;
+        public bool ParallelConnect { get; set; } = true;
+        public bool ParallelClearGap { get; set; }
+        public double CheckMaxSkew { get; set; } = 5;
+        public double CheckMaxSpan { get; set; } = 150;
+        public bool CheckSpanWarn { get; set; } = true;
         public List<ParallelPreset> Presets { get; set; } = new List<ParallelPreset>
         {
             new ParallelPreset { Name = "Offset 1.0 m right", Horizontal = "1.0", Vertical = "0" },

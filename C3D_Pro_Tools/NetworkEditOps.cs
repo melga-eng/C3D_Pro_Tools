@@ -173,6 +173,8 @@ namespace C3DProTools
         internal sealed class Counts
         {
             public int Done, Created, Skipped, Failed, Structures;
+            /// <summary>Copy ends connected to a structure.</summary>
+            public int Joined;
             /// <summary>New pipes made by copying a pipe in the drawing (its part has no family to build from).</summary>
             public int Copied;
             /// <summary>Networks that kept family-less copies which could not be moved to the requested network.</summary>
@@ -419,6 +421,43 @@ namespace C3DProTools
             public bool IncludeSource;
             /// <summary>Conduits: vertical offsets are measured up from the source pipe's outside bottom instead of its centreline.</summary>
             public bool FromBottom;
+            /// <summary>
+            /// Straight pipes chosen together that meet end to end with no structure between them: their copies meet at the mitre
+            /// of the two offset lines (one continuous offset run, no wedge or gap at the deflection).
+            /// </summary>
+            public bool Mitre = true;
+            /// <summary>Copies in the source pipe's network whose end lies inside one of its structures are connected to that structure.</summary>
+            public bool ConnectToStructures = true;
+        }
+
+        /// <summary>Plan distance (m) within which two pipe ends count as one joint.</summary>
+        private const double JointTolerance = 0.01;
+
+        /// <summary>
+        /// For each chosen straight gravity pipe, the far end of the chosen pipe joined to its start / end with no structure there
+        /// (in the same direction of travel), for mitred copies.
+        /// </summary>
+        private static (Dictionary<ObjectId, Point3d> before, Dictionary<ObjectId, Point3d> after) FreeJoints(Transaction tr, List<ObjectId> pipeIds)
+        {
+            var before = new Dictionary<ObjectId, Point3d>();
+            var after = new Dictionary<ObjectId, Point3d>();
+            List<Pipe> straight = pipeIds.Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe)
+                .Where(p => p != null && p.SubEntityType == PipeSubEntityType.Straight).ToList();
+            bool Same(Point3d a, Point3d b) => new Point2d(a.X, a.Y).GetDistanceTo(new Point2d(b.X, b.Y)) <= JointTolerance && Math.Abs(a.Z - b.Z) <= JointTolerance;
+            foreach (Pipe p in straight)
+                foreach (Pipe q in straight)
+                {
+                    if (p == q || !p.EndStructureId.IsNull || !q.StartStructureId.IsNull || !Same(p.EndPoint, q.StartPoint)) continue;
+                    if (!after.ContainsKey(p.ObjectId) && !before.ContainsKey(q.ObjectId)) { after[p.ObjectId] = q.EndPoint; before[q.ObjectId] = p.StartPoint; }
+                }
+            return (before, after);
+        }
+
+        /// <summary>The point offset <paramref name="h"/> (+ = right) at the mitre of the legs a→joint→b, at level <paramref name="z"/>.</summary>
+        public static Point3d MitreAt(Point3d a, Point3d joint, Point3d b, double h, double z)
+        {
+            (double X, double Y) m = PlanGeometry.OffsetRun(new List<(double X, double Y)> { (a.X, a.Y), (joint.X, joint.Y), (b.X, b.Y) }, h)[1];
+            return new Point3d(m.X, m.Y, z);
         }
 
         public static Counts ApplyParallel(Transaction tr, CivilDocument doc, Database db, List<ObjectId> pipeIds, ParallelOptions o, Editor ed)
@@ -435,6 +474,16 @@ namespace C3DProTools
                     footprints[id] = fp = o.BoxLength > 0 && o.BoxWidth > 0 ? StructureFootprint.Box(st, o.BoxLength, o.BoxWidth) : StructureFootprint.Of(st);
                 return fp;
             }
+            // The structures' own sizes: Civil 3D keeps a pipe end connected only inside them.
+            Dictionary<ObjectId, StructureFootprint> own = new Dictionary<ObjectId, StructureFootprint>();
+            StructureFootprint OwnFootprint(ObjectId id)
+            {
+                if (id.IsNull) return null;
+                if (!own.TryGetValue(id, out StructureFootprint fp) && tr.GetObject(id, OpenMode.ForRead) is Structure st) own[id] = fp = StructureFootprint.Of(st);
+                return fp;
+            }
+            (Dictionary<ObjectId, Point3d> before, Dictionary<ObjectId, Point3d> after) = o.Mitre
+                ? FreeJoints(tr, pipeIds) : (new Dictionary<ObjectId, Point3d>(), new Dictionary<ObjectId, Point3d>());
 
             foreach (ObjectId id in pipeIds)
             {
@@ -508,6 +557,9 @@ namespace C3DProTools
                             else
                             {
                                 if (!TryOffsetLine(s, e, h, out Point3d ns, out Point3d ne)) { ed.WriteMessage($"\n[Skipped] Pipe <{src.Name}> has no length in plan."); c.Skipped++; continue; }
+                                // Joined end to end with another chosen pipe (no structure): both copies end at the mitre.
+                                if (before.TryGetValue(id, out Point3d prev)) ns = MitreAt(prev, s, e, h, s.Z);
+                                if (after.TryGetValue(id, out Point3d next)) ne = MitreAt(s, e, next, h, e.Z);
                                 // Each copy meets the wall where its own line does (round manholes are nearer at an offset).
                                 Point3d fs = startFp != null ? startFp.Fit(ns, ne, o.Face) : ns, fe = endFp != null ? endFp.Fit(ne, ns, o.Face) : ne;
                                 KeepSlope(ns, ne, ref fs, ref fe);
@@ -528,6 +580,15 @@ namespace C3DProTools
                             }
                             c.Created++;
                             c.NewIds.Add(newId);
+                            // In the source's network, an end inside one of its structures is connected there.
+                            if (o.ConnectToStructures && !curved && copy.NetworkId == src.NetworkId)
+                                foreach ((ObjectId sid, bool atStart) in new[] { (src.StartStructureId, true), (src.EndStructureId, false) })
+                                {
+                                    StructureFootprint fp = OwnFootprint(sid);
+                                    if (fp == null || !fp.Contains(atStart ? copy.StartPoint : copy.EndPoint, 0.0)) continue;
+                                    CoverApply.Connect(copy, true, atStart, sid, ed);
+                                    c.Joined++;
+                                }
                         }
                         catch (Exception ex) { ed.WriteMessage($"\n[Error] Copying pipe <{src.Name}>: {ex.Message}"); c.Failed++; }
                     }

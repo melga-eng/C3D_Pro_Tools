@@ -99,6 +99,8 @@ namespace C3DProTools
         private readonly CheckBox _chkEveryLabel = ToolUi.Check("Arrange every label (off: only labels with a problem)");
         private readonly CheckBox _chkSlide = ToolUi.Check("Labels sitting on their pipe slide along it instead of being dragged out");
         private readonly CheckBox _chkAvoidText = ToolUi.Check("Keep clear of other text in the drawing");
+        private readonly CheckBox _chkAvoidXrefs = ToolUi.Check("Keep clear of the linework and text of loaded xrefs");
+        private readonly CheckBox _chkMask = ToolUi.Check("Mask the text of arranged labels (background mask on their label styles)");
         private readonly DataGridView _gridIssues = ToolUi.Grid();
         private readonly List<(ArrangeIssue issue, Box2? box)> _issues = new List<(ArrangeIssue, Box2?)>();
 
@@ -458,10 +460,16 @@ namespace C3DProTools
             ToolUi.Wide(place, _chkEveryLabel);
             ToolUi.Wide(place, _chkSlide);
             ToolUi.Wide(place, _chkAvoidText);
+            ToolUi.Wide(place, _chkAvoidXrefs);
+            ToolUi.Wide(place, _chkMask, _tips, "Civil 3D masks label text through the label style: every label of those styles is masked, here and elsewhere. " +
+                                                "Data shortcut parts are networks in this drawing and are always avoided.");
             ToolUi.Wide(place, ToolUi.Note("Labels you placed by hand can be locked: they are never moved. Select them in the drawing, then Lock."));
             ToolUi.Wide(place, Buttons(
                 StyleUi.Secondary("Lock selected labels…", (s, e) => LockSelected(true)),
                 StyleUi.Secondary("Unlock selected labels…", (s, e) => LockSelected(false))));
+            ToolUi.Wide(place, Buttons(
+                StyleUi.Secondary("Mask selected labels' text…", (s, e) => MaskSelected(true)),
+                StyleUi.Secondary("Unmask…", (s, e) => MaskSelected(false))));
             ToolUi.Wide(place, Buttons(
                 StyleUi.Secondary("Check", (s, e) => RunArrange(Checked(_clbSheets), true)),
                 StyleUi.Primary("Arrange labels", (s, e) => RunArrange(Checked(_clbSheets), false))));
@@ -622,6 +630,8 @@ namespace C3DProTools
             _chkEveryLabel.Checked = _s.ArrangeEveryLabel;
             _chkSlide.Checked = _s.SlideOnPipe;
             _chkAvoidText.Checked = _s.AvoidModelText;
+            _chkAvoidXrefs.Checked = _s.AvoidXrefs;
+            _chkMask.Checked = _s.MaskArranged;
 
             NamingOptions n = _s.Naming;
             _nameTarget.Mode = _s.RenameTarget;
@@ -666,10 +676,11 @@ namespace C3DProTools
             _s.MaxDistance = max; _s.Gap = gap; _s.Margin = margin;
             _s.Plan = _chkPlan.Checked; _s.Profile = _chkProfile.Checked;
             _s.ArrangeEveryLabel = _chkEveryLabel.Checked; _s.SlideOnPipe = _chkSlide.Checked; _s.AvoidModelText = _chkAvoidText.Checked;
+            _s.AvoidXrefs = _chkAvoidXrefs.Checked; _s.MaskArranged = _chkMask.Checked;
             o = new ArrangeOptions
             {
                 MaxDistance = max, Gap = gap, Margin = margin, Plan = _s.Plan, Profile = _s.Profile,
-                RearrangeAll = _s.ArrangeEveryLabel, SlideOnPipe = _s.SlideOnPipe, AvoidModelText = _s.AvoidModelText
+                RearrangeAll = _s.ArrangeEveryLabel, SlideOnPipe = _s.SlideOnPipe, AvoidModelText = _s.AvoidModelText, AvoidXrefs = _s.AvoidXrefs
             };
             return true;
         }
@@ -979,6 +990,7 @@ namespace C3DProTools
             }
             else o.RearrangeAll = true;
             ArrangeReport report = new ArrangeReport();
+            int masked = -1;
             Cursor = Cursors.WaitCursor;
             try
             {
@@ -989,7 +1001,7 @@ namespace C3DProTools
                     CivilDocument cdoc = CivilDocument.GetCivilDocument(db);
                     List<LabelInfo> labels = AnnotLabels.Scan(tr, db);
                     o.Only = choose(tr, labels);
-                    AnnotScene scene = AnnotScene.Read(tr, db, cdoc, o.AvoidModelText, o.Profile);
+                    AnnotScene scene = AnnotScene.Read(tr, db, cdoc, o.AvoidModelText, o.Profile, o.AvoidXrefs);
                     double ppu = AnnotLabels.PaperPerUnit(db);
                     HashSet<ObjectId> handled = new HashSet<ObjectId>();
                     int done = 0;
@@ -999,6 +1011,8 @@ namespace C3DProTools
                         _lblStatus.Refresh();
                         report.Add(AnnotArranger.Arrange(tr, s, labels, scene, o, handled, checkOnly, ppu));
                     }
+                    if (!checkOnly && _s.MaskArranged)
+                        masked = AnnotLabels.SetMask(tr, report.Boxes.Keys.Where(id => o.Only == null || o.Only.Contains(id)).ToList(), true).styles;
                     tr.Commit();
                 }
             }
@@ -1013,9 +1027,26 @@ namespace C3DProTools
             string unmeasured = report.Unmeasured > 0 ? $" {report.Unmeasured} could not be measured (listed)." : "";
             SetStatus(checkOnly
                 ? $"Checked {report.Checked} label(s) on {sheets.Count} sheet(s): {report.Problems} with a problem.{unmeasured}"
-                : $"Arranged {report.Checked} label(s) on {sheets.Count} sheet(s): moved {report.Moved}, {report.Unresolved} without a clear place (listed).{unmeasured}");
+                : $"Arranged {report.Checked} label(s) on {sheets.Count} sheet(s): moved {report.Moved}, {report.Unresolved} without a clear place (listed).{unmeasured}" +
+                  (masked > 0 ? $" Text masking turned on in {masked} label style(s)." : ""));
             if (report.Checked == 0) SetStatus("No chosen labels are shown on those sheets.");
             if (_issues.Count > 0 && _nav.Selected != PArrange) _nav.Selected = PArrange;
+        }
+
+        private async void MaskSelected(bool mask)
+        {
+            List<ObjectId> ids = await PickAsync(mask ? "\nSelect the labels (or multileaders) whose text to mask: " : "\nSelect the labels (or multileaders) to unmask: ");
+            if (ids == null) return;
+            (int styles, int leaders) n;
+            using (_doc.LockDocument())
+            using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+            {
+                n = AnnotLabels.SetMask(tr, ids, mask);
+                tr.Commit();
+            }
+            _doc.Editor.Regen();
+            if (n.styles + n.leaders == 0) SetStatus(mask ? "Nothing changed: the selection's labels are masked already (or it has no labels)." : "Nothing changed.");
+            else SetStatus($"{(mask ? "Masked" : "Unmasked")} the text of {n.styles} label style(s) and {n.leaders} multileader(s).");
         }
 
         private async void LockSelected(bool locked)

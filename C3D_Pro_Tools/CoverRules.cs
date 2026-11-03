@@ -69,6 +69,11 @@ namespace C3DProTools
         public JunctionMatchRule GravityJunction { get; set; } = JunctionMatchRule.CrownToCrown;
         /// <summary>Dry utilities: free by default (an invert rule would force every pit to step down).</summary>
         public JunctionMatchRule DryJunction { get; set; } = JunctionMatchRule.None;
+        /// <summary>
+        /// Dry utilities with a free junction: the most the invert may step up or down through a pit (m; 0 = flush entry and
+        /// exit), so a conduit cannot jump through a single pull pit.
+        /// </summary>
+        public double DryMaxStep { get; set; } = 0.30;
         /// <summary>Minimum drop across a gravity manhole by the turn there (m): up to <see cref="StraightMaxDeg"/>, up to <see cref="MediumMaxDeg"/>, sharper.</summary>
         public double MinDropStraight { get; set; } = 0.02;
         public double MinDropMedium { get; set; } = 0.03;
@@ -123,7 +128,22 @@ namespace C3DProTools
 
         // =====================================================================================
 
+        /// <summary>
+        /// The "Standard Gravity Preset (v ≥ 0.75 m/s)" slope table (DN mm, min %, max %), as given by the tool's owner for
+        /// self-cleansing velocity; loaded on request, never applied by default.
+        /// </summary>
+        public static List<SlopeRow> GravityPresetV075() => new List<SlopeRow>
+        {
+            Row(150, 0.65, 10.0), Row(200, 0.45, 8.0), Row(250, 0.35, 8.0), Row(300, 0.28, 6.0), Row(400, 0.20, 5.0),
+            Row(500, 0.15, 4.0), Row(600, 0.12, 3.5), Row(800, 0.09, 3.0), Row(1000, 0.07, 2.5), Row(1200, 0.06, 2.0)
+        };
+
+        private static SlopeRow Row(double dn, double min, double max) => new SlopeRow { DiameterMm = dn, MinSlopePercent = min, MaxSlopePercent = max };
+
         public JunctionMatchRule JunctionFor(CoverMode mode) => mode == CoverMode.Gravity ? GravityJunction : DryJunction;
+
+        /// <summary>The most the invert may step either way through a structure with a free junction (+∞ when not limited).</summary>
+        public double FreeStepFor(CoverMode mode) => mode == CoverMode.Dry ? Math.Max(0, DryMaxStep) : double.PositiveInfinity;
 
         /// <summary>The minimum drop at a gravity manhole turning by <paramref name="deflectionDeg"/>; none for dry utilities.</summary>
         public double MinDropFor(CoverMode mode, double deflectionDeg)

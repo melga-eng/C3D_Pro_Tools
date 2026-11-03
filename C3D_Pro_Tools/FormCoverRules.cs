@@ -33,7 +33,7 @@ namespace C3DProTools
         private readonly ComboBox _cbGravityJunction = ToolUi.Combo(), _cbDryJunction = ToolUi.Combo(), _cbBackdrop = ToolUi.Combo(), _cbSlopes = ToolUi.Combo();
         private readonly TextBox _txtDropStraight = ToolUi.Number(0), _txtDropMedium = ToolUi.Number(0), _txtDropSharp = ToolUi.Number(0);
         private readonly TextBox _txtStraightDeg = ToolUi.Number(0, 50), _txtMediumDeg = ToolUi.Number(0, 50);
-        private readonly TextBox _txtMinBackdrop = ToolUi.Number(0), _txtMaxBackdrop = ToolUi.Number(0);
+        private readonly TextBox _txtMinBackdrop = ToolUi.Number(0), _txtMaxBackdrop = ToolUi.Number(0), _txtDryStep = ToolUi.Number(0);
         private readonly TextBox _txtSlopeTable = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, Width = 260, Height = 90, Font = new Font(FontFamily.GenericMonospace, 9F) };
         private readonly TextBox _txtMargin = ToolUi.Number(0), _txtZoneLayers = new TextBox { Width = 220 }, _txtZoneCover = ToolUi.Number(0), _txtZoneLabel = new TextBox { Width = 120 };
         private readonly TextBox _txtRadiusMultiple = ToolUi.Number(0), _txtRadius = ToolUi.Number(0), _txtBudget = ToolUi.Number(0), _txtSpan = ToolUi.Number(0);
@@ -66,7 +66,9 @@ namespace C3DProTools
 
             TableLayoutPanel junction = ToolUi.Card("Manholes and pits", "How the outgoing pipe may sit against the incoming one, and how far it may drop.");
             ToolUi.Field(junction, "Gravity networks", _cbGravityJunction, _tips, "Crown to crown: a larger outlet drops so its crown is not above the inlet's.");
-            ToolUi.Field(junction, "Dry utilities", _cbDryJunction, _tips, "Free: cables may rise or fall through a pit.");
+            ToolUi.Field(junction, "Dry utilities", _cbDryJunction, _tips, "Free: cables may rise or fall through a pit, within the step below.");
+            ToolUi.Field(junction, "Dry pit step", ToolUi.WithUnit(_txtDryStep, "m up or down at most (invert to invert; 0 = flush)"), _tips,
+                "With a free junction, how far a conduit's invert may step up or down through one pit.");
             ToolUi.Field(junction, "Minimum drop", ToolUi.Inline(_txtDropStraight, Unit("m up to"), _txtStraightDeg, Unit("°,"), _txtDropMedium, Unit("m up to"), _txtMediumDeg, Unit("°,"), _txtDropSharp, Unit("m sharper")),
                 _tips, "Gravity only: by the turn the flow makes at the manhole.");
             ToolUi.Field(junction, "Deeper drops", _cbBackdrop, _tips, "The standard maximum drop is set in the main window.");
@@ -78,6 +80,10 @@ namespace C3DProTools
             ToolUi.Field(slopes, "Table", _txtSlopeTable, _tips, "One row per line: inner diameter (mm), minimum slope (%), maximum slope (% or 0 = the job's). " +
                                                                     "A pipe takes the row of the largest diameter not above its own. Enter your authority's values.");
             ToolUi.Wide(slopes, ToolUi.Note("Rows: DN mm, min %, max %  —  e.g.  300, 0.5, 8"));
+            Button preset = StyleUi.Secondary("Load Standard Gravity Preset (v >= 0.75 m/s)", (s, e) => LoadGravityPreset());
+            _tips.SetToolTip(preset, "Fills the table with a self-cleansing preset (DN150 to DN1200) and takes the slope limits from it. " +
+                                     "Check the values against your authority's standard before relying on them.");
+            ToolUi.Wide(slopes, preset);
             ToolUi.Add(stack, slopes);
 
             TableLayoutPanel cover = ToolUi.Card("Cover");
@@ -98,7 +104,8 @@ namespace C3DProTools
             ToolUi.Field(crossings, "With a wet utility", ToolUi.WithUnit(_txtWet, "m"), _tips, "Wet to dry and wet to wet; pipes of an unknown class count as wet.");
             ToolUi.Field(crossings, "Protection slab / HDD", ToolUi.WithUnit(_txtSlab, "m least clearance (0 = full clearance only)"), _tips,
                 "Used only where the full clearance cannot be kept; those crossings are flagged.");
-            ToolUi.Field(crossings, "Encasement", ToolUi.WithUnit(_txtPadding, "m on each side of dry utilities"));
+            ToolUi.Field(crossings, "Encasement", ToolUi.WithUnit(_txtPadding, "m on each side of dry utilities"), _tips,
+                "Concrete not drawn in the model: part of the utility's outside, so cover is to its top and clearances are kept from its faces.");
             ToolUi.Field(crossings, "Horizontal clearance", ToolUi.WithUnit(_txtHorizontal, "m edge to edge"));
             ToolUi.Wide(crossings, _chkParallel);
             ToolUi.Field(crossings, "Structure collar", ToolUi.WithUnit(_txtCollar, "m around the route's structures (branches there)"));
@@ -124,6 +131,14 @@ namespace C3DProTools
             Show(rules ?? new CoverRules());
         }
 
+        private void LoadGravityPreset()
+        {
+            CultureInfo c = CultureInfo.InvariantCulture;
+            _txtSlopeTable.Text = string.Join(Environment.NewLine, CoverRules.GravityPresetV075().Select(row =>
+                $"{row.DiameterMm.ToString("0.###", c)}, {row.MinSlopePercent.ToString("0.####", c)}, {row.MaxSlopePercent.ToString("0.####", c)}"));
+            _cbSlopes.SelectedIndex = Array.FindIndex(SlopeSources, s => s.value == SlopeSource.Table);
+        }
+
         private static Label Unit(string text) => new Label { Text = text, AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 6, 0) };
 
         private void Show(CoverRules r)
@@ -135,6 +150,7 @@ namespace C3DProTools
             _txtDropStraight.Text = ToolUi.Format(r.MinDropStraight); _txtDropMedium.Text = ToolUi.Format(r.MinDropMedium); _txtDropSharp.Text = ToolUi.Format(r.MinDropSharp);
             _txtStraightDeg.Text = ToolUi.Format(r.StraightMaxDeg); _txtMediumDeg.Text = ToolUi.Format(r.MediumMaxDeg);
             _txtMinBackdrop.Text = ToolUi.Format(r.MinBackdropHeight); _txtMaxBackdrop.Text = ToolUi.Format(r.MaxBackdropDrop);
+            _txtDryStep.Text = ToolUi.Format(r.DryMaxStep);
             CultureInfo c = CultureInfo.InvariantCulture;
             _txtSlopeTable.Text = string.Join(Environment.NewLine, (r.SlopeTable ?? new List<SlopeRow>()).Select(row =>
                 $"{row.DiameterMm.ToString("0.###", c)}, {row.MinSlopePercent.ToString("0.####", c)}, {row.MaxSlopePercent.ToString("0.####", c)}"));
@@ -157,7 +173,7 @@ namespace C3DProTools
             r = null;
             bool Bad(string message) { MessageBox.Show(this, message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
             TextBox[] numbers = { _txtDropStraight, _txtDropMedium, _txtDropSharp, _txtStraightDeg, _txtMediumDeg, _txtMinBackdrop, _txtMaxBackdrop, _txtMargin, _txtZoneCover,
-                                  _txtRadiusMultiple, _txtRadius, _txtBudget, _txtSpan, _txtDryDry, _txtWet, _txtSlab, _txtPadding, _txtHorizontal, _txtCollar };
+                                  _txtRadiusMultiple, _txtRadius, _txtBudget, _txtSpan, _txtDryDry, _txtWet, _txtSlab, _txtPadding, _txtHorizontal, _txtCollar, _txtDryStep };
             double[] v = new double[numbers.Length];
             for (int i = 0; i < numbers.Length; i++)
                 if (!ToolUi.TryNumber(numbers[i], out v[i]) || v[i] < 0) { numbers[i].Focus(); return Bad("Every rule must be a number, zero or more."); }
@@ -193,7 +209,7 @@ namespace C3DProTools
                 CoverSafetyEpsilon = v[7], ZoneLayers = _txtZoneLayers.Text.Trim(), ZoneMinCover = v[8], ZoneLabel = _txtZoneLabel.Text.Trim(),
                 MinBendRadiusMultiple = v[9], MinBendRadius = v[10], BendBudgetDeg = v[11], MaxStructureSpan = v[12],
                 UseClearanceMatrix = _chkMatrix.Checked, DryToDryClearance = v[13], WetClearance = v[14], ProtectionMinClearance = v[15], EncasementPadding = v[16],
-                HorizontalClearance = v[17], StructureCollar = v[18], EnforceVerticalOnParallel = _chkParallel.Checked,
+                HorizontalClearance = v[17], StructureCollar = v[18], DryMaxStep = v[19], EnforceVerticalOnParallel = _chkParallel.Checked,
                 IctPattern = _txtIct.Text, PowerPattern = _txtPower.Text, GravityPattern = _txtGravity.Text, PressurePattern = _txtPressure.Text
             };
             return true;

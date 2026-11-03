@@ -23,6 +23,13 @@ namespace C3DProTools
         public string NamePattern = "{view} - P{n}";
         public bool TrimParts = true, CopyLabels = true, FitElevation = true;
         public double Margin = 1.0;
+        /// <summary>Each part's elevation range is rounded outward to whole steps of this (m).</summary>
+        public double DatumIncrement = 1.0;
+        /// <summary>The number {SheetNo} takes in the first part's name.</summary>
+        public int FirstSheetNo = 1;
+        /// <summary>Lines at the stations where the alignment enters and leaves closed polylines on these layers (empty = none).</summary>
+        public string ZoneLayers = "";
+        public string ZoneLabel = "Paved";
         public bool DeleteSource;
         public ProfileRoleRules Rules = new ProfileRoleRules();
         /// <summary>The sheet viewport's size in model units (0 = no viewport to check against).</summary>
@@ -106,6 +113,9 @@ namespace C3DProTools
             if (ends.Count > 1 && s1 - ends[ends.Count - 2] < o.MinLast) ends.RemoveAt(ends.Count - 2);
 
             Frame f = Measure(v);
+            Alignment alignment = tr.GetObject(v.AlignmentId, OpenMode.ForRead) as Alignment;
+            string alignmentName = alignment?.Name ?? "";
+            Func<double, string> station = StationText(alignment);
             List<ObjectId> roles = RoleProfiles(tr, v, o.Rules, surfaces);
             ProfileViewMatch.ViewPartIndex index = surfaces.Parts;
             List<SplitPart> parts = new List<SplitPart>();
@@ -113,12 +123,9 @@ namespace C3DProTools
             for (int i = 0; i < ends.Count; i++)
             {
                 SplitPart p = new SplitPart { N = i + 1, S0 = i == 0 ? s0 : Math.Max(s0, start - o.Overlap), S1 = ends[i] };
-                p.Name = Name(o.NamePattern, v.Name, p.N, p.S0, p.S1);
+                p.Name = Name(o.NamePattern, v.Name, p.N, p.S0, p.S1, alignmentName, o.FirstSheetNo, station);
                 if (o.FitElevation && ProfileViewMatch.FitRange(tr, v, roles, p.S0, p.S1, out double lo, out double hi, index))
-                {
-                    p.Low = Math.Floor(lo - o.Margin); p.High = Math.Ceiling(hi + o.Margin);
-                    if (p.High - p.Low < 1) p.High = p.Low + 1;
-                }
+                    (p.Low, p.High) = ProfileViewMath.DatumRange(lo, hi, o.Margin, o.DatumIncrement);
                 else { p.Low = v.ElevationMin; p.High = v.ElevationMax; }
                 p.Width = (p.S1 - p.S0) * f.Horizontal + f.Left + f.Right;
                 p.Height = (p.High - p.Low) * f.Vertical + f.Top + f.Bottom;
@@ -137,15 +144,34 @@ namespace C3DProTools
             return roles.Count > 0 ? roles : all.Where(p => p.Drawn).Select(p => p.Id).ToList();
         }
 
-        public static string Name(string pattern, string view, int n, double s0, double s1) =>
-            (string.IsNullOrWhiteSpace(pattern) ? "{view} - P{n}" : pattern)
-                .Replace("{view}", view).Replace("{n}", n.ToString(CultureInfo.InvariantCulture))
-                .Replace("{from}", Station(s0)).Replace("{to}", Station(s1));
-
-        public static string Station(double s)
+        /// <summary>
+        /// A part's name from the pattern: {view} {n} {from} {to}, or {ViewName} {PartIndex} {StartSta} {EndSta} {AlignmentName}
+        /// {SheetNo}, each with an optional format ({SheetNo:000}).
+        /// </summary>
+        public static string Name(string pattern, string view, int n, double s0, double s1, string alignment = "", int firstSheet = 1, Func<double, string> station = null)
         {
-            double km = Math.Floor(s / 1000.0);
-            return $"{km:0}+{s - km * 1000:000}";
+            station = station ?? Station;
+            return ProfileViewMath.Name(string.IsNullOrWhiteSpace(pattern) ? "{view} - P{n}" : pattern,
+                ProfileViewMath.SplitTokens(view, alignment, n, station(s0), station(s1), firstSheet));
+        }
+
+        /// <summary>Station text with the sign in front (-0+050), whole metres.</summary>
+        public static string Station(double s) => ProfileViewMath.Station(s);
+
+        /// <summary>
+        /// Station text for an alignment: Civil 3D's own (station equations and the drawing's station format) when it has station
+        /// equations, else <see cref="Station"/>.
+        /// </summary>
+        public static Func<double, string> StationText(Alignment alignment)
+        {
+            bool equations = false;
+            try { equations = alignment != null && alignment.StationEquations.Count > 0; } catch (Exception) { }
+            if (!equations) return Station;
+            return s =>
+            {
+                try { return alignment.GetStationStringWithEquations(s); }
+                catch (Exception) { return Station(s); }
+            };
         }
 
         /// <summary>Creates the parts. Each step commits on its own (the view geometry is read back between them).</summary>
@@ -244,6 +270,19 @@ namespace C3DProTools
                     }
             }
 
+            if (!string.IsNullOrWhiteSpace(o.ZoneLayers))
+                using (Transaction tr = db.TransactionManager.StartTransaction())
+                {
+                    List<IReadOnlyList<(double X, double Y)>> zones = ProfileViewZones.ReadZones(tr, db, o.ZoneLayers);
+                    if (zones.Count == 0) log.Add($"Cover zones: no closed polylines on {o.ZoneLayers}.");
+                    int marked = 0;
+                    foreach (SplitPart p in parts.Where(x => !x.ViewId.IsNull))
+                        try { marked += ProfileViewZones.Mark(tr, db, p.ViewId, zones, o.ZoneLabel); }
+                        catch (Exception ex) { log.Add($"{p.Name}: cover zones: {ex.Message}"); }
+                    if (zones.Count > 0) log.Add($"Cover zones: {marked} zone edge(s) marked.");
+                    tr.Commit();
+                }
+
             if (o.Sheets) CreateSheets(db, parts, o, f, log);
 
             if (o.DeleteSource)
@@ -264,7 +303,7 @@ namespace C3DProTools
                 ProfileViewBandItemCollection items = new ProfileViewBandItemCollection(v.ObjectId, top ? BandLocationType.Top : BandLocationType.Bottom);
                 List<ProfileViewBandItem> from = (top ? src.Bands.GetTopBandItems() : src.Bands.GetBottomBandItems()).ToList();
                 foreach (ProfileViewBandItem b in from)
-                    try { items.Add(b.BandType, ProfileViewMatch.StyleName(tr, b.BandStyleId)); }
+                    try { items.Add(b.BandStyleId); }
                     catch (Exception ex) { log.Add($"{v.Name}: band \"{ProfileViewMatch.StyleName(tr, b.BandStyleId)}\": {ex.Message}"); }
                 List<ProfileViewBandItem> to = items.ToList();
                 for (int i = 0; i < Math.Min(from.Count, to.Count); i++)
@@ -279,6 +318,7 @@ namespace C3DProTools
                 try { if (top) v.Bands.SetTopBandItems(items); else v.Bands.SetBottomBandItems(items); }
                 catch (Exception ex) { log.Add($"{v.Name}: setting the bands failed: {ex.Message}"); }
             }
+            try { v.Bands.MatchIncrementToGridIntervals = src.Bands.MatchIncrementToGridIntervals; } catch (Exception) { }
         }
 
         /// <summary>Which profiles the source shows, and any style it overrides them with.</summary>

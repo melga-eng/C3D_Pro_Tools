@@ -68,7 +68,7 @@ namespace C3DProTools
                     if (kv.Value < 0) issues.Add($"Clashes with {kv.Key.Name}");
                     else if (slab > 0 && kv.Value >= slab - Tolerance)
                         row.Flags.Add($"Protection slab / HDD at {kv.Key.Name}: {kv.Value:0.00} m clear (full clearance {full:0.00} m)");
-                    else issues.Add($"Only {kv.Value:0.00} m clear of {kv.Key.Name}");
+                    else issues.Add($"Only {kv.Value:0.00} m clear of {kv.Key.Name} (needs {full:0.00} m)");
                 }
 
                 if (worstCover.zone != null) issues.Add($"Cover below the {worstCover.zone} minimum ({worstCover.required - worstCover.shortfall:0.000} m < {worstCover.required:0.00} m)");
@@ -124,8 +124,13 @@ namespace C3DProTools
                 bool manhole = a.Section != b.Section && secB.AfterManhole;
                 if (manhole)
                 {
-                    if (rule == JunctionMatchRule.None) continue;
                     double dIn = a.Source.InnerHeight, dOut = b.Source.InnerHeight;
+                    if (rule == JunctionMatchRule.None)
+                    {
+                        double step = rules.FreeStepFor(o.Mode), change = (b.Z0 - dOut / 2.0) - (a.Z1 - dIn / 2.0);
+                        if (Math.Abs(change) > step + 1e-6) rows[i].Issue($"Invert steps {change:+0.00;-0.00} m through the structure, more than ±{step:0.00} m");
+                        continue;
+                    }
                     double matched = CoverRules.MaxOutletCentre(rule, a.Z1, dIn, dOut);
                     double minDrop = rules.MinDropFor(o.Mode, secB.DeflectionIn);
                     if (b.Z0 > matched - minDrop + 1e-6)

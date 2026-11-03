@@ -41,6 +41,8 @@ namespace C3DProTools
         public bool CreateMissing = true;
         public OtherProfileAction Others = OtherProfileAction.Hide;
         public double Margin = 1.0;
+        /// <summary>The elevation range is rounded outward to whole steps of this (m).</summary>
+        public double DatumIncrement = 1.0;
         public string TopPrefix = "TOP - ";
     }
 
@@ -446,11 +448,11 @@ namespace C3DProTools
             // 6. Elevation range.
             if (o.Elevation && FitRange(tr, view, roleIds.Values.Where(x => !x.IsNull), view.StationStart, view.StationEnd, out double lo, out double hi, surfaces.Parts))
             {
-                double min = Math.Floor(lo - o.Margin), max = Math.Ceiling(hi + o.Margin);
+                (double min, double max) = ProfileViewMath.DatumRange(lo, hi, o.Margin, o.DatumIncrement);
                 if (view.ElevationRangeMode != ElevationRangeType.UserSpecified || Math.Abs(view.ElevationMin - min) > 1e-6 || Math.Abs(view.ElevationMax - max) > 1e-6)
                 {
                     Change("Elevation range", $"{view.ElevationMin:0.##} – {view.ElevationMax:0.##}{(view.ElevationRangeMode == ElevationRangeType.Automatic ? " (automatic)" : "")}", $"{min:0.##} – {max:0.##}");
-                    if (write) try { ProfileCreation.SetElevationRange(view, lo, hi, o.Margin); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
+                    if (write) try { ProfileCreation.SetElevationRange(view, lo, hi, o.Margin, o.DatumIncrement); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
                 }
             }
         }
@@ -487,7 +489,13 @@ namespace C3DProTools
                     items = new ProfileViewBandItemCollection(view.ObjectId, top ? BandLocationType.Top : BandLocationType.Bottom);
                     foreach (BandRecipe w in want)
                     {
-                        try { items.Add((BandType)Enum.Parse(typeof(BandType), w.BandType), w.Style); }
+                        try
+                        {
+                            // The style by type and name (the call Civil 3D asks for in place of the obsolete Add(type, name)).
+                            ObjectId styleId = Autodesk.Civil.DatabaseServices.Styles.BandStyle.GetBandStyleId(view.Database, (BandType)Enum.Parse(typeof(BandType), w.BandType), w.Style);
+                            if (styleId.IsNull) throw new InvalidOperationException("there is no band style of that name");
+                            items.Add(styleId);
+                        }
                         catch (Exception ex) { log.Add($"{view.Name}: adding the band \"{w.Style}\" failed: {ex.Message}"); }
                     }
                     have = items.ToList();
@@ -762,7 +770,7 @@ namespace C3DProTools
         /// Problems in a view: bands showing a profile of another alignment or none, missing roles, second profiles of a role,
         /// and an elevation range that cuts off the profiles or parts. Each fixable one carries its fix.
         /// </summary>
-        public static List<ViewIssue> Check(Transaction tr, CivilDocument doc, ObjectId viewId, ProfileRoleRules rules, Surfaces surfaces, double margin)
+        public static List<ViewIssue> Check(Transaction tr, CivilDocument doc, ObjectId viewId, ProfileRoleRules rules, Surfaces surfaces, double margin, double increment = 1.0)
         {
             List<ViewIssue> issues = new List<ViewIssue>();
             ProfileView view = (ProfileView)tr.GetObject(viewId, OpenMode.ForRead);
@@ -822,8 +830,8 @@ namespace C3DProTools
                 {
                     ViewId = viewId, View = vn,
                     Text = $"The elevation range {view.ElevationMin:0.##} – {view.ElevationMax:0.##} cuts off the profiles or parts ({lo:0.##} – {hi:0.##}).",
-                    FixText = $"Fit to {Math.Floor(lo - margin):0} – {Math.Ceiling(hi + margin):0}",
-                    Fix = t => { ProfileView v = (ProfileView)t.GetObject(viewId, OpenMode.ForWrite); ProfileCreation.SetElevationRange(v, lo, hi, margin); }
+                    FixText = $"Fit to {ProfileViewMath.DatumRange(lo, hi, margin, increment).low:0.##} – {ProfileViewMath.DatumRange(lo, hi, margin, increment).high:0.##}",
+                    Fix = t => { ProfileView v = (ProfileView)t.GetObject(viewId, OpenMode.ForWrite); ProfileCreation.SetElevationRange(v, lo, hi, margin, increment); }
                 });
             }
             return issues;

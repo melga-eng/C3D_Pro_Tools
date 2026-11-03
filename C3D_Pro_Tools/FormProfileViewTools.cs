@@ -53,6 +53,9 @@ namespace C3DProTools
         private readonly CheckBox _chkElevation = ToolUi.Check("Elevation range: fit the profiles and parts, plus");
         private readonly CheckBox _chkInView = ToolUi.Check("Set profile styles in these views only (view overrides), not on the profiles");
         private readonly TextBox _txtMargin = ToolUi.Number(1, 50);
+        /// <summary>Elevation ranges round outward to whole steps of this (m); 1, 2 or 5 offered, any positive number typed.</summary>
+        private readonly ComboBox _cbDatum = new ComboBox { Width = 50, DropDownStyle = ComboBoxStyle.DropDown };
+        private readonly CheckBox _chkMatchZones = ToolUi.Check("Cover zone lines (the layers set on Split views)");
         private readonly CheckBox _chkCreate = ToolUi.Check("Create missing role profiles (ground from its surface, top from the parts in the view)");
         private readonly TextBox _txtTopPrefix = new TextBox { Width = 120 };
         private readonly RadioButton _rbLeave = new RadioButton { Text = "Leave", AutoSize = true }, _rbHide = new RadioButton { Text = "Hide in the view", AutoSize = true }, _rbDelete = new RadioButton { Text = "Delete", AutoSize = true };
@@ -78,6 +81,9 @@ namespace C3DProTools
         private readonly CheckBox _chkDeleteSource = ToolUi.Check("Delete the long view afterwards");
         private readonly CheckBox _chkSheets = ToolUi.Check("Create a profile sheet for each part, from this sheet:");
         private readonly CheckBox _chkPartTitle = ToolUi.Check("Number the \"PART n\" in each sheet's title");
+        private readonly TextBox _txtSheetNo = ToolUi.Number(1, 50);
+        private readonly CheckBox _chkSplitZones = ToolUi.Check("Mark cover zones on each part: a line where the alignment enters and leaves");
+        private readonly TextBox _txtZoneLayers = new TextBox { Width = 220 }, _txtZoneLabel = new TextBox { Width = 120 };
         private readonly DataGridView _gridSplit = ToolUi.Grid();
         private List<SplitPart> _plan;
 
@@ -166,8 +172,9 @@ namespace C3DProTools
             ToolUi.Wide(what, _chkBands);
             ToolUi.Wide(what, _chkProfileStyles);
             ToolUi.Wide(what, _chkLabels);
-            ToolUi.Wide(what, ToolUi.Inline(_chkElevation, _txtMargin, Muted("m above and below, in whole metres")));
+            ToolUi.Wide(what, ToolUi.Inline(_chkElevation, _txtMargin, Muted("m above and below, rounded to whole"), _cbDatum, Muted("m")));
             ToolUi.Wide(what, _chkInView);
+            ToolUi.Wide(what, _chkMatchZones);
             ToolUi.Add(stack, what);
 
             TableLayoutPanel profiles = ToolUi.Card("Profiles", "You are asked about these again at the start of each run.");
@@ -260,11 +267,16 @@ namespace C3DProTools
 
             TableLayoutPanel place = ToolUi.Card("Parts");
             ToolUi.Wide(place, ToolUi.Inline(_rbBelow, _rbRight, Muted("gap"), _txtGap, Muted("m")));
-            ToolUi.Field(place, "Names", ToolUi.Inline(_txtName, Muted("{view} {n} {from} {to}")));
+            ToolUi.Field(place, "Names", ToolUi.Inline(_txtName, Muted("{view} {n} {from} {to} {AlignmentName} {SheetNo}, first {SheetNo}"), _txtSheetNo));
+            _tips.SetToolTip(_txtName, "Tokens: {view} or {ViewName}, {n} or {PartIndex}, {from} or {StartSta}, {to} or {EndSta}, {AlignmentName}, {SheetNo}. " +
+                                       "Add a format after a colon, e.g. PROFILE SHEET {SheetNo:000} - PART - {PartIndex}. Stations follow the alignment's station equations.");
             ToolUi.Wide(place, _chkTrim);
             ToolUi.Wide(place, _chkSplitLabels);
             ToolUi.Wide(place, _chkSplitFit);
             ToolUi.Wide(place, _chkDeleteSource);
+            ToolUi.Wide(place, _chkSplitZones);
+            ToolUi.Field(place, "Zone polylines", ToolUi.Inline(_txtZoneLayers, Muted("layers (comma-separated, * allowed), labelled"), _txtZoneLabel), _tips,
+                "Closed polylines on these layers (paving, roads, taxiways) are the zones; lines go on layer " + ProfileViewZones.Layer + ".");
             ToolUi.Wide(place, ToolUi.Note("Objects projected into the view (COGO points, blocks) cannot be projected by a .NET tool: the report lists how many fall in each part, " +
                                            "to project with Civil 3D's Project Objects to Profile View."));
             ToolUi.Add(stack, place);
@@ -384,6 +396,9 @@ namespace C3DProTools
             _chkElevation.Checked = _s.MatchElevation;
             _chkInView.Checked = _s.StylesInView;
             _txtMargin.Text = ToolUi.Format(_s.Margin);
+            if (_cbDatum.Items.Count == 0) _cbDatum.Items.AddRange(new object[] { "1", "2", "5" });
+            _cbDatum.Text = ToolUi.Format(_s.DatumIncrement > 0 ? _s.DatumIncrement : 1);
+            _chkMatchZones.Checked = _s.MatchZones;
             _chkCreate.Checked = _s.CreateMissing;
             _txtTopPrefix.Text = _s.TopPrefix;
             _rbLeave.Checked = _s.Others == OtherProfileAction.Leave;
@@ -410,6 +425,10 @@ namespace C3DProTools
             _chkSheets.Checked = _s.SplitSheets;
             _txtFirstSheet.Text = _s.SplitSheetFirstName;
             _chkPartTitle.Checked = _s.SplitSheetPartTitle;
+            _txtSheetNo.Text = _s.SplitFirstSheetNo.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _chkSplitZones.Checked = _s.SplitZones;
+            _txtZoneLayers.Text = _s.ZoneLayers;
+            _txtZoneLabel.Text = _s.ZoneLabel;
         }
 
         private void SaveSettings()
@@ -423,6 +442,8 @@ namespace C3DProTools
             _s.MatchElevation = _chkElevation.Checked;
             _s.StylesInView = _chkInView.Checked;
             if (ToolUi.TryNumber(_txtMargin, out double m) && m >= 0) _s.Margin = m;
+            _s.DatumIncrement = Datum();
+            _s.MatchZones = _chkMatchZones.Checked;
             _s.CreateMissing = _chkCreate.Checked;
             _s.TopPrefix = _txtTopPrefix.Text;
             _s.Others = _rbDelete.Checked ? OtherProfileAction.Delete : _rbHide.Checked ? OtherProfileAction.Hide : OtherProfileAction.Leave;
@@ -445,7 +466,17 @@ namespace C3DProTools
             _s.SplitSheetTemplate = _cbSheetTemplate.SelectedItem as string ?? "";
             _s.SplitSheetFirstName = _txtFirstSheet.Text;
             _s.SplitSheetPartTitle = _chkPartTitle.Checked;
+            if (int.TryParse(_txtSheetNo.Text, out int sheetNo)) _s.SplitFirstSheetNo = sheetNo;
+            _s.SplitZones = _chkSplitZones.Checked;
+            _s.ZoneLayers = _txtZoneLayers.Text.Trim();
+            _s.ZoneLabel = _txtZoneLabel.Text.Trim();
         }
+
+        /// <summary>The datum increment typed or picked (1 m when not a positive number).</summary>
+        private double Datum() =>
+            double.TryParse(_cbDatum.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double d) && d > 0 ? d : 1.0;
+
+        private string ZoneLabel() => string.IsNullOrWhiteSpace(_txtZoneLabel.Text) ? "zone" : _txtZoneLabel.Text.Trim();
 
         private ProfileRoleRules Rules() => new ProfileRoleRules
         {
@@ -462,7 +493,7 @@ namespace C3DProTools
                 ViewStyle = _chkViewStyle.Checked, Bands = _chkBands.Checked, ProfileStyles = _chkProfileStyles.Checked, ProfileLabels = _chkLabels.Checked,
                 Elevation = _chkElevation.Checked, StylesInView = _chkInView.Checked, CreateMissing = _chkCreate.Checked,
                 Others = _rbDelete.Checked ? OtherProfileAction.Delete : _rbHide.Checked ? OtherProfileAction.Hide : OtherProfileAction.Leave,
-                Margin = Math.Max(0, margin), TopPrefix = _txtTopPrefix.Text
+                Margin = Math.Max(0, margin), DatumIncrement = Datum(), TopPrefix = _txtTopPrefix.Text
             };
         }
 
@@ -659,11 +690,15 @@ namespace C3DProTools
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
                     ProfileViewMatch.Surfaces surfaces = new ProfileViewMatch.Surfaces(tr, cdoc);
+                    List<IReadOnlyList<(double X, double Y)>> zones = _chkMatchZones.Checked && _txtZoneLayers.Text.Trim().Length > 0
+                        ? ProfileViewZones.ReadZones(tr, db, _txtZoneLayers.Text.Trim()) : null;
+                    if (_chkMatchZones.Checked && zones == null) log.Add("Cover zone lines: no zone layers are set (on Split views).");
                     foreach (ViewItem t in apply)
                     {
                         try
                         {
                             ProfileViewMatch.Apply(tr, cdoc, recipe, t.Id, o, surfaces, true, changes, log);
+                            if (zones != null) ProfileViewZones.Mark(tr, db, t.Id, zones, ZoneLabel());
                             if (!master.IsNull && t.Id != master) ProfileViewMatch.Link(tr, t.Id, master);
                         }
                         catch (Exception ex) { log.Add($"{t.Name}: {ex.Message}"); }
@@ -852,7 +887,7 @@ namespace C3DProTools
                 {
                     ProfileViewMatch.Surfaces surfaces = new ProfileViewMatch.Surfaces(tr, CivilApplication.ActiveDocument);
                     foreach (ObjectId id in views)
-                        try { _issues.AddRange(ProfileViewMatch.Check(tr, CivilApplication.ActiveDocument, id, Rules(), surfaces, Math.Max(0, margin))); }
+                        try { _issues.AddRange(ProfileViewMatch.Check(tr, CivilApplication.ActiveDocument, id, Rules(), surfaces, Math.Max(0, margin), Datum())); }
                         catch (Exception ex) { _issues.Add(new ViewIssue { ViewId = id, View = _views.FirstOrDefault(v => v.Id == id)?.Name ?? "?", Text = "Could not be checked: " + ex.Message }); }
                     tr.Commit();
                 }
@@ -927,13 +962,16 @@ namespace C3DProTools
             problem = null;
             SplitOptions o = new SplitOptions { Rules = Rules(), Below = _rbBelow.Checked, NamePattern = _txtName.Text, TrimParts = _chkTrim.Checked, CopyLabels = _chkSplitLabels.Checked,
                 FitElevation = _chkSplitFit.Checked, DeleteSource = _chkDeleteSource.Checked, Sheets = _chkSheets.Checked, SheetTemplate = _cbSheetTemplate.SelectedItem as string ?? "",
-                FirstSheetName = _txtFirstSheet.Text.Trim(), NumberPartTitle = _chkPartTitle.Checked };
+                FirstSheetName = _txtFirstSheet.Text.Trim(), NumberPartTitle = _chkPartTitle.Checked, DatumIncrement = Datum(),
+                ZoneLayers = _chkSplitZones.Checked ? _txtZoneLayers.Text.Trim() : "", ZoneLabel = ZoneLabel() };
+            o.FirstSheetNo = int.TryParse(_txtSheetNo.Text, out int firstNo) ? firstNo : 1;
             if (!ToolUi.TryNumber(_txtLength, out o.Length) || o.Length <= 0) problem = "Enter the length of each part.";
             else if (!ToolUi.TryNumber(_txtRound, out o.Round) || o.Round < 0) problem = "Enter the station rounding (0 for none).";
             else if (!ToolUi.TryNumber(_txtOverlap, out o.Overlap) || o.Overlap < 0 || o.Overlap >= o.Length) problem = "Enter an overlap smaller than the part length.";
             else if (!ToolUi.TryNumber(_txtMinLast, out o.MinLast) || o.MinLast < 0) problem = "Enter the shortest last part.";
             else if (!ToolUi.TryNumber(_txtGap, out o.Gap) || o.Gap < 0) problem = "Enter the gap between parts.";
             else if (o.Sheets && o.SheetTemplate.Length == 0) problem = "Choose the sheet to copy for each part.";
+            else if (_chkSplitZones.Checked && _txtZoneLayers.Text.Trim().Length == 0) problem = "Enter the layers of the zone polylines, or untick the cover zones.";
             ToolUi.TryNumber(_txtMargin, out o.Margin);
             return o;
         }

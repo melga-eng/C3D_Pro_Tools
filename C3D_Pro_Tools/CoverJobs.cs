@@ -129,8 +129,11 @@ namespace C3DProTools
 
         /// <summary>
         /// The closed polylines in model space on the rules' zone layers (comma-separated names, * and ? allowed), as plan
-        /// outlines (vertices; arc segments are taken by their chords).
+        /// outlines. Arc segments are followed by chords no more than 50 mm off the arc, so a curved road edge is checked as drawn.
         /// </summary>
+        /// <summary>Largest gap (m) between a zone outline's arc and the chords that stand for it.</summary>
+        public const double ZoneArcTolerance = 0.05;
+
         public static List<List<(double X, double Y)>> ReadZonePolygons(Transaction tr, Database db, CoverRules rules)
         {
             List<List<(double X, double Y)>> polygons = new List<List<(double X, double Y)>>();
@@ -144,9 +147,9 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(id, OpenMode.ForRead) is Polyline pl) || !pl.Closed || pl.NumberOfVertices < 3) continue;
                 if (!layers.Any(l => l.IsMatch(pl.Layer))) continue;
-                List<(double X, double Y)> outline = new List<(double X, double Y)>();
-                for (int i = 0; i < pl.NumberOfVertices; i++) { Point2d v = pl.GetPoint2dAt(i); outline.Add((v.X, v.Y)); }
-                polygons.Add(outline);
+                List<(double X, double Y, double Bulge)> vertices = new List<(double X, double Y, double Bulge)>();
+                for (int i = 0; i < pl.NumberOfVertices; i++) { Point2d v = pl.GetPoint2dAt(i); vertices.Add((v.X, v.Y, pl.GetBulgeAt(i))); }
+                polygons.Add(PlanGeometry.Densify(vertices, true, ZoneArcTolerance));
             }
             return polygons;
         }
@@ -192,6 +195,8 @@ namespace C3DProTools
             string networkName = !job.Route.NetworkId.IsNull && tr.GetObject(job.Route.NetworkId, OpenMode.ForRead) is Network routeNet ? routeNet.Name : "";
             job.Route.Class = rules.Classify(networkName, false);
             if (job.Route.Class == UtilityClass.Unknown && o.Mode == CoverMode.Dry) job.Route.Class = UtilityClass.DryPower;
+            // Encasement not drawn in the model is part of the route's outside: cover to its top, clearances from its faces.
+            job.Route.ApplyEncasement(rules.PaddingFor(job.Route.Class));
             if (o.CrossingClearance > 0 || rules.UseClearanceMatrix)
             {
                 HashSet<ObjectId> exclude = new HashSet<ObjectId>(batchPipes);

@@ -216,6 +216,49 @@ namespace C3DProTools
             catch (Exception) { return false; }
         }
 
+        /// <summary>
+        /// Background masking on or off for labels' text: on the text components of the label styles the Civil 3D labels use (a
+        /// style is shared: every label of that style changes), and on the text of multileaders directly. Returns the styles and
+        /// multileaders changed.
+        /// </summary>
+        public static (int styles, int leaders) SetMask(Transaction tr, IEnumerable<ObjectId> ids, bool mask)
+        {
+            HashSet<ObjectId> styles = new HashSet<ObjectId>();
+            int leaders = 0;
+            foreach (ObjectId id in ids)
+            {
+                if (id.IsErased) continue;
+                DBObject obj = tr.GetObject(id, OpenMode.ForRead);
+                if (obj is CLabel label)
+                {
+                    try { if (!label.StyleId.IsNull) styles.Add(label.StyleId); } catch (Exception) { }
+                }
+                else if (obj is MLeader ml && ml.ContentType == ContentType.MTextContent)
+                {
+                    ml.UpgradeOpen();
+                    MText text = ml.MText;
+                    text.BackgroundFill = mask;
+                    if (mask) { text.UseBackgroundColor = true; text.BackgroundScaleFactor = 1.5; }
+                    ml.MText = text;
+                    leaders++;
+                }
+            }
+            int changed = 0;
+            foreach (ObjectId sid in styles)
+            {
+                if (!(tr.GetObject(sid, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.LabelStyle style)) continue;
+                bool any = false;
+                foreach (ObjectId c in style.GetComponents(Autodesk.Civil.DatabaseServices.Styles.LabelStyleComponentType.Text))
+                    if (tr.GetObject(c, OpenMode.ForWrite) is Autodesk.Civil.DatabaseServices.Styles.LabelStyleTextComponent t && t.Border.BackgroundMask.Value != mask)
+                    {
+                        t.Border.BackgroundMask.Value = mask;
+                        any = true;
+                    }
+                if (any) changed++;
+            }
+            return (changed, leaders);
+        }
+
         public static void SetLocked(Transaction tr, Database db, IEnumerable<ObjectId> ids, bool locked)
         {
             RegAppTable table = (RegAppTable)tr.GetObject(db.RegAppTableId, OpenMode.ForRead);

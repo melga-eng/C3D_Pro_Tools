@@ -24,7 +24,7 @@ namespace C3DProTools
     /// </summary>
     internal sealed partial class FormNetworkEditor : Form
     {
-        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7;
+        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8;
         private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…" };
 
         private readonly NetworkEditorSettings _s = NetworkEditorSettings.Load();
@@ -57,6 +57,12 @@ namespace C3DProTools
         private readonly RadioButton _rbOwnSize = new RadioButton { Text = "Same part as each source pipe", AutoSize = true }, _rbChosenSize = new RadioButton { Text = "This part:", AutoSize = true };
         private readonly PartChooser _parPart = new PartChooser(DomainType.Pipe);
         private readonly CheckBox _chkParFit = ToolUi.Check("End straight copies at the source pipe's structures");
+        private readonly CheckBox _chkParMitre = ToolUi.Check("Copies of pipes joined end to end (no structure) meet at a mitre: one continuous offset run");
+        private readonly CheckBox _chkParConnect = ToolUi.Check("Connect copy ends that lie inside the source's structures (same network)");
+        private readonly ComboBox _cbSpacing = ToolUi.Combo(150);
+        // Chambers and spans
+        private readonly TextBox _txtMaxSkew = ToolUi.Number(5, 50), _txtMaxSpan = ToolUi.Number(150, 60);
+        private readonly CheckBox _chkSpanWarn = ToolUi.Check("Also warn about long spans after splitting or fitting pipes");
         private readonly ComboBox _cbParFace = ToolUi.Combo(160);
         private readonly TextBox _txtParBoxL = ToolUi.Number(6, 60), _txtParBoxW = ToolUi.Number(3, 60);
         private FlowLayoutPanel _parBoxRow;
@@ -111,6 +117,7 @@ namespace C3DProTools
             _nav.Add("Merge pipes", "Join straight pipes end to end");
             _nav.Add("Swap parts", "Pipes, structures, fittings: many at once");
             _nav.Add("Pressure to gravity", "Gravity copies of pressure pipes");
+            _nav.Add("Chambers and spans", "Pipe entry walls, chamber alignment, long spans");
             _pages.Add(BuildSplit());
             _pages.Add(BuildParallel());
             _pages.Add(BuildConduits());
@@ -119,6 +126,7 @@ namespace C3DProTools
             _pages.Add(BuildMerge());
             _pages.Add(BuildSwap());
             _pages.Add(BuildGravity());
+            _pages.Add(BuildChecks());
             foreach (Control p in _pages) { p.Visible = false; _content.Controls.Add(p); }
 
             Controls.Add(_content);
@@ -214,7 +222,7 @@ namespace C3DProTools
             ToolUi.Field(card, "Vertical (m)", _txtV, _tips, "Vertical offsets, comma separated, e.g. -0.15, 0, 0.15 (0 = at the source pipe's level)");
             Button fill = StyleUi.Secondary("Fill grid", (s, e) => FillGrid());
             ToolUi.Field(card, "Grid", ToolUi.Inline(_numCols, new Label { Text = "columns ×", AutoSize = true, Margin = new Padding(2, 7, 6, 0) }, _numRows,
-                new Label { Text = "rows, spacing", AutoSize = true, Margin = new Padding(2, 7, 6, 0) }, _txtSpX, new Label { Text = "×", AutoSize = true, Margin = new Padding(2, 7, 2, 0) }, _txtSpZ,
+                new Label { Text = "rows, spacing", AutoSize = true, Margin = new Padding(2, 7, 6, 0) }, _txtSpX, new Label { Text = "×", AutoSize = true, Margin = new Padding(2, 7, 2, 0) }, _txtSpZ, _cbSpacing,
                 new Label { Text = "m, centred", AutoSize = true, Margin = new Padding(2, 7, 8, 0) }, fill));
             ToolUi.Add(stack, card);
 
@@ -223,6 +231,8 @@ namespace C3DProTools
             ToolUi.Wide(part, _rbChosenSize);
             ToolUi.Wide(part, _parPart);
             ToolUi.Wide(part, ToolUi.Inline(_chkParFit, new Label { Text = "at their", AutoSize = true, Margin = new Padding(0, 7, 4, 0) }, _cbParFace));
+            ToolUi.Wide(part, _chkParMitre);
+            ToolUi.Wide(part, _chkParConnect);
             _parBoxRow = ToolUi.Inline(new Label { Text = "Box", AutoSize = true, Margin = new Padding(20, 7, 8, 0) }, _txtParBoxL,
                 new Label { Text = "long ×", AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 6, 0) }, _txtParBoxW,
                 new Label { Text = "m wide, centred on each structure, length along its rotation", AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 0, 0) });
@@ -241,6 +251,8 @@ namespace C3DProTools
             ToolUi.Exclusive(_rbOwnSize, _rbChosenSize);
             ToolUi.Exclusive(_rbSameNet, _rbNewNet);
             _cbParFace.Items.AddRange(new object[] { "inner walls", "outer walls", "centres", "box of my size" });
+            _cbSpacing.Items.AddRange(new object[] { "m centre to centre", "m clear between outsides" });
+            _tips.SetToolTip(_cbSpacing, "Clear gap: the pitch is the gap plus the outside size of the first chosen pipe (or of the chosen part).");
             _cbParFace.SelectedIndexChanged += (s, e) => UpdateBoxFields();
             foreach (ParallelPreset p in _s.Presets) _cbPreset.Items.Add(p.Name);
             _cbPreset.SelectedIndexChanged += (s, e) =>
@@ -264,7 +276,7 @@ namespace C3DProTools
             ToolUi.Field(card, "Fit ends to", _cbFitFace);
             ToolUi.Field(card, "Box", ToolUi.Inline(_txtFitBoxL, new Label { Text = "long ×", AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 6, 0) }, _txtFitBoxW,
                 new Label { Text = "m wide", AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 0, 0) }), _tips,
-                "The box is centred on each structure and turned with it: its length runs along the structure's own X axis (the direction its rotation gives), its width across.");
+                "The box is centred on each structure and turned with it, as the part's own sizes lie: its width along the structure's own X axis (the direction its rotation gives), its length across it.");
             ToolUi.Wide(card, _chkFitConnect);
             Button outlines = StyleUi.Secondary("Draw the outlines to check…", (s, e) => DrawFitOutlines());
             _tips.SetToolTip(outlines, "Draws the faces or boxes the chosen pipes' ends would be fitted to as closed polylines, to compare with the structures before fitting.");
@@ -637,6 +649,12 @@ namespace C3DProTools
             _cbParFace.Enabled = _s.ParallelFit;
             _txtParBoxL.Text = ToolUi.Format(_s.ParallelBoxLength);
             _txtParBoxW.Text = ToolUi.Format(_s.ParallelBoxWidth);
+            _chkParMitre.Checked = _s.ParallelMitre;
+            _chkParConnect.Checked = _s.ParallelConnect;
+            _cbSpacing.SelectedIndex = _s.ParallelClearGap ? 1 : 0;
+            _txtMaxSkew.Text = ToolUi.Format(_s.CheckMaxSkew);
+            _txtMaxSpan.Text = ToolUi.Format(_s.CheckMaxSpan);
+            _chkSpanWarn.Checked = _s.CheckSpanWarn;
 
             ApplyConduitSettings();
             _cbFitFace.SelectedIndex = Math.Max(0, Math.Min(3, _s.FitFace));
@@ -684,6 +702,12 @@ namespace C3DProTools
             _s.ParallelFace = _cbParFace.SelectedIndex;
             if (ToolUi.TryNumber(_txtParBoxL, out double pl) && pl > 0) _s.ParallelBoxLength = pl;
             if (ToolUi.TryNumber(_txtParBoxW, out double pw) && pw > 0) _s.ParallelBoxWidth = pw;
+            _s.ParallelMitre = _chkParMitre.Checked;
+            _s.ParallelConnect = _chkParConnect.Checked;
+            _s.ParallelClearGap = _cbSpacing.SelectedIndex == 1;
+            if (ToolUi.TryNumber(_txtMaxSkew, out double skew) && skew >= 0 && skew < 90) _s.CheckMaxSkew = skew;
+            if (ToolUi.TryNumber(_txtMaxSpan, out double span) && span >= 0) _s.CheckMaxSpan = span;
+            _s.CheckSpanWarn = _chkSpanWarn.Checked;
             SaveConduitSettings();
             _s.FitFace = _cbFitFace.SelectedIndex;
             _s.FitConnect = _chkFitConnect.Checked;
@@ -711,9 +735,117 @@ namespace C3DProTools
         private void FillGrid()
         {
             if (!ToolUi.TryNumber(_txtSpX, out double sx) || !ToolUi.TryNumber(_txtSpZ, out double sz)) { MessageBox.Show(this, "Enter the spacing as numbers.", Text); return; }
-            string Centred(int n, double spacing) => string.Join(", ", Enumerable.Range(0, n).Select(i => ToolUi.Format((i - (n - 1) / 2.0) * spacing)));
-            _txtH.Text = Centred((int)_numCols.Value, sx);
-            _txtV.Text = Centred((int)_numRows.Value, sz);
+            bool clearGap = _cbSpacing.SelectedIndex == 1;
+            double width = 0, height = 0;
+            if (clearGap && !CopyOutside(out width, out height))
+            {
+                MessageBox.Show(this, "Choose a pipe (or the part for the copies) first: a clear gap is measured between the copies' outsides.", Text);
+                return;
+            }
+            (List<double> h, List<double> v) = PlanGeometry.ArrayOffsets((int)_numCols.Value, (int)_numRows.Value,
+                PlanGeometry.Pitch(sx, width, clearGap), PlanGeometry.Pitch(sz, height, clearGap));
+            _txtH.Text = string.Join(", ", h.Select(ToolUi.Format));
+            _txtV.Text = string.Join(", ", v.Select(ToolUi.Format));
+        }
+
+        /// <summary>The copies' outside width and height: the chosen part's, else the first chosen gravity pipe's.</summary>
+        private bool CopyOutside(out double width, out double height)
+        {
+            width = height = 0;
+            if (_rbChosenSize.Checked && _parPart.Pick is PartPick pick && pick.InnerHeight > 0)
+            {
+                width = height = pick.InnerHeight + 2 * Math.Max(0, pick.Wall);
+                return true;
+            }
+            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
+            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+                foreach (ObjectId id in _pipes)
+                {
+                    if (id.IsErased) continue;
+                    if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) { width = CoverRoute.OuterWidthOf(p); height = CoverRoute.OuterHeightOf(p); return width > 0; }
+                    if (tr.GetObject(id, OpenMode.ForRead) is PressurePipe pp) { width = height = pp.OuterDiameter; return width > 0; }
+                }
+            return false;
+        }
+
+        // =====================================================================================
+        // Chambers and spans
+        // =====================================================================================
+
+        private Control BuildChecks()
+        {
+            (Panel host, TableLayoutPanel stack) = ToolUi.Page();
+            TableLayoutPanel card = ToolUi.Card("Rectangular chambers",
+                "Every rectangular structure the chosen pipes meet is checked: a pipe should enter through one of the narrow walls (the two shorter faces), " +
+                "square to it. A chamber with one pipe, or two running straight through, can be turned so its narrow walls sit square to the pipe.");
+            ToolUi.Field(card, "Off square allowed", ToolUi.WithUnit(_txtMaxSkew, "°"));
+            ToolUi.Wide(card, ToolUi.Note("Turning a chamber moves its walls: fit the pipe ends again afterwards (Fit to structures)."));
+            ToolUi.Add(stack, card);
+
+            TableLayoutPanel spans = ToolUi.Card("Spans", "Structure-to-structure lengths (centre to centre; pipes joined with no structure between them count as one span) " +
+                "in the chosen pipes' networks, for the pipes chosen and the spans next to their structures.");
+            ToolUi.Field(spans, "Longest span", ToolUi.WithUnit(_txtMaxSpan, "m (0 = no check)"));
+            ToolUi.Wide(spans, _chkSpanWarn);
+            ToolUi.Add(stack, spans);
+            return host;
+        }
+
+        private bool CheckLimits(out double skew, out double span)
+        {
+            span = 0;
+            if (!ToolUi.TryNumber(_txtMaxSkew, out skew) || skew < 0 || skew >= 90 || !ToolUi.TryNumber(_txtMaxSpan, out span) || span < 0)
+            {
+                MessageBox.Show(this, "Enter the angle off square (0 to 90°) and the longest span (0 or more).", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>A warning about long spans around these pipes, when asked for on the Chambers and spans page ("" otherwise).</summary>
+        private string SpanWarning(IEnumerable<ObjectId> pipes)
+        {
+            if (!_chkSpanWarn.Checked || !ToolUi.TryNumber(_txtMaxSpan, out double span) || span <= 0) return "";
+            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
+            try
+            {
+                using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+                    return NetworkChecks.SpanWarning(tr, pipes.Where(id => !id.IsErased).ToList(), span);
+            }
+            catch (Exception ex) { return "The spans could not be checked: " + ex.Message; }
+        }
+
+        private void RunChecks()
+        {
+            if (_pipes.Count == 0) { MessageBox.Show(this, "Choose some pipes first.", Text); return; }
+            if (!CheckLimits(out double skew, out double span)) return;
+            List<ChamberEntryIssue> issues;
+            string spans;
+            Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
+            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+            {
+                issues = NetworkChecks.CheckEntries(tr, _pipes.Where(id => !id.IsErased).ToList(), skew);
+                spans = span > 0 ? NetworkChecks.SpanWarning(tr, _pipes.Where(id => !id.IsErased).ToList(), span) : "";
+            }
+            string spanText = spans.Length > 0 ? spans : span > 0 ? $"Every span is within {span:0.00} m." : "";
+            if (issues.Count == 0)
+            {
+                _lblStatus.Text = "No chamber entry problems.";
+                MessageBox.Show(this, ("Every pipe enters its rectangular chamber through a narrow wall, square to it.\n\n" + spanText).Trim(), Text,
+                    MessageBoxButtons.OK, spans.Length > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                return;
+            }
+            List<PreviewRow> rows = issues.Select(i => new PreviewRow
+            {
+                Tag = i, Enabled = i.AlignedRotation.HasValue, Checked = i.AlignedRotation.HasValue,
+                Cells = new[] { i.Structure, i.Pipe, i.Problem,
+                    i.AlignedRotation.HasValue ? $"Turn {i.Rotation * 180 / Math.PI:0.#}° → {i.AlignedRotation.Value * 180 / Math.PI:0.#}°" : "— (not one pipe or straight through)" }
+            }).ToList();
+            string intro = $"{issues.Count} pipe(s) enter a rectangular chamber through a long wall or more than {skew:0.#}° off square. " +
+                           "Ticked chambers are turned so their narrow walls sit square to the pipe." + (spanText.Length > 0 ? "\n\n" + spanText : "");
+            if (!Confirm("Chambers and spans", intro, new[] { "Structure", "Pipe", "Problem", "Fix" }, rows, "Turn the ticked chambers")) return;
+            List<ChamberEntryIssue> chosen = rows.Select(r => (ChamberEntryIssue)r.Tag).ToList();
+            NetworkEditOps.Counts c = Change((tr, ed) => new NetworkEditOps.Counts { Done = NetworkChecks.AlignChambers(tr, chosen) });
+            Report($"Turned {c.Done} chamber(s) square to their pipes.", c, "Fit the pipe ends to the turned chambers' walls with Fit to structures.");
         }
 
         // =====================================================================================
@@ -940,6 +1072,7 @@ namespace C3DProTools
                     case AMerge: RunMerge(); break;
                     case ASwap: RunSwap(); break;
                     case AGravity: RunGravity(); break;
+                    case AChecks: RunChecks(); break;
                 }
             }
             catch (System.Exception ex)
@@ -1051,7 +1184,8 @@ namespace C3DProTools
 
             List<NetworkEditOps.SplitPlan> chosen = rows.Select(r => (NetworkEditOps.SplitPlan)r.Tag).ToList();
             NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplySplit(tr, chosen, _chkSplitStructure.Checked ? _splitPart.Pick : null, ed));
-            Report($"Split {c.Done} pipe(s) into {c.Done + c.Created} pieces.", c, c.Structures > 0 ? $"Structures added: {c.Structures}" : "");
+            string spanWarning = SpanWarning(chosen.Select(p => p.PipeId).Concat(c.NewIds));
+            Report($"Split {c.Done} pipe(s) into {c.Done + c.Created} pieces.", c, ((c.Structures > 0 ? $"Structures added: {c.Structures}\n" : "") + spanWarning).Trim());
         }
 
         private void RunParallel()
@@ -1069,7 +1203,8 @@ namespace C3DProTools
                 Horizontal = h, Vertical = v, SameNetwork = _rbSameNet.Checked, NewNetworkName = string.IsNullOrWhiteSpace(_txtNewNet.Text) ? "Parallel copies" : _txtNewNet.Text.Trim(),
                 Part = _rbChosenSize.Checked ? _parPart.Pick : null,
                 PartsListId = _rbChosenSize.Checked && _parPart.Pick != null ? _parPart.Pick.PartsListId : ObjectId.Null,
-                FitToStructures = _chkParFit.Checked, Face = _cbParFace.SelectedIndex == 3 ? StructureFace.InnerWall : (StructureFace)Math.Max(0, _cbParFace.SelectedIndex)
+                FitToStructures = _chkParFit.Checked, Face = _cbParFace.SelectedIndex == 3 ? StructureFace.InnerWall : (StructureFace)Math.Max(0, _cbParFace.SelectedIndex),
+                Mitre = _chkParMitre.Checked, ConnectToStructures = _chkParConnect.Checked
             };
             if (_chkParFit.Checked && _cbParFace.SelectedIndex == 3)
             {
@@ -1080,7 +1215,7 @@ namespace C3DProTools
                                       (o.SameNetwork ? " in their own networks?" : $" in the new network \"{o.NewNetworkName}\"?"), Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
             NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplyParallel(tr, CivilApplication.ActiveDocument, acDoc.Database, new List<ObjectId>(_pipes), o, ed));
-            Report($"Created {c.Created} copies of {c.Done} pipe(s).", c);
+            Report($"Created {c.Created} copies of {c.Done} pipe(s).", c, c.Joined > 0 ? $"Copy ends connected to structures: {c.Joined}" : "");
         }
 
         /// <summary>The fit chosen on the page: the face, and the box (length, width; 0 = each structure's own size). False when the box is not valid.</summary>
@@ -1125,6 +1260,7 @@ namespace C3DProTools
             NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplyFit(tr, chosen, ed));
             string extra = (c.Structures > 0 ? $"Loose ends connected: {c.Structures}\n" : "") +
                            (c.Unconnected > 0 ? $"Ends left unconnected (fitted outside their structure's own size): {c.Unconnected}; see the command line." : "");
+            extra += "\n" + SpanWarning(gravity);
             Report($"Fitted {c.Done} pipe(s) to {what}.", c, extra.Trim());
         }
 

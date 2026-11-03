@@ -22,6 +22,19 @@ namespace C3DProTools
         public Point2d Center;
         public bool Clockwise;
 
+        /// <summary>The point a fraction <paramref name="t"/> of the way along the piece in plan (Z interpolated by length).</summary>
+        public Point3d At(double t)
+        {
+            double z = A.Z + (B.Z - A.Z) * t;
+            if (!Curved) return new Point3d(A.X + (B.X - A.X) * t, A.Y + (B.Y - A.Y) * t, z);
+            Vector2d r = new Point2d(A.X, A.Y) - Center;
+            double a = Math.Atan2(r.Y, r.X) + (Clockwise ? -1 : 1) * Sweep * t;
+            return new Point3d(Center.X + r.Length * Math.Cos(a), Center.Y + r.Length * Math.Sin(a), z);
+        }
+
+        /// <summary>The same arc (or line) from <paramref name="a"/> to <paramref name="b"/>, two points on it in order.</summary>
+        public LinePiece Between(Point3d a, Point3d b) => new LinePiece { A = a, B = b, Curved = Curved, Center = Center, Clockwise = Clockwise };
+
         public double PlanLength => Curved ? (new Point2d(A.X, A.Y) - Center).Length * Sweep : new Point2d(A.X, A.Y).GetDistanceTo(new Point2d(B.X, B.Y));
 
         /// <summary>The arc's turn in radians (0 for a straight piece).</summary>
@@ -59,8 +72,18 @@ namespace C3DProTools
         public double MinLength = 0.05;
         /// <summary>Straight pipes longer than this are split into equal parts (0 = no limit).</summary>
         public double MaxLength;
-        /// <summary>Pipes run from the line's higher end down, instead of the way the line was drawn.</summary>
+        /// <summary>
+        /// Pipes run downhill, instead of the way the line was drawn: the line's overall fall decides (its grade over the whole
+        /// length, each stretch weighted by its length), not only its two ends.
+        /// </summary>
         public bool Downhill;
+        /// <summary>
+        /// An arc whose elevation points (or, with levels from a surface, whose ground) are more than this off one constant grade
+        /// is split into curved pipes at those points, so no elevation control is lost (m).
+        /// </summary>
+        public double ArcGradeTolerance = 0.005;
+        /// <summary>A line end lying on a pipe of the network away from its ends (no structure there): reported, or that pipe is split there.</summary>
+        public bool SplitPipeMetMidSpan;
         /// <summary>Structure at every joint between two pipes of a line / at both ends of a line; null = none.</summary>
         public PartPick Joint, Ends;
         /// <summary>An end lying inside a structure already in the target network is connected to it.</summary>
@@ -87,6 +110,8 @@ namespace C3DProTools
     internal sealed class LineNetworkResult
     {
         public int Networks, Lines, Pipes, Structures, Connected, Failed, Erased;
+        /// <summary>Pipes of the network split where a line ended on them mid-span.</summary>
+        public int Split;
         /// <summary>Arcs Civil 3D would not take as one curved pipe, drawn as straight pipes along them instead.</summary>
         public int Chorded;
         public readonly List<string> FailedLines = new List<string>();
@@ -96,7 +121,7 @@ namespace C3DProTools
 
     /// <summary>
     /// Gravity networks from feature lines (and 3D polylines / polylines): every straight span between two points becomes a
-    /// pipe, every arc between two PIs one curved pipe (elevation points on an arc are ignored). Elevations are the line's Z
+    /// pipe, every arc between two PIs one curved pipe (split at elevation points that leave its grade). Elevations are the line's Z
     /// or a surface's less a depth, taken as the pipe's centre, invert, inner top, outer top or outer bottom.
     /// </summary>
     internal static class NetworkFromLines
@@ -121,14 +146,18 @@ namespace C3DProTools
         // =====================================================================================
 
         /// <summary>The line as spans at its own elevations, or null with the reason.</summary>
-        public static List<LinePiece> Read(Transaction tr, ObjectId id, out string error)
+        public static List<LinePiece> Read(Transaction tr, ObjectId id, out string error) => Read(tr, id, double.PositiveInfinity, out error, out _);
+
+        /// <summary>The line's spans; feature line arcs whose elevation points leave one grade by more than the tolerance are split at them.</summary>
+        public static List<LinePiece> Read(Transaction tr, ObjectId id, double arcGradeTolerance, out string error, out int splitArcs)
         {
             error = null;
+            splitArcs = 0;
             List<LinePiece> spans = new List<LinePiece>();
             try
             {
                 DBObject obj = tr.GetObject(id, OpenMode.ForRead);
-                if (obj is FeatureLine fl) ReadFeatureLine(fl, spans);
+                if (obj is FeatureLine fl) ReadFeatureLine(fl, spans, arcGradeTolerance, ref splitArcs);
                 else if (obj is Polyline pl) ReadPolyline(pl, spans);
                 else if (obj is Polyline3d p3) ReadPolyline3d(tr, p3, spans);
                 else { error = "Not a feature line or polyline."; return null; }
@@ -146,7 +175,7 @@ namespace C3DProTools
         /// elevation point splits an arc, and the first half-way point alone lies almost on the chord when an elevation point
         /// sits close to the PI).
         /// </summary>
-        private static void ReadFeatureLine(FeatureLine fl, List<LinePiece> spans)
+        private static void ReadFeatureLine(FeatureLine fl, List<LinePiece> spans, double arcGradeTolerance, ref int splitArcs)
         {
             Point3d[] all = fl.GetPoints(FeatureLinePointType.AllPoints).Cast<Point3d>().ToArray();
             Point3d[] pis = fl.GetPoints(FeatureLinePointType.PIPoint).Cast<Point3d>().ToArray();
@@ -168,7 +197,18 @@ namespace C3DProTools
                         if (off > far) { far = off; mid = q; }
                     }
                 if (TryArc(all[a], mid, all[b], out Point2d center, out bool clockwise))
-                    spans.Add(new LinePiece { A = all[a], B = all[b], Curved = true, Center = center, Clockwise = clockwise });
+                {
+                    LinePiece arc = new LinePiece { A = all[a], B = all[b], Curved = true, Center = center, Clockwise = clockwise };
+                    // Elevation points on the arc off its one grade: a curved pipe from each to the next, so none is lost.
+                    List<(double S, double Z)> grade = new List<(double S, double Z)>();
+                    for (int k = a; k <= b; k++) grade.Add((k == a ? 0 : arc.Between(all[a], all[k]).PlanLength, all[k].Z));
+                    if (b - a > 1 && PlanGeometry.GradeDeviation(grade) > arcGradeTolerance)
+                    {
+                        for (int k = a; k < b; k++) spans.Add(arc.Between(all[k], all[k + 1]));
+                        splitArcs++;
+                    }
+                    else spans.Add(arc);
+                }
                 else
                     for (int k = a; k < b; k++) spans.Add(new LinePiece { A = all[k], B = all[k + 1] });
                 a = b;
@@ -250,8 +290,9 @@ namespace C3DProTools
             row.Pieces = new List<LinePiece>();
             row.Error = null;
             row.Notes.Clear();
-            List<LinePiece> spans = Read(tr, row.SourceId, out string error);
+            List<LinePiece> spans = Read(tr, row.SourceId, o.ArcGradeTolerance, out string error, out int splitArcs);
             if (spans == null) { row.Error = error; return; }
+            if (splitArcs > 0) row.Notes.Add($"{splitArcs} arc(s) split at their elevation points");
 
             if (o.MaxLength > 0) spans = spans.SelectMany(s => SplitLong(s, o.MaxLength)).ToList();
 
@@ -266,6 +307,25 @@ namespace C3DProTools
                     if (double.IsNaN(g)) { missed++; return p; }
                     return new Point3d(p.X, p.Y, g - o.Depth);
                 }
+                // An arc over uneven ground is split where the ground leaves one grade, so it follows the surface like straight spans do.
+                int groundArcs = 0;
+                spans = spans.SelectMany(s =>
+                {
+                    if (!s.Curved) return new[] { s };
+                    int n = Math.Max(2, Math.Min(64, (int)Math.Ceiling(s.PlanLength / ArcSurfaceStep)));
+                    List<Point3d> pts = Enumerable.Range(0, n + 1).Select(i => s.At((double)i / n)).ToList();
+                    List<(double S, double Z)> ground = new List<(double S, double Z)>();
+                    for (int i = 0; i <= n; i++)
+                    {
+                        double g = CoverRoute.GroundAt(surface, pts[i].X, pts[i].Y);
+                        if (double.IsNaN(g)) return new[] { s };
+                        ground.Add((s.PlanLength * i / n, g));
+                    }
+                    if (PlanGeometry.GradeDeviation(ground) <= o.ArcGradeTolerance) return new[] { s };
+                    groundArcs++;
+                    return Enumerable.Range(0, n).Select(i => s.Between(pts[i], pts[i + 1])).ToArray();
+                }).ToList();
+                if (groundArcs > 0) row.Notes.Add($"{groundArcs} arc(s) split to follow the surface");
                 foreach (LinePiece s in spans) { s.A = Drop(s.A); s.B = Drop(s.B); }
                 if (missed > 0) { row.Error = $"{missed} point(s) lie outside the surface."; return; }
             }
@@ -274,17 +334,37 @@ namespace C3DProTools
             spans = MergeShort(spans, o.MinLength, out int shortArcs);
             if (shortArcs > 0) row.Notes.Add($"{shortArcs} arc(s) shorter than {ToolUi.Format(o.MinLength)} m kept");
 
-            if (o.Downhill && spans[0].A.Z < spans[spans.Count - 1].B.Z)
+            if (o.Downhill && OverallGrade(spans) > 0)
             {
+                bool endsDisagree = spans[0].A.Z >= spans[spans.Count - 1].B.Z;
                 spans.Reverse();
                 spans = spans.Select(s => s.Reversed()).ToList();
-                row.Notes.Add("reversed to run downhill");
+                row.Notes.Add(endsDisagree ? "reversed to run downhill (by its overall fall; its ends alone say otherwise)" : "reversed to run downhill");
             }
             int flat = spans.Count(s => Math.Abs(s.Slope) < 0.001);
             int rising = spans.Count(s => s.Slope >= 0.001);
             if (flat > 0) row.Notes.Add($"{flat} flat pipe(s)");
             if (rising > 0 && rising < spans.Count) row.Notes.Add($"{rising} pipe(s) rise along the flow");
             row.Pieces = spans;
+        }
+
+        /// <summary>A surface arc is checked against the ground about this often (m).</summary>
+        private const double ArcSurfaceStep = 5.0;
+
+        /// <summary>The line's overall grade (rise per metre, + = rising in the drawn direction), weighted by length.</summary>
+        public static double OverallGrade(List<LinePiece> spans)
+        {
+            List<(double S, double Z)> profile = new List<(double S, double Z)> { (0, spans[0].A.Z) };
+            double s = 0;
+            foreach (LinePiece p in spans)
+            {
+                if (p.PlanLength < SamePoint) continue;
+                // A jump in level between pieces (none in a line, but kept honest) counts at its station.
+                if (Math.Abs(profile[profile.Count - 1].Z - p.A.Z) > 1e-9) profile.Add((s, p.A.Z));
+                s += p.PlanLength;
+                profile.Add((s, p.B.Z));
+            }
+            return PlanGeometry.TrendSlope(profile);
         }
 
         private static IEnumerable<LinePiece> SplitLong(LinePiece s, double max)
@@ -459,17 +539,44 @@ namespace C3DProTools
                     (ObjectId ef, ObjectId es) = o.Ends != null ? PartIn(netId, o.Ends) : (ObjectId.Null, ObjectId.Null);
                     if (o.Ends != null && es.IsNull) ed.WriteMessage($"\n[Warning] {o.Ends.Label} could not be put in the parts list of {network.Name}; {row.SourceName} has no end structures.");
                     ObjectId startStructure = ObjectId.Null;
+                    List<(Pipe pipe, bool atStart, NetworkEditOps.SplitPlan plan)> midSpan = new List<(Pipe, bool, NetworkEditOps.SplitPlan)>();
                     foreach (bool atStart in new[] { true, false })
                     {
                         (Pipe p, LinePiece piece) = atStart ? pipes[0] : pipes[pipes.Count - 1];
                         Point3d at = atStart ? p.StartPoint : p.EndPoint;
                         ObjectId sid = At(at)?.Id ?? ObjectId.Null;
                         if (!sid.IsNull) connected++;
+                        else if (MidSpan(tr, network, madeIds, at) is NetworkEditOps.SplitPlan met)
+                        {
+                            // On a pipe of the network, away from its ends: a junction there (made last), or reported.
+                            Pipe other = (Pipe)tr.GetObject(met.PipeId, OpenMode.ForRead);
+                            PartPick junction = o.Joint ?? o.Ends;
+                            if (o.SplitPipeMetMidSpan && junction != null) { midSpan.Add((p, atStart, met)); continue; }
+                            string why = o.SplitPipeMetMidSpan ? " (choose a joint or end structure to split it there)" : "";
+                            string note = $"{row.SourceName}: its {(atStart ? "start" : "end")} lies on pipe {other.Name} mid-span; not connected{why}.";
+                            ed.WriteMessage($"\n[Note] {note}");
+                            result.Log.Add(note);
+                            if (!es.IsNull) sid = Add(ef, es, at, piece, p);
+                        }
                         else if (!es.IsNull) sid = Add(ef, es, at, piece, p);
                         // Civil 3D refuses both ends of one pipe at the same structure.
                         if (sid.IsNull || (!atStart && pipes.Count == 1 && sid == startStructure)) continue;
                         CoverApply.Connect(p, true, atStart, sid, ed);
                         if (atStart) startStructure = sid;
+                    }
+
+                    // Last, once the line is made: the pipes met mid-span are split, with a junction structure their ends connect to.
+                    foreach ((Pipe p, bool atStart, NetworkEditOps.SplitPlan plan) in midSpan)
+                    {
+                        Point3d at = plan.Points[0];
+                        NetworkEditOps.Counts c = NetworkEditOps.ApplySplit(tr, new List<NetworkEditOps.SplitPlan> { plan }, o.Joint ?? o.Ends, ed);
+                        ObjectId sid = JunctionAt(tr, plan.PipeId, at);
+                        if (c.Failed > 0 || sid.IsNull) { result.Log.Add($"{row.SourceName}: pipe {plan.Name} could not be split for a junction."); continue; }
+                        structures += c.Structures;
+                        inNetwork[netId].Add(StructureFootprint.Of((Structure)tr.GetObject(sid, OpenMode.ForRead)));
+                        CoverApply.Connect(p, true, atStart, sid, ed);
+                        result.Log.Add($"{row.SourceName}: pipe {plan.Name} split, and joined at a new structure where the line meets it.");
+                        result.Split++;
                     }
 
                     if (o.EraseSource)
@@ -500,6 +607,28 @@ namespace C3DProTools
                 }
             }
             return result;
+        }
+
+        /// <summary>How close (m, in plan) a line end must be to a pipe to count as meeting it.</summary>
+        private const double MidSpanTolerance = 0.05;
+
+        /// <summary>The split that would put a junction where <paramref name="at"/> meets a pipe of the network mid-span (not one made now), or null.</summary>
+        private static NetworkEditOps.SplitPlan MidSpan(Transaction tr, Network network, List<ObjectId> made, Point3d at)
+        {
+            List<ObjectId> candidates = network.GetPipeIds().Cast<ObjectId>().Where(id => !made.Contains(id)).ToList();
+            if (candidates.Count == 0) return null;
+            List<NetworkEditOps.SplitPlan> plans = NetworkEditOps.PlanSplitAtPoints(tr, candidates, new List<Point3d> { at }, MidSpanTolerance, out _);
+            return plans.Count == 1 && plans[0].Points.Count == 1 ? plans[0] : null;
+        }
+
+        /// <summary>The structure the split pipe now has at the split point (it ends there, or starts there for a curved one).</summary>
+        private static ObjectId JunctionAt(Transaction tr, ObjectId pipeId, Point3d at)
+        {
+            Pipe pipe = (Pipe)tr.GetObject(pipeId, OpenMode.ForRead);
+            foreach (ObjectId sid in new[] { pipe.EndStructureId, pipe.StartStructureId })
+                if (!sid.IsNull && tr.GetObject(sid, OpenMode.ForRead) is Structure st &&
+                    new Point2d(st.Location.X, st.Location.Y).GetDistanceTo(new Point2d(at.X, at.Y)) < 0.01) return sid;
+            return ObjectId.Null;
         }
 
         private const double ChordSagitta = 0.01;

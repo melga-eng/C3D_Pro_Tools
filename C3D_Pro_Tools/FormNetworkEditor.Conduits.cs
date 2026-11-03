@@ -329,7 +329,9 @@ namespace C3DProTools
             {
                 Horizontal = l.HorizontalOffsets(), Vertical = l.VerticalOffsets(), IncludeSource = true, FromBottom = l.FromBottom,
                 SameNetwork = _rbConSameNet.Checked, NewNetworkName = string.IsNullOrWhiteSpace(_txtConNet.Text) ? "Conduits" : _txtConNet.Text.Trim(),
-                Part = pick, PartsListId = pick.PartsListId
+                Part = pick, PartsListId = pick.PartsListId,
+                // Conduits stay unconnected as before; at joints without a structure they meet at a mitre.
+                ConnectToStructures = false
             };
             Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
             NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplyParallel(tr, CivilApplication.ActiveDocument, acDoc.Database, encasements, o, ed));

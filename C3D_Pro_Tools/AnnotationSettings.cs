@@ -30,6 +30,8 @@ namespace C3DProTools
         public bool SlideOnPipe { get; set; }
         public int ArrangeTarget { get; set; } = 1;
         public bool AvoidModelText { get; set; } = true;
+        public bool AvoidXrefs { get; set; } = true;
+        public bool MaskArranged { get; set; }
 
         // Names
         public NamingOptions Naming { get; set; } = new NamingOptions();

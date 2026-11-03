@@ -357,13 +357,14 @@ namespace C3DProTools
         /// stretch where its outside overlaps the route's in plan. A pipe merely alongside, closer than the rules' horizontal
         /// clearance, is reported in <see cref="CoverRoute.Proximities"/> (or cleared too, when the rules say so). Pipes
         /// meeting one of the route's structures are branches there: left out inside the structure and its collar.
-        /// Each crossing gets its utility class, the clearance the rules give for the pair, and encasement padding.
+        /// Each crossing gets its utility class and the clearance the rules give for the pair; the other pipe's encasement is
+        /// added to its outside (the route's own is already in its sections, <see cref="ApplyEncasement"/>), so the clearance is
+        /// kept envelope to envelope.
         /// </summary>
         public void FindCrossings(Transaction tr, Autodesk.Civil.ApplicationServices.CivilDocument doc, HashSet<ObjectId> exclude, CoverRules rules, double flatClearance)
         {
             rules = rules ?? new CoverRules();
             double horizontalClearance = Math.Max(0, rules.HorizontalClearance);
-            double routePadding = rules.PaddingFor(Class);
             // The route's structures and their footprints: around them, a pipe meeting them is a branch, not a crossing.
             Dictionary<ObjectId, StructureFootprint> footprints = new Dictionary<ObjectId, StructureFootprint>();
             foreach (RouteStructure rs in Structures)
@@ -427,14 +428,14 @@ namespace C3DProTools
             }
 
             // Only pipes coming within reach of the route's extents need a closer look.
-            double margin = 5 + widest + routePadding + horizontalClearance;
+            double margin = 5 + widest + horizontalClearance;
             others = others.FindAll(o => o.path.Exists(q => q.X >= minX - margin - o.halfWidth && q.X <= maxX + margin + o.halfWidth && q.Y >= minY - margin - o.halfWidth && q.Y <= maxY + margin + o.halfWidth));
             // Inside a route structure the pipe meets (and its collar), the pipe is a branch there, not a crossing.
             bool AtBranch(List<StructureFootprint> branchOf, double x, double y) =>
                 branchOf.Count > 0 && branchOf.Exists(f => f.Contains(new Point3d(x, y, 0), rules.StructureCollar));
-            // The clearance kept to a pipe: the rules' value for the pair, plus the route's own encasement.
+            // The clearance kept to a pipe: the rules' value for the pair, outside of encasement to outside of encasement.
             RouteCrossing NewCrossing(ObjectId id, string name, UtilityClass cls) =>
-                new RouteCrossing { PipeId = id, Name = name, Class = cls, Clearance = rules.ClearanceBetween(Class, cls, flatClearance) + routePadding };
+                new RouteCrossing { PipeId = id, Name = name, Class = cls, Clearance = rules.ClearanceBetween(Class, cls, flatClearance) };
 
             // 1. Where the centrelines cross in plan, at any angle (shallow-skew crossings were once skipped as running alongside).
             foreach ((ObjectId id, string name, List<Point3d> path, double halfHeight, double _, UtilityClass cls, List<StructureFootprint> branchOf) in others)
@@ -500,7 +501,7 @@ namespace C3DProTools
             {
                 List<RouteCrossing> ofThisPipe = Crossings.FindAll(c => c.PipeId == id);
                 MarkCrossingBands(plan, path.ConvertAll(q => (q.X, q.Y, q.Z)), halfWidth, halfHeight, horizontalClearance, ofThisPipe,
-                    () => NewCrossing(id, name, cls), rules.EnforceVerticalOnParallel, routePadding,
+                    () => NewCrossing(id, name, cls), rules.EnforceVerticalOnParallel,
                     branchOf.Count == 0 ? null : (Func<int, bool>)(r => AtBranch(branchOf, plan[r].X, plan[r].Y)), name);
             }
             Crossings.Sort((a, b) => a.S.CompareTo(b.S));

@@ -26,6 +26,10 @@ namespace C3DProTools
         /// <summary>The labels that may move (null = all); the others stay where they are and only count as obstacles.</summary>
         public HashSet<ObjectId> Only;
         public bool AvoidModelText = true;
+        /// <summary>Linework and text of loaded xrefs (and the blocks in them) count as obstacles too.</summary>
+        public bool AvoidXrefs = true;
+        /// <summary>How far past a viewport's edge (paper mm, through its scale) obstacles are gathered.</summary>
+        public double NearMarginMm = 20;
         public bool Plan = true, Profile = true;
     }
 
@@ -56,8 +60,84 @@ namespace C3DProTools
         public readonly List<(Point3d a, Point3d b, ObjectId part)> PipeSegments = new List<(Point3d, Point3d, ObjectId)>();
         public readonly List<(Point3d[] corners, ObjectId part)> Structures = new List<(Point3d[], ObjectId)>();
         public readonly List<Point3d[]> Texts = new List<Point3d[]>();
+        /// <summary>Linework and text boxes of loaded xrefs, in the host drawing's coordinates.</summary>
+        public readonly List<(Point3d a, Point3d b)> XrefSegments = new List<(Point3d, Point3d)>();
+        public readonly List<Point3d[]> XrefTexts = new List<Point3d[]>();
+        /// <summary>Most xref items read, so a huge background drawing cannot stall the arranger.</summary>
+        private const int MaxXrefItems = 200000;
         /// <summary>Per profile view: its whole box, its band area below the graph, and the parts drawn in it.</summary>
         public readonly Dictionary<ObjectId, ProfileArea> Profiles = new Dictionary<ObjectId, ProfileArea>();
+
+        private static bool Hidden(Transaction tr, ObjectId layerId)
+        {
+            try { return tr.GetObject(layerId, OpenMode.ForRead) is LayerTableRecord l && (l.IsOff || l.IsFrozen); }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>
+        /// The visible linework and text of a loaded xref (an insert at depth 0 must be an xref; blocks inside it are read too,
+        /// two levels down), moved into the host drawing by <paramref name="xf"/>.
+        /// </summary>
+        private void ReadXref(Transaction tr, BlockReference br, Matrix3d xf, int depth)
+        {
+            if (depth > 2 || !(tr.GetObject(br.BlockTableRecord, OpenMode.ForRead) is BlockTableRecord btr)) return;
+            if (depth == 0 && (!btr.IsFromExternalReference || !btr.IsResolved)) return;
+            if (Hidden(tr, br.LayerId)) return;
+            foreach (ObjectId id in btr)
+            {
+                if (XrefSegments.Count + XrefTexts.Count > MaxXrefItems) return;
+                if (!(tr.GetObject(id, OpenMode.ForRead) is Entity e) || !e.Visible || Hidden(tr, e.LayerId)) continue;
+                try
+                {
+                    switch (e)
+                    {
+                        case Line l:
+                            XrefSegments.Add((l.StartPoint.TransformBy(xf), l.EndPoint.TransformBy(xf)));
+                            break;
+                        case Polyline pl:
+                        {
+                            int n = pl.NumberOfVertices, count = pl.Closed ? n : n - 1;
+                            for (int i = 0; i < count; i++)
+                            {
+                                Point3d a = pl.GetPoint3dAt(i), b = pl.GetPoint3dAt((i + 1) % n);
+                                Point3d prev = a;
+                                foreach ((double X, double Y) q in PlanGeometry.ArcPoints(a.X, a.Y, b.X, b.Y, pl.GetBulgeAt(i), 0.1, 32))
+                                {
+                                    Point3d next = new Point3d(q.X, q.Y, a.Z);
+                                    XrefSegments.Add((prev.TransformBy(xf), next.TransformBy(xf)));
+                                    prev = next;
+                                }
+                            }
+                            break;
+                        }
+                        case MText mt:
+                            XrefTexts.Add(mt.GetBoundingPoints().Cast<Point3d>().Select(p => p.TransformBy(xf)).ToArray());
+                            break;
+                        case DBText _:
+                            XrefTexts.Add(Corners(e.GeometricExtents).Select(p => p.TransformBy(xf)).ToArray());
+                            break;
+                        case BlockReference inner:
+                            ReadXref(tr, inner, xf * inner.BlockTransform, depth + 1);
+                            break;
+                        case Curve c:
+                        {
+                            // Arcs, circles, splines, 2D / 3D polylines: sampled along their parameter.
+                            double p0 = c.StartParam, p1 = c.EndParam;
+                            int n = c is Polyline2d || c is Polyline3d ? Math.Max(1, (int)Math.Round(p1 - p0)) * 4 : 32;
+                            Point3d prev = c.GetPointAtParameter(p0);
+                            for (int i = 1; i <= n; i++)
+                            {
+                                Point3d next = c.GetPointAtParameter(p0 + (p1 - p0) * i / n);
+                                XrefSegments.Add((prev.TransformBy(xf), next.TransformBy(xf)));
+                                prev = next;
+                            }
+                            break;
+                        }
+                    }
+                }
+                catch (Exception) { }
+            }
+        }
 
         internal sealed class ProfileArea
         {
@@ -66,9 +146,16 @@ namespace C3DProTools
             public readonly List<Point3d[]> Boxes = new List<Point3d[]>();
         }
 
-        public static AnnotScene Read(Transaction tr, Database db, CivilDocument doc, bool texts, bool profiles)
+        public static AnnotScene Read(Transaction tr, Database db, CivilDocument doc, bool texts, bool profiles, bool xrefs = false)
         {
             AnnotScene s = new AnnotScene();
+            if (xrefs)
+            {
+                BlockTableRecord space = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+                foreach (ObjectId id in space)
+                    if (id.ObjectClass.DxfName == "INSERT" && tr.GetObject(id, OpenMode.ForRead) is BlockReference br && br.Visible)
+                        try { s.ReadXref(tr, br, br.BlockTransform, 0); } catch (Exception) { }
+            }
             List<(Pipe pipe, ObjectIdCollection views)> profilePipes = new List<(Pipe, ObjectIdCollection)>();
             List<(Structure st, ObjectIdCollection views)> profileStructures = new List<(Structure, ObjectIdCollection)>();
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
@@ -262,11 +349,22 @@ namespace C3DProTools
 
             // ---- Obstacles on this sheet ----
             List<(Point2d a, Point2d b)> segs = new List<(Point2d, Point2d)>();
+            List<string> segKinds = new List<string>();
             List<Box2> boxes = new List<Box2>(paper);
             List<string> boxKinds = paper.Select(_ => "sheet text").ToList();
-            bool Near(Point3d p) => p.X >= v.ModelBox.MinPoint.X - 20 && p.X <= v.ModelBox.MaxPoint.X + 20 && p.Y >= v.ModelBox.MinPoint.Y - 20 && p.Y <= v.ModelBox.MaxPoint.Y + 20;
+            // Obstacles are gathered a little past the viewport: a set paper distance, in drawing units through its scale.
+            double near = PlanGeometry.PaperToModel(o.NearMarginMm, v.Scale);
+            bool Near(Point3d p) => p.X >= v.ModelBox.MinPoint.X - near && p.X <= v.ModelBox.MaxPoint.X + near && p.Y >= v.ModelBox.MinPoint.Y - near && p.Y <= v.ModelBox.MaxPoint.Y + near;
+            // A segment counts when its own box reaches the area (a long pipe can cross the viewport with both ends far outside).
+            bool NearSegment(Point3d a, Point3d b) =>
+                Math.Max(a.X, b.X) >= v.ModelBox.MinPoint.X - near && Math.Min(a.X, b.X) <= v.ModelBox.MaxPoint.X + near &&
+                Math.Max(a.Y, b.Y) >= v.ModelBox.MinPoint.Y - near && Math.Min(a.Y, b.Y) <= v.ModelBox.MaxPoint.Y + near;
             foreach ((Point3d a, Point3d b, ObjectId _) in scene.PipeSegments)
-                if (Near(a) || Near(b)) { Point2d pa = v.ToPaper(a), pb = v.ToPaper(b); if (vpBox.Hits(pa, pb)) segs.Add((pa, pb)); }
+                if (NearSegment(a, b)) { Point2d pa = v.ToPaper(a), pb = v.ToPaper(b); if (vpBox.Hits(pa, pb)) { segs.Add((pa, pb)); segKinds.Add("pipe"); } }
+            foreach ((Point3d a, Point3d b) in scene.XrefSegments)
+                if (NearSegment(a, b)) { Point2d pa = v.ToPaper(a), pb = v.ToPaper(b); if (vpBox.Hits(pa, pb)) { segs.Add((pa, pb)); segKinds.Add("xref line"); } }
+            foreach (Point3d[] c in scene.XrefTexts)
+                if (c.Length > 0 && Near(c[0])) { Box2 b = ToPaper(v, c); if (b.Overlaps(vpBox)) { boxes.Add(b); boxKinds.Add("xref text"); } }
             foreach ((Point3d[] c, ObjectId _) in scene.Structures)
                 if (Near(c[0])) { Box2 b = ToPaper(v, c); if (b.Overlaps(vpBox)) { boxes.Add(b); boxKinds.Add("structure"); } }
             foreach (Point3d[] c in scene.Texts)
@@ -279,7 +377,7 @@ namespace C3DProTools
                 if (!region.Overlaps(vpBox)) continue;
                 profileRegions[kv.Key] = region;
                 if (kv.Value.Bands != null) { boxes.Add(ToPaper(v, kv.Value.Bands)); boxKinds.Add("profile band"); }
-                foreach ((Point3d a, Point3d b, ObjectId _) in kv.Value.Segments) segs.Add((v.ToPaper(a), v.ToPaper(b)));
+                foreach ((Point3d a, Point3d b, ObjectId _) in kv.Value.Segments) { segs.Add((v.ToPaper(a), v.ToPaper(b))); segKinds.Add("pipe"); }
                 foreach (Point3d[] c in kv.Value.Boxes) { boxes.Add(ToPaper(v, c)); boxKinds.Add("profile structure"); }
             }
 
@@ -365,7 +463,7 @@ namespace C3DProTools
                 if (it.Region != null && !InArea(it, it.Box)) return "Outside its profile view";
                 Box2 g = it.Box.Grow(o.Gap);
                 foreach (int i in grid.Query(g)) if (i != slot[it] && all[i].Overlaps(g)) return "Overlaps a " + kinds[i];
-                if (!it.Slides) foreach (int i in segGrid.Query(g)) if (it.Box.Hits(segs[i].a, segs[i].b)) return "Covers a pipe";
+                if (!it.Slides) foreach (int i in segGrid.Query(g)) if (it.Box.Hits(segs[i].a, segs[i].b)) return "Covers a " + segKinds[i];
                 return "";
             }
             // Labels that are fine where they are (and locked ones) stay, and become obstacles for the rest.

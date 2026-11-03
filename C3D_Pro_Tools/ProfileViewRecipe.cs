@@ -100,6 +100,9 @@ namespace C3DProTools
         public bool CreateMissing { get; set; } = true;
         public OtherProfileAction Others { get; set; } = OtherProfileAction.Hide;
         public double Margin { get; set; } = 1.0;
+        /// <summary>Elevation ranges round outward to whole steps of this (m).</summary>
+        public double DatumIncrement { get; set; } = 1.0;
+        public bool MatchZones { get; set; }
         public string TopPrefix { get; set; } = "TOP - ";
         public bool LinkFollowers { get; set; } = true;
 
@@ -121,6 +124,10 @@ namespace C3DProTools
         public string SplitSheetTemplate { get; set; } = "";
         public string SplitSheetFirstName { get; set; } = "";
         public bool SplitSheetPartTitle { get; set; } = true;
+        public int SplitFirstSheetNo { get; set; } = 1;
+        public bool SplitZones { get; set; }
+        public string ZoneLayers { get; set; } = "";
+        public string ZoneLabel { get; set; } = "Paved";
 
         private static string FilePath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "ProfileViewTools.json");

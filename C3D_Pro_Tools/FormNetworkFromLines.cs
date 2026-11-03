@@ -54,6 +54,7 @@ namespace C3DProTools
         private readonly CheckBox _chkEnds = ToolUi.Check("A structure at both ends of every line");
         private readonly PartChooser _endPart = new PartChooser(DomainType.Structure);
         private readonly CheckBox _chkConnect = ToolUi.Check("Connect ends lying inside a structure already in the network");
+        private readonly CheckBox _chkMidSpan = ToolUi.Check("Split a pipe a line ends on mid-span, with a junction structure there (else it is reported)");
         // Networks
         private readonly RadioButton _rbPerLine = new RadioButton { Text = "One network per line, named", AutoSize = true };
         private readonly RadioButton _rbOne = new RadioButton { Text = "All lines in one network:", AutoSize = true };
@@ -134,12 +135,12 @@ namespace C3DProTools
 
             TableLayoutPanel geo = ToolUi.Card("Pipes along the line",
                 "Every straight span between two points of the line becomes a pipe; every arc becomes one curved pipe from its start to its end " +
-                "(elevation points on an arc are ignored, the pipe keeps one grade).");
+                "(split into curved pipes at elevation points, or ground with levels from a surface, that leave one grade by more than 5 mm).");
             ToolUi.Wide(geo, ToolUi.Inline(_chkMerge, ToolUi.WithUnit(_txtMergeTol, "m")));
             ToolUi.Field(geo, "Shortest pipe", ToolUi.WithUnit(_txtMinLength, "m"), _tips, "A straight span shorter than this joins its straight neighbour.");
             ToolUi.Field(geo, "Longest pipe", ToolUi.WithUnit(_txtMaxLength, "m (0 = no limit)"), _tips,
                 "Straight pipes longer than this are split into equal parts. With levels from a surface, every split point follows the surface.");
-            _cbDirection.Items.AddRange(new object[] { "As the line was drawn", "Downhill (from the higher end)" });
+            _cbDirection.Items.AddRange(new object[] { "As the line was drawn", "Downhill (by the line's overall fall)" });
             ToolUi.Field(geo, "Pipe direction", _cbDirection);
             ToolUi.Add(stack, geo);
 
@@ -153,6 +154,8 @@ namespace C3DProTools
             ToolUi.Wide(st, _chkEnds);
             ToolUi.Wide(st, _endPart);
             ToolUi.Wide(st, _chkConnect, _tips, "When the network already exists: a line end inside one of its structures is connected to that structure (instead of getting a new one).");
+            ToolUi.Wide(st, _chkMidSpan, _tips, "A line end within 50 mm of a pipe of the network, away from that pipe's ends: the pipe is split there and both pieces and the line " +
+                                                 "join at a new structure (the joint structure, else the end structure). Off: the report names each such end.");
             ToolUi.Add(stack, st);
 
             TableLayoutPanel net = ToolUi.Card("Networks",
@@ -273,6 +276,7 @@ namespace C3DProTools
             _chkEnds.Checked = _s.AddEnds;
             _endPart.SetContext(ObjectId.Null, _s.EndList, _s.EndFamily, _s.EndSize);
             _chkConnect.Checked = _s.ConnectExisting;
+            _chkMidSpan.Checked = _s.SplitPipeMetMidSpan;
             _rbOne.Checked = _s.OneNetwork;
             _rbPerLine.Checked = !_s.OneNetwork;
             _txtPrefix.Text = _s.Prefix ?? "";
@@ -298,6 +302,7 @@ namespace C3DProTools
             _s.AddEnds = _chkEnds.Checked;
             _s.EndList = _endPart.ListName; _s.EndFamily = _endPart.FamilyName; _s.EndSize = _endPart.SizeName;
             _s.ConnectExisting = _chkConnect.Checked;
+            _s.SplitPipeMetMidSpan = _chkMidSpan.Checked;
             _s.OneNetwork = _rbOne.Checked;
             _s.Prefix = _txtPrefix.Text;
             _s.NetworkName = _cbOneNetwork.Text;
@@ -405,6 +410,7 @@ namespace C3DProTools
                 Joint = _chkJoints.Checked ? _jointPart.Pick : null,
                 Ends = _chkEnds.Checked ? _endPart.Pick : null,
                 ConnectExisting = _chkConnect.Checked,
+                SplitPipeMetMidSpan = _chkMidSpan.Checked,
                 EraseSource = _chkErase.Checked
             };
             if (o.FromSurface && (!ToolUi.TryNumber(_txtDepth, out o.Depth))) error = "Enter the depth below the surface as a number.";
@@ -537,9 +543,10 @@ namespace C3DProTools
                               (res.Structures > 0 ? $"\nStructures added: {res.Structures}" : "") +
                               (res.Connected > 0 ? $"\nEnds and joints sharing a structure (existing, or made for a line met there): {res.Connected}" : "") +
                               (res.Chorded > 0 ? $"\nArcs Civil 3D would not take as one curved pipe, drawn as straight pipes along the arc: {res.Chorded} (see the command line)" : "") +
+                              (res.Split > 0 ? $"\nPipes split for a line ending on them mid-span: {res.Split}" : "") +
                               (res.Erased > 0 ? $"\nSource lines erased: {res.Erased}" : "") +
                               (res.Failed > 0 ? $"\nFailed, nothing made for them: {string.Join(", ", res.FailedLines.Take(8))}{(res.FailedLines.Count > 8 ? $" and {res.FailedLines.Count - 8} more" : "")}; the reasons are on the command line." : "") +
-                              (res.Log.Count > 0 ? "\n\nParts lists:\n• " + string.Join("\n• ", res.Log) : "") +
+                              (res.Log.Count > 0 ? "\n\nNotes:\n• " + string.Join("\n• ", res.Log) : "") +
                               "\n\nUNDO reverses the whole run.";
                 _lblStatus.Text = $"Created {res.Pipes} pipe(s) from {res.Lines} line(s).";
                 if (res.PipeIds.Count == 0) { MessageBox.Show(this, text, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }

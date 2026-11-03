@@ -217,11 +217,10 @@ namespace C3DProTools
         /// Fixes the view's elevation range to cover the parts as well as the surfaces: an automatic range follows only
         /// the profiles, so pipes deeper than the ground would fall below the view. Rounded out to whole meters.
         /// </summary>
-        public static void SetElevationRange(ProfileView view, double lowest, double highest, double margin)
+        /// <summary>The view's elevation range: the levels given plus the margin, rounded outward to whole <paramref name="increment"/>s (1, 2, 5 m...).</summary>
+        public static void SetElevationRange(ProfileView view, double lowest, double highest, double margin, double increment = 1.0)
         {
-            double min = Math.Floor(lowest - margin);
-            double max = Math.Ceiling(highest + margin);
-            if (max - min < 1.0) max = min + 1.0;
+            (double min, double max) = ProfileViewMath.DatumRange(lowest, highest, margin, increment);
 
             view.ElevationRangeMode = ElevationRangeType.UserSpecified;
             // Order matters: the view rejects a minimum above its current maximum (and vice versa).

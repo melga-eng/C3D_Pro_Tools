@@ -34,6 +34,7 @@ namespace C3DProTools
         public string EndFamily { get; set; }
         public string EndSize { get; set; }
         public bool ConnectExisting { get; set; } = true;
+        public bool SplitPipeMetMidSpan { get; set; }
 
         public bool OneNetwork { get; set; }
         public string NetworkName { get; set; } = "Feature line network";
