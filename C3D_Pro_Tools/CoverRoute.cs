@@ -156,7 +156,46 @@ namespace C3DProTools
             }
 
             route.BuildRecords(builder, steps, surface, spacing);
+            route.ComputePlanTurns();
             return route;
+        }
+
+        /// <summary>
+        /// Each section's plan turn from the one before (<see cref="RouteSection.DeflectionIn"/>) and along itself
+        /// (<see cref="RouteSection.PlanSweep"/>), from the stations' plan positions: arcs and straights alike.
+        /// </summary>
+        private void ComputePlanTurns()
+        {
+            double Bearing(int a, int b) => Math.Atan2(Records[b].Plan.Y - Records[a].Plan.Y, Records[b].Plan.X - Records[a].Plan.X);
+            double Turn(double from, double to)
+            {
+                double d = Math.Abs(to - from) % (2 * Math.PI);
+                return (d > Math.PI ? 2 * Math.PI - d : d) * 180.0 / Math.PI;
+            }
+            foreach (RouteSection sec in Sections)
+            {
+                sec.PlanSweep = 0;
+                for (int r = sec.FirstRecord + 1; r < sec.LastRecord; r++)
+                {
+                    if (Records[r].Plan.GetDistanceTo(Records[r - 1].Plan) < 1e-6 || Records[r + 1].Plan.GetDistanceTo(Records[r].Plan) < 1e-6) continue;
+                    sec.PlanSweep += Turn(Bearing(r - 1, r), Bearing(r, r + 1));
+                }
+                if (sec.Index == 0 || sec.LastRecord <= sec.FirstRecord) continue;
+                RouteSection prev = Sections[sec.Index - 1];
+                if (prev.LastRecord <= prev.FirstRecord) continue;
+                sec.DeflectionIn = Turn(Bearing(prev.LastRecord - 1, prev.LastRecord), Bearing(sec.FirstRecord, sec.FirstRecord + 1));
+            }
+        }
+
+        /// <summary>The route's plan direction (radians from +X) at station <paramref name="s"/>.</summary>
+        public double PlanBearingAt(double s)
+        {
+            int r = 1;
+            while (r < Records.Count - 1 && Records[r].S < s) r++;
+            for (int a = r - 1; a >= 0; a--)
+                if (Records[r].Plan.GetDistanceTo(Records[a].Plan) > 1e-6)
+                    return Math.Atan2(Records[r].Plan.Y - Records[a].Plan.Y, Records[r].Plan.X - Records[a].Plan.X);
+            return 0;
         }
 
         private void AddStructure(Transaction tr, ObjectId id, int sectionIn, int sectionOut, Autodesk.Civil.DatabaseServices.Surface surface)
@@ -271,6 +310,7 @@ namespace C3DProTools
                 sec.LastRecord = route.Records.Count - 1;
             }
             route.FillMissingGround();
+            route.ComputePlanTurns();
 
             // One placeholder pipe per section: its size, and a first-guess level a fixed depth below the ground.
             foreach (RouteSection sec in route.Sections)
@@ -312,15 +352,22 @@ namespace C3DProTools
         // ---------------- Crossing pipes ----------------
 
         /// <summary>
-        /// Finds the gravity and pressure pipes the route must clear vertically (not those in <paramref name="exclude"/>, nor
-        /// pipes meeting the route at one of its structures): every pipe crossing it in plan at any angle, with a station
-        /// exactly where the centrelines cross, and every pipe whose outside comes within <paramref name="horizontalClearance"/>
-        /// of the route's outside, over the whole stretch where it does (shallow-skew crossings and pipes alongside).
+        /// Finds the gravity and pressure pipes the route must clear vertically (not those in <paramref name="exclude"/>):
+        /// every pipe crossing it in plan at any angle, with a station exactly where the centrelines cross, and over every
+        /// stretch where its outside overlaps the route's in plan. A pipe merely alongside, closer than the rules' horizontal
+        /// clearance, is reported in <see cref="CoverRoute.Proximities"/> (or cleared too, when the rules say so). Pipes
+        /// meeting one of the route's structures are branches there: left out inside the structure and its collar.
+        /// Each crossing gets its utility class, the clearance the rules give for the pair, and encasement padding.
         /// </summary>
-        public void FindCrossings(Transaction tr, Autodesk.Civil.ApplicationServices.CivilDocument doc, HashSet<ObjectId> exclude, double horizontalClearance = 0)
+        public void FindCrossings(Transaction tr, Autodesk.Civil.ApplicationServices.CivilDocument doc, HashSet<ObjectId> exclude, CoverRules rules, double flatClearance)
         {
-            HashSet<ObjectId> routeStructures = new HashSet<ObjectId>();
-            foreach (RouteStructure rs in Structures) if (!rs.Id.IsNull) routeStructures.Add(rs.Id);
+            rules = rules ?? new CoverRules();
+            double horizontalClearance = Math.Max(0, rules.HorizontalClearance);
+            double routePadding = rules.PaddingFor(Class);
+            // The route's structures and their footprints: around them, a pipe meeting them is a branch, not a crossing.
+            Dictionary<ObjectId, StructureFootprint> footprints = new Dictionary<ObjectId, StructureFootprint>();
+            foreach (RouteStructure rs in Structures)
+                if (!rs.Id.IsNull && !footprints.ContainsKey(rs.Id) && tr.GetObject(rs.Id, OpenMode.ForRead) is Structure st) footprints[rs.Id] = StructureFootprint.Of(st);
 
             // The route in plan, as stationed polylines per section.
             List<(RouteSection sec, List<Point3d> pts, List<double> st)> paths = new List<(RouteSection, List<Point3d>, List<double>)>();
@@ -340,37 +387,57 @@ namespace C3DProTools
                 widest = Math.Max(widest, sec.PlanWidth);
             }
 
-            List<(ObjectId id, string name, List<Point3d> path, double halfHeight, double halfWidth)> others = new List<(ObjectId, string, List<Point3d>, double, double)>();
+            List<(ObjectId id, string name, List<Point3d> path, double halfHeight, double halfWidth, UtilityClass cls, List<StructureFootprint> branchOf)> others =
+                new List<(ObjectId, string, List<Point3d>, double, double, UtilityClass, List<StructureFootprint>)>();
+            // The route structures a pipe meets: connected to, or with an end inside (plus the collar).
+            List<StructureFootprint> BranchOf(Point3d start, Point3d end, params ObjectId[] connected)
+            {
+                List<StructureFootprint> list = new List<StructureFootprint>();
+                foreach (KeyValuePair<ObjectId, StructureFootprint> kv in footprints)
+                    if (Array.IndexOf(connected, kv.Key) >= 0 || kv.Value.Contains(start, rules.StructureCollar) || kv.Value.Contains(end, rules.StructureCollar)) list.Add(kv.Value);
+                return list;
+            }
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
+                UtilityClass cls = rules.Classify(net.Name, false);
+                double pad = rules.PaddingFor(cls);
                 foreach (ObjectId id in net.GetPipeIds())
                 {
                     if (exclude.Contains(id) || !(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
-                    if (routeStructures.Contains(p.StartStructureId) || routeStructures.Contains(p.EndStructureId)) continue;
                     ArcInfo? arc = null;
                     if (p.SubEntityType == PipeSubEntityType.Curved && PipeArcGeometry.TryGetGravityArc(p, out ArcInfo a)) arc = a;
-                    others.Add((id, p.Name, PipeArcGeometry.SamplePath(p.StartPoint, p.EndPoint, arc, 2.0, 200), OuterHeightOf(p) / 2.0, OuterWidthOf(p) / 2.0));
+                    others.Add((id, p.Name, PipeArcGeometry.SamplePath(p.StartPoint, p.EndPoint, arc, 2.0, 200), OuterHeightOf(p) / 2.0 + pad, OuterWidthOf(p) / 2.0 + pad,
+                        cls, BranchOf(p.StartPoint, p.EndPoint, p.StartStructureId, p.EndStructureId)));
                 }
             }
             foreach (ObjectId netId in doc.GetPressurePipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is PressurePipeNetwork net)) continue;
+                UtilityClass cls = rules.Classify(net.Name, true);
+                double pad = rules.PaddingFor(cls);
                 foreach (ObjectId id in net.GetPipeIds())
                 {
                     if (exclude.Contains(id) || !(tr.GetObject(id, OpenMode.ForRead) is PressurePipe p)) continue;
                     ArcInfo? arc = null;
                     if (p.IsCurve && PipeArcGeometry.TryGetPressureArc(p, out ArcInfo a)) arc = a;
-                    others.Add((id, p.Name, PipeArcGeometry.SamplePath(p.StartPoint, p.EndPoint, arc, 2.0, 200), p.OuterDiameter / 2.0, p.OuterDiameter / 2.0));
+                    others.Add((id, p.Name, PipeArcGeometry.SamplePath(p.StartPoint, p.EndPoint, arc, 2.0, 200), p.OuterDiameter / 2.0 + pad, p.OuterDiameter / 2.0 + pad,
+                        cls, BranchOf(p.StartPoint, p.EndPoint)));
                 }
             }
 
             // Only pipes coming within reach of the route's extents need a closer look.
-            double margin = 5 + widest + horizontalClearance;
+            double margin = 5 + widest + routePadding + horizontalClearance;
             others = others.FindAll(o => o.path.Exists(q => q.X >= minX - margin - o.halfWidth && q.X <= maxX + margin + o.halfWidth && q.Y >= minY - margin - o.halfWidth && q.Y <= maxY + margin + o.halfWidth));
+            // Inside a route structure the pipe meets (and its collar), the pipe is a branch there, not a crossing.
+            bool AtBranch(List<StructureFootprint> branchOf, double x, double y) =>
+                branchOf.Count > 0 && branchOf.Exists(f => f.Contains(new Point3d(x, y, 0), rules.StructureCollar));
+            // The clearance kept to a pipe: the rules' value for the pair, plus the route's own encasement.
+            RouteCrossing NewCrossing(ObjectId id, string name, UtilityClass cls) =>
+                new RouteCrossing { PipeId = id, Name = name, Class = cls, Clearance = rules.ClearanceBetween(Class, cls, flatClearance) + routePadding };
 
             // 1. Where the centrelines cross in plan, at any angle (shallow-skew crossings were once skipped as running alongside).
-            foreach ((ObjectId id, string name, List<Point3d> path, double halfHeight, double _) in others)
+            foreach ((ObjectId id, string name, List<Point3d> path, double halfHeight, double _, UtilityClass cls, List<StructureFootprint> branchOf) in others)
             {
                 double total = 0;
                 for (int j = 1; j < path.Count; j++) total += PlanDistance(path[j - 1], path[j]);
@@ -388,8 +455,13 @@ namespace C3DProTools
                             if (fraction < 0.01 || fraction > 0.99) continue;
                             double z = path[j - 1].Z + (path[j].Z - path[j - 1].Z) * tOther;
                             double s = st[k - 1] + (st[k] - st[k - 1]) * tRoute;
+                            if (AtBranch(branchOf, pts[k - 1].X + (pts[k].X - pts[k - 1].X) * tRoute, pts[k - 1].Y + (pts[k].Y - pts[k - 1].Y) * tRoute)) continue;
                             if (Crossings.Exists(c => c.PipeId == id && Math.Abs(c.S - s) < 0.5)) continue;
-                            Crossings.Add(new RouteCrossing { PipeId = id, Name = name, S = s, Top = z + halfHeight, Bottom = z - halfHeight });
+                            RouteCrossing crossing = NewCrossing(id, name, cls);
+                            crossing.S = s;
+                            crossing.Top = z + halfHeight;
+                            crossing.Bottom = z - halfHeight;
+                            Crossings.Add(crossing);
                         }
                     }
                     along += segLength;
@@ -421,14 +493,15 @@ namespace C3DProTools
                 sec.LastRecord++;
             }
 
-            // 2. Every station where a pipe's outside comes within reach of the route's: the whole width of a skewed
-            //    crossing, the whole length of a pipe alongside.
+            // 2. Every station where a pipe's outside overlaps the route's in plan (the whole width of a skewed crossing, the
+            //    length of a pipe on top of it); a pipe only alongside, within the horizontal clearance, is reported.
             List<(double X, double Y)> plan = Records.ConvertAll(r => (r.Plan.X, r.Plan.Y));
-            foreach ((ObjectId id, string name, List<Point3d> path, double halfHeight, double halfWidth) in others)
+            foreach ((ObjectId id, string name, List<Point3d> path, double halfHeight, double halfWidth, UtilityClass cls, List<StructureFootprint> branchOf) in others)
             {
                 List<RouteCrossing> ofThisPipe = Crossings.FindAll(c => c.PipeId == id);
                 MarkCrossingBands(plan, path.ConvertAll(q => (q.X, q.Y, q.Z)), halfWidth, halfHeight, horizontalClearance, ofThisPipe,
-                    () => new RouteCrossing { PipeId = id, Name = name });
+                    () => NewCrossing(id, name, cls), rules.EnforceVerticalOnParallel, routePadding,
+                    branchOf.Count == 0 ? null : (Func<int, bool>)(r => AtBranch(branchOf, plan[r].X, plan[r].Y)), name);
             }
             Crossings.Sort((a, b) => a.S.CompareTo(b.S));
         }

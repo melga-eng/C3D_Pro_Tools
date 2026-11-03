@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 // The route model the cover solver works on: stations, levels, sizes and crossings only. No AutoCAD / Civil 3D types here,
 // so CoverSolver and CoverEvaluation can be built and tested without Civil 3D. The drawing side of these classes
@@ -37,6 +38,11 @@ namespace C3DProTools
         /// <summary>True when the previous section ends at the same structure this one starts from (a manhole between them).</summary>
         public bool AfterManhole;
 
+        /// <summary>Plan turn (degrees, unsigned) from the previous section's end direction to this one's start; 0 for the first.</summary>
+        public double DeflectionIn;
+        /// <summary>Plan turn (degrees, unsigned) along a curved section; 0 for straight ones.</summary>
+        public double PlanSweep;
+
         public double Length => S1 - S0;
         public RoutePipe Template => Pipes[0];
         public double PlanWidth => OuterWidth > 0 ? OuterWidth : OuterHeight;
@@ -72,6 +78,20 @@ namespace C3DProTools
         public double Top, Bottom;
         /// <summary>Set by the solver: whether the route was taken under (true) or over the crossing pipe, the same along its whole width.</summary>
         public bool PassBelow = true;
+        /// <summary>Vertical clearance required to this pipe (m); NaN = the job's crossing clearance.</summary>
+        public double Clearance = double.NaN;
+        public UtilityClass Class;
+
+        public double ClearanceOr(double flat) => double.IsNaN(Clearance) ? flat : Clearance;
+    }
+
+    /// <summary>A pipe running alongside the route closer than the horizontal clearance, without touching it in plan: reported, not cleared vertically.</summary>
+    internal sealed class ProximityWarning
+    {
+        public string Name;
+        public double S0, S1;
+        /// <summary>Least edge-to-edge distance in plan (m) and the clearance asked for.</summary>
+        public double MinEdgeDistance, Required;
     }
 
     /// <summary>A crossing pipe's outside top and bottom at one station of the route.</summary>
@@ -119,6 +139,19 @@ namespace C3DProTools
             return (best, bestZ, bestFraction);
         }
 
+        /// <summary>True when (x, y) lies inside the closed plan polygon (even-odd rule; the closing edge is implied).</summary>
+        public static bool Inside(IReadOnlyList<(double X, double Y)> polygon, double x, double y)
+        {
+            bool inside = false;
+            for (int i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
+            {
+                var a = polygon[i];
+                var b = polygon[j];
+                if ((a.Y > y) != (b.Y > y) && x < (b.X - a.X) * (y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;
+            }
+            return inside;
+        }
+
         /// <summary>Plan intersection of segments a0-a1 and b0-b1, with the fraction along each.</summary>
         public static bool Intersect(double a0x, double a0y, double a1x, double a1y, double b0x, double b0y, double b1x, double b1y, out double ta, out double tb)
         {
@@ -139,38 +172,116 @@ namespace C3DProTools
         public readonly List<RouteSection> Sections = new List<RouteSection>();
         public readonly List<RouteRecord> Records = new List<RouteRecord>();
         public readonly List<RouteCrossing> Crossings = new List<RouteCrossing>();
+        public readonly List<ProximityWarning> Proximities = new List<ProximityWarning>();
+        /// <summary>Stretches with their own minimum cover (e.g. under paving).</summary>
+        public readonly List<CoverZone> Zones = new List<CoverZone>();
+        public UtilityClass Class;
         public int MissingGround;
         public bool IsReference;
 
         public double Length => Sections.Count == 0 ? 0 : Sections[Sections.Count - 1].S1;
+
+        /// <summary>The cover zone at station <paramref name="s"/> (the one asking most cover when zones overlap), or null.</summary>
+        public CoverZone ZoneAt(double s)
+        {
+            CoverZone best = null;
+            foreach (CoverZone z in Zones)
+                if (s >= z.S0 - 1e-6 && s <= z.S1 + 1e-6 && (best == null || z.MinCover > best.MinCover)) best = z;
+            return best;
+        }
+
+        /// <summary>The minimum cover at station <paramref name="s"/>: its zone's, else <paramref name="general"/>.</summary>
+        public double MinCoverAt(double s, double general) => ZoneAt(s)?.MinCover ?? general;
+
+        /// <summary>
+        /// Adds a cover zone for every stretch of route inside one of the plan polygons (closed polylines of paving, roads...).
+        /// A zone runs from the last station before it to the first after it, so its edges are always inside.
+        /// </summary>
+        /// <param name="plan">Each record's plan position, in record order.</param>
+        public void AddZones(IReadOnlyList<(double X, double Y)> plan, IEnumerable<IReadOnlyList<(double X, double Y)>> polygons, double minCover, string label)
+        {
+            foreach (IReadOnlyList<(double X, double Y)> polygon in polygons)
+            {
+                if (polygon.Count < 3) continue;
+                int start = -1;
+                for (int r = 0; r <= Records.Count; r++)
+                {
+                    bool inside = r < Records.Count && CrossingGeometry.Inside(polygon, plan[r].X, plan[r].Y);
+                    if (inside && start < 0) start = r;
+                    if (!inside && start >= 0)
+                    {
+                        Zones.Add(new CoverZone { S0 = Records[Math.Max(0, start - 1)].S, S1 = Records[Math.Min(Records.Count - 1, r)].S, MinCover = minCover, Label = label });
+                        start = -1;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Structure-to-structure spans (pulls): runs of sections between manholes, with their length and plan turning
+        /// (plain joints and curved sections; degrees).
+        /// </summary>
+        public List<(int first, int last, double length, double planTurn)> Spans()
+        {
+            List<(int, int, double, double)> spans = new List<(int, int, double, double)>();
+            int start = 0;
+            for (int i = 1; i <= Sections.Count; i++)
+            {
+                if (i < Sections.Count && !Sections[i].AfterManhole) continue;
+                double turn = 0;
+                for (int k = start; k < i; k++) turn += Sections[k].PlanSweep + (k > start ? Sections[k].DeflectionIn : 0);
+                spans.Add((start, i - 1, Sections[i - 1].S1 - Sections[start].S0, turn));
+                start = i;
+            }
+            return spans;
+        }
 
         /// <summary>Offset from the pipe centreline to the point cover is measured to (positive = above the centreline).</summary>
         public static double ReferenceOffset(CoverReference reference, double innerHeight, double outerHeight) =>
             reference == CoverReference.OutsideTop ? outerHeight / 2.0 : reference == CoverReference.Invert ? -innerHeight / 2.0 : 0.0;
 
         /// <summary>
-        /// Gives every station where another pipe's outside comes within <paramref name="horizontalClearance"/> of the route's
-        /// outside in plan that pipe's levels there, so the route clears it vertically along the whole stretch: a few metres
-        /// for a shallow-skew crossing, the full length for a pipe running alongside. Each unbroken stretch is one crossing,
-        /// the one already found where the centrelines cross when there is one, else a new one from <paramref name="create"/>
-        /// at the closest station.
+        /// Sorts out how another pipe lies against the route, station by station, over each unbroken stretch where its
+        /// outside comes within <paramref name="horizontalClearance"/> of the route's outside in plan:
+        /// <list type="bullet">
+        /// <item>where the two outsides overlap in plan (or the centrelines cross), the route must clear it vertically: those
+        /// stations take its levels (a few metres for a shallow-skew crossing, the full length of a pipe on top of it);</item>
+        /// <item>a stretch where it only comes near, alongside, is reported as a <see cref="ProximityWarning"/> (or cleared
+        /// vertically too with <paramref name="enforceOnParallel"/>).</item>
+        /// </list>
+        /// Stations <paramref name="excluded"/> says to skip (around the route's own structures, where a pipe meeting them is a
+        /// branch) are left out. Each stretch is one crossing: the one found where the centrelines cross when there is one,
+        /// else a new one from <paramref name="create"/> at the closest station.
         /// </summary>
         /// <param name="plan">Each record's plan position, in record order.</param>
         /// <param name="path">The other pipe's centreline.</param>
+        /// <param name="halfWidth">Half the other pipe's outside width, encasement included.</param>
         /// <param name="ofThisPipe">Crossings of this pipe found so far; new ones are added to it and to <see cref="Crossings"/>.</param>
+        /// <param name="routePadding">Encasement added to each side of the route's own outside.</param>
         internal void MarkCrossingBands(IReadOnlyList<(double X, double Y)> plan, IReadOnlyList<(double X, double Y, double Z)> path,
-            double halfWidth, double halfHeight, double horizontalClearance, List<RouteCrossing> ofThisPipe, Func<RouteCrossing> create)
+            double halfWidth, double halfHeight, double horizontalClearance, List<RouteCrossing> ofThisPipe, Func<RouteCrossing> create,
+            bool enforceOnParallel = false, double routePadding = 0, Func<int, bool> excluded = null, string name = null)
         {
-            List<(int r, double z, double d)> run = new List<(int, double, double)>();
+            List<(int r, double z, double edge)> run = new List<(int, double, double)>();
             void Close()
             {
                 if (run.Count == 0) return;
                 double s0 = Records[run[0].r].S, s1 = Records[run[run.Count - 1].r].S;
                 RouteCrossing c = ofThisPipe.Find(x => x.S >= s0 - 1e-6 && x.S <= s1 + 1e-6);
+                bool touches = c != null || run.Exists(h => h.edge < 0);
+                if (!touches && !enforceOnParallel)
+                {
+                    Proximities.Add(new ProximityWarning
+                    {
+                        Name = name ?? create().Name, S0 = s0, S1 = s1, MinEdgeDistance = Math.Max(0, run.Min(h => h.edge)), Required = horizontalClearance
+                    });
+                    run.Clear();
+                    return;
+                }
                 if (c == null)
                 {
-                    (int r, double z, double d) closest = run[0];
-                    foreach (var hit in run) if (hit.d < closest.d) closest = hit;
+                    (int r, double z, double edge) closest = run[0];
+                    foreach (var hit in run) if (hit.edge < closest.edge) closest = hit;
                     c = create();
                     c.S = Records[closest.r].S;
                     c.Top = closest.z + halfHeight;
@@ -178,16 +289,20 @@ namespace C3DProTools
                     Crossings.Add(c);
                     ofThisPipe.Add(c);
                 }
-                foreach ((int r, double z, double _) in run) Records[r].AddCrossing(c, z + halfHeight, z - halfHeight);
+                // Vertical clearance only where the outsides overlap in plan, unless asked for along the whole stretch.
+                foreach ((int r, double z, double edge) in run)
+                    if (enforceOnParallel || edge < 0 || Math.Abs(Records[r].S - c.S) <= 1e-6) Records[r].AddCrossing(c, z + halfHeight, z - halfHeight);
                 run.Clear();
             }
 
             for (int r = 0; r < Records.Count; r++)
             {
-                double reach = Sections[Records[r].Section].PlanWidth / 2.0 + halfWidth + horizontalClearance;
+                if (excluded != null && excluded(r)) { Close(); continue; }
+                double touch = Sections[Records[r].Section].PlanWidth / 2.0 + routePadding + halfWidth;
                 (double d, double z, double fraction) = CrossingGeometry.Closest(path, plan[r].X, plan[r].Y);
                 // A pipe whose end is what lies near the route (a branch meeting it) is not a crossing there.
-                if (d < reach && fraction > 0.01 && fraction < 0.99) run.Add((r, z, d));
+                // edge < 0: the outsides overlap in plan.
+                if (d < touch + horizontalClearance && fraction > 0.01 && fraction < 0.99) run.Add((r, z, d - touch));
                 else Close();
             }
             Close();

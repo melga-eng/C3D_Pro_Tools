@@ -15,11 +15,13 @@
 
 	<ItemGroup>
 		<Compile Include="..\..\C3D_Pro_Tools\CoverRoute.Model.cs" Link="Engine\CoverRoute.Model.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\CoverRules.cs" Link="Engine\CoverRules.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverSolver.cs" Link="Engine\CoverSolver.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverEvaluation.cs" Link="Engine\CoverEvaluation.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\NavisGeometryFit.cs" Link="Engine\NavisGeometryFit.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\NavisInterpreter.cs" Link="Engine\NavisInterpreter.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\NavisCatalogEditor.cs" Link="Engine\NavisCatalogEditor.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NavisTransform.cs" Link="Engine\NavisTransform.cs" />
 		<Compile Include="..\..\Shared\NavisLinkProtocol.cs" Link="Engine\NavisLinkProtocol.cs" />
 	</ItemGroup>
 

@@ -30,6 +30,8 @@ namespace C3DProTools
         public double MaxLength { get; set; }
         public double CrossingClearance { get; set; }
         public double Spacing { get; set; } = 1.0;
+        /// <summary>Junction matching, drops, slopes by size, cover margin and zones, dry utility bends and pulls, crossing clearances.</summary>
+        public CoverRules Rules { get; set; } = new CoverRules();
 
         // Drawing new pipes along paths.
         public bool DrawToExisting { get; set; }

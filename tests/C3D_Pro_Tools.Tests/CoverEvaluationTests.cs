@@ -24,14 +24,25 @@ namespace C3DProTools.Tests
             Assert.Equal(0.30, row.MinCover, 6);
         }
 
+        /// <summary>Up to 1.1.0 a millimetre short of a limit counted as meeting it; now 0.5995 m fails a 0.600 m rule.</summary>
         [Fact]
-        public void CoverWithinOneMillimetreOfTheLimit_Passes()
+        public void CoverHalfAMillimetreShortOfTheLimit_Fails()
         {
             CoverRoute route = Routes.Build(new[] { new SectionSpec { Length = 20 } }, s => 100.0);
             CoverOptions o = Routes.Options(CoverMode.Dry);
-            // 0.5995 m cover against a 0.6 m minimum: inside the 1 mm tolerance today.
             CoverRow row = CoverEvaluation.Evaluate(route, new List<ProfilePipe> { Pipe(route, 99.2205, 99.2205) }, o)[0];
-            Assert.False(row.Failed, row.Status);
+            Assert.True(row.Failed);
+            Assert.False(CoverEvaluation.Evaluate(route, new List<ProfilePipe> { Pipe(route, 99.22, 99.22) }, o)[0].Failed, "exactly 0.600 m meets it");
+        }
+
+        [Fact]
+        public void Solver_KeepsTheCoverSafetyMargin()
+        {
+            CoverRoute route = Routes.Build(new[] { new SectionSpec { Length = 60 } }, s => 100.0 + 0.7 * Math.Sin(s / 9.0));
+            CoverOptions o = Routes.Options(CoverMode.Dry);
+            CoverSolution solution = new CoverSolver(route, o).Solve();
+            List<CoverRow> rows = CoverEvaluation.Evaluate(route, solution.Pipes, o);
+            Assert.All(rows, r => Assert.True(r.MinCover >= 0.6 + 0.002 - 1e-9, $"{r.MinCover:0.0000} m"));
         }
 
         [Fact]

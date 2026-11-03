@@ -398,8 +398,12 @@ namespace C3DProTools
             _txtStructSpacing.Text, _chkReversePaths.Checked.ToString()
         });
 
-        /// <summary>Prepares (and with <paramref name="solve"/> optimises) the ticked jobs of a list. False when the options are not usable.</summary>
-        private bool Prepare(List<CoverJob> jobs, bool solve, IEnumerable<CoverJob> only = null)
+        /// <summary>
+        /// Prepares (and with <paramref name="solve"/> optimises) the ticked jobs of a list. Reading the routes uses the drawing
+        /// here; optimising runs in the background with the Cancel button shown and the rest of the window locked. False when
+        /// the options are not usable or the optimising was cancelled.
+        /// </summary>
+        private async System.Threading.Tasks.Task<bool> Prepare(List<CoverJob> jobs, bool solve, IEnumerable<CoverJob> only = null)
         {
             if (!TryReadOptions(out CoverOptions o)) return false;
             if (!_surfaces.ContainsKey(_cbSurface.Text)) { MessageBox.Show(this, "Choose the surface cover is measured from.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
@@ -419,6 +423,7 @@ namespace C3DProTools
                 using (Transaction tr = acDoc.Database.TransactionManager.StartTransaction())
                 {
                     Autodesk.Civil.DatabaseServices.Surface surface = OpenSurface(tr);
+                    setup.ZonePolygons = CoverJobs.ReadZonePolygons(tr, acDoc.Database, o.Rules);
                     int n = 0;
                     foreach (CoverJob job in todo)
                     {
@@ -431,18 +436,44 @@ namespace C3DProTools
                 }
                 if (solve)
                 {
-                    SetStatus($"Optimising {todo.Count} route(s)…");
-                    CoverJobs.SolveAll(todo);
+                    SetStatus($"Optimising {todo.Count} route(s)… (Cancel stops it)");
+                    using (System.Threading.CancellationTokenSource cts = new System.Threading.CancellationTokenSource())
+                    {
+                        foreach (CoverJob job in todo) if (job.Options != null) job.Options.Cancel = cts.Token;
+                        _solving = cts;
+                        _btnCancelSolve.Visible = true;
+                        _split.Enabled = false;
+                        _nav.Enabled = false;
+                        try
+                        {
+                            // Pure data only (routes, options, solver): nothing here touches the drawing.
+                            await System.Threading.Tasks.Task.Run(() => CoverJobs.SolveAll(todo));
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            foreach (CoverJob job in todo.Where(j => j.Solution == null && j.Error == null)) job.Status = "Optimising cancelled";
+                            SetStatus("Optimising cancelled; routes already optimised keep their results.");
+                            return false;
+                        }
+                        finally
+                        {
+                            _solving = null;
+                            _btnCancelSolve.Visible = false;
+                            _split.Enabled = true;
+                            _nav.Enabled = true;
+                            foreach (CoverJob job in todo) if (job.Options != null) job.Options.Cancel = default;
+                        }
+                    }
                 }
             }
             finally { Cursor = Cursors.Default; }
             return true;
         }
 
-        private void RunJobs(List<CoverJob> jobs, bool solve)
+        private async void RunJobs(List<CoverJob> jobs, bool solve)
         {
             DataGridView grid = jobs == _coverJobs ? _coverGrid : _drawGrid;
-            if (!Prepare(jobs, solve)) return;
+            if (!await Prepare(jobs, solve)) return;
             FillJobs(grid, jobs);
             List<CoverJob> done = jobs.Where(j => j.Include && !j.Applied).ToList();
             int errors = done.Count(j => j.Error != null);
@@ -451,7 +482,7 @@ namespace C3DProTools
                 : $"Checked {done.Count} route(s): {done.Sum(j => j.CurrentFailing)} of {done.Sum(j => j.Current?.Count ?? 0)} pipes fail the limits.");
         }
 
-        private void Preview(DataGridView grid)
+        private async void Preview(DataGridView grid)
         {
             CoverJob job = SelectedJob(grid);
             if (job == null) return;
@@ -460,7 +491,7 @@ namespace C3DProTools
             // A route prepared with other options (or never) is prepared and optimised again first.
             if (job.Route == null || !_preparedWith.TryGetValue(job, out string key) || key != OptionsKey() || job.Solution == null && job.Error == null)
             {
-                if (!Prepare(jobs, true, new[] { job })) return;
+                if (!await Prepare(jobs, true, new[] { job })) return;
                 FillJobs(grid, jobs);
             }
             if (job.Route == null) { MessageBox.Show(this, job.Error ?? "The route could not be read.", Text); return; }
@@ -478,9 +509,9 @@ namespace C3DProTools
             Apply(new List<CoverJob> { job }, jobs);
         }
 
-        private void ApplyTicked(List<CoverJob> jobs)
+        private async void ApplyTicked(List<CoverJob> jobs)
         {
-            if (!Prepare(jobs, true)) return;
+            if (!await Prepare(jobs, true)) return;
             DataGridView grid = jobs == _coverJobs ? _coverGrid : _drawGrid;
             FillJobs(grid, jobs);
             List<CoverJob> ready = jobs.Where(j => j.Include && !j.Applied && j.Solution != null).ToList();

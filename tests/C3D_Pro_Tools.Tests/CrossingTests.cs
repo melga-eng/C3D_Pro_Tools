@@ -82,16 +82,71 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
-        public void PipeAlongside_OutOfReach_IsIgnoredUnlessAHorizontalClearanceAsksForIt()
+        public void PipeAlongside_NotTouching_IsReportedNotClearedVertically()
         {
             (CoverRoute route, var plan) = StraightRoute();
-            var path = Line(20, 1.0, 80, 1.0, 99.0);
+            var path = Line(20, 0.6, 80, 0.6, 99.0);
 
-            route.MarkCrossingBands(plan, path, 0.15, 0.15, 0.0, new List<RouteCrossing>(), () => new RouteCrossing());
+            // Outsides 0.6 - 0.18 - 0.15 = 0.27 m apart, closer than the 0.30 m horizontal clearance.
+            route.MarkCrossingBands(plan, path, 0.15, 0.15, 0.30, new List<RouteCrossing>(), () => new RouteCrossing { Name = "W1" });
+
             Assert.Empty(route.Crossings);
+            Assert.DoesNotContain(route.Records, r => r.Crossings.Count > 0);
+            ProximityWarning w = Assert.Single(route.Proximities);
+            Assert.Equal("W1", w.Name);
+            Assert.Equal(0.27, w.MinEdgeDistance, 9);
+            Assert.Equal(21.0, w.S0, 9);
+            Assert.Equal(79.0, w.S1, 9);
+        }
 
-            route.MarkCrossingBands(plan, path, 0.15, 0.15, 0.8, new List<RouteCrossing>(), () => new RouteCrossing());
+        [Fact]
+        public void PipeAlongside_NotTouching_IsClearedWhenAskedFor()
+        {
+            (CoverRoute route, var plan) = StraightRoute();
+            var path = Line(20, 0.6, 80, 0.6, 99.0);
+
+            route.MarkCrossingBands(plan, path, 0.15, 0.15, 0.30, new List<RouteCrossing>(), () => new RouteCrossing { Name = "W1" }, enforceOnParallel: true);
+
             Assert.Single(route.Crossings);
+            Assert.Empty(route.Proximities);
+            Assert.Equal(59, route.Records.Count(r => r.Crossings.Count > 0));
+        }
+
+        [Fact]
+        public void PipeAlongside_BeyondTheHorizontalClearance_IsIgnored()
+        {
+            (CoverRoute route, var plan) = StraightRoute();
+            route.MarkCrossingBands(plan, Line(20, 1.0, 80, 1.0, 99.0), 0.15, 0.15, 0.30, new List<RouteCrossing>(), () => new RouteCrossing());
+            Assert.Empty(route.Crossings);
+            Assert.Empty(route.Proximities);
+        }
+
+        [Fact]
+        public void SkewCrossing_WithHorizontalClearance_ClearsOnlyWhereTheOutsidesOverlap()
+        {
+            (CoverRoute route, var plan) = StraightRoute();
+            double a = 10 * Math.PI / 180;
+            var path = Line(50 - 30 * Math.Cos(a), -30 * Math.Sin(a), 50 + 30 * Math.Cos(a), 30 * Math.Sin(a), 98.5);
+
+            route.MarkCrossingBands(plan, path, 0.25, 0.25, 0.30, new List<RouteCrossing>(), () => new RouteCrossing { Name = "Skew" });
+
+            // The approaches within 0.30 m are part of the crossing, not a separate warning; only 48..52 overlap.
+            Assert.Single(route.Crossings);
+            Assert.Empty(route.Proximities);
+            Assert.Equal(new[] { 48, 49, 50, 51, 52 }, route.Records.Where(r => r.Crossings.Count > 0).Select(r => (int)Math.Round(r.S)).ToArray());
+        }
+
+        [Fact]
+        public void BranchAtARouteStructure_IsLeftOutThere()
+        {
+            (CoverRoute route, var plan) = StraightRoute();
+            // A lateral meeting the route's manhole at station 50 and crossing its centreline there.
+            var path = Line(50, -10, 50, 10, 98.5);
+
+            route.MarkCrossingBands(plan, path, 0.15, 0.15, 0.0, new List<RouteCrossing>(), () => new RouteCrossing { Name = "Lateral" },
+                excluded: r => Math.Abs(route.Records[r].S - 50) <= 1.0);
+
+            Assert.Empty(route.Crossings);
         }
 
         [Fact]

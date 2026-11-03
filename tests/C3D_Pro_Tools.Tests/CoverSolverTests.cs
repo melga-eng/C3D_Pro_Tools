@@ -81,30 +81,60 @@ namespace C3DProTools.Tests
             Assert.True(invertIn - invertOut <= o.MaxDrop + 1e-9);
         }
 
-        /// <summary>
-        /// Characterisation of the current junction rule: invert matching. A larger outlet may sit with its crown above the
-        /// inlet crown. Stage 3 makes the rule configurable (crown-to-crown by default for gravity), and this test is then
-        /// updated on purpose.
-        /// </summary>
-        [Fact]
-        public void Gravity_SizeIncreaseAtManhole_CurrentRuleIsInvertMatching()
+        private static CoverRoute SizeIncreaseRoute() => Routes.Build(new[]
         {
-            CoverRoute route = Routes.Build(new[]
-            {
-                new SectionSpec { Length = 40, Inner = 0.3, Outer = 0.36 },
-                new SectionSpec { Length = 40, Inner = 0.6, Outer = 0.72, ManholeBefore = true }
-            }, s => 100.0 - 0.01 * s);
+            new SectionSpec { Length = 40, Inner = 0.3, Outer = 0.36 },
+            new SectionSpec { Length = 40, Inner = 0.6, Outer = 0.72, ManholeBefore = true }
+        }, s => 100.0 - 0.01 * s);
+
+        private static CoverOptions SizeIncreaseOptions(JunctionMatchRule rule)
+        {
             CoverOptions o = Routes.Options(CoverMode.Gravity);
             // Cover to the invert, so the outlet's own cover limit does not bind before the junction rule does.
             o.Reference = CoverReference.Invert;
             o.MinCover = 0.6; o.MaxCover = 4.0;
-            (CoverSolution solution, _) = Solve(route, o);
+            o.Rules.GravityJunction = rule;
+            return o;
+        }
+
+        /// <summary>Soffit (crown) matching is the gravity default: a larger outlet drops so its crown is not above the inlet's.</summary>
+        [Fact]
+        public void Gravity_SizeIncreaseAtManhole_CrownsMatchByDefault()
+        {
+            CoverOptions o = Routes.Options(CoverMode.Gravity);
+            Assert.Equal(JunctionMatchRule.CrownToCrown, o.Rules.GravityJunction);
+            o = SizeIncreaseOptions(o.Rules.GravityJunction);
+            (CoverSolution solution, List<CoverRow> rows) = Solve(SizeIncreaseRoute(), o);
 
             ProfilePipe inlet = solution.Pipes.FindLast(p => p.Section == 0), outlet = solution.Pipes.Find(p => p.Section == 1);
-            double invertIn = inlet.Z1 - 0.15, invertOut = outlet.Z0 - 0.30;
             double crownIn = inlet.Z1 + 0.15, crownOut = outlet.Z0 + 0.30;
-            Assert.True(invertOut <= invertIn + 1e-9);
-            Assert.True(crownOut > crownIn + 1e-6, "today's invert rule lets the outlet crown sit above the inlet crown");
+            // The 0.02 m minimum drop of a straight-through manhole applies on top.
+            Assert.True(crownOut <= crownIn - 0.02 + 1e-9, $"outlet crown {crownOut:0.000} vs inlet crown {crownIn:0.000}");
+            Assert.All(rows, r => Assert.False(r.Failed, r.Status));
+        }
+
+        /// <summary>The old behaviour stays available: with invert matching a larger outlet's crown sits above the inlet's.</summary>
+        [Fact]
+        public void Gravity_SizeIncreaseAtManhole_InvertMatchingWhenChosen()
+        {
+            (CoverSolution solution, _) = Solve(SizeIncreaseRoute(), SizeIncreaseOptions(JunctionMatchRule.InvertToInvert));
+            ProfilePipe inlet = solution.Pipes.FindLast(p => p.Section == 0), outlet = solution.Pipes.Find(p => p.Section == 1);
+            Assert.True(outlet.Z0 - 0.30 <= inlet.Z1 - 0.15 - 0.02 + 1e-9);
+            Assert.True(outlet.Z0 + 0.30 > inlet.Z1 + 0.15 + 1e-6);
+        }
+
+        [Theory]
+        [InlineData((int)JunctionMatchRule.CrownToCrown)]
+        [InlineData((int)JunctionMatchRule.Match08Depth)]
+        [InlineData((int)JunctionMatchRule.InvertToInvert)]
+        [InlineData((int)JunctionMatchRule.StrictCrownAndInvert)]
+        public void Gravity_EveryJunctionRule_IsMetAtTheManhole(int ruleValue)
+        {
+            JunctionMatchRule rule = (JunctionMatchRule)ruleValue;
+            (CoverSolution solution, List<CoverRow> rows) = Solve(SizeIncreaseRoute(), SizeIncreaseOptions(rule));
+            ProfilePipe inlet = solution.Pipes.FindLast(p => p.Section == 0), outlet = solution.Pipes.Find(p => p.Section == 1);
+            Assert.True(outlet.Z0 <= CoverRules.MaxOutletCentre(rule, inlet.Z1, 0.3, 0.6) - 0.02 + 1e-9);
+            Assert.All(rows, r => Assert.False(r.Failed, r.Status));
         }
 
         [Fact]

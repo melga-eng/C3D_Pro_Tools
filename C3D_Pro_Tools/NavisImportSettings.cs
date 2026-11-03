@@ -31,6 +31,11 @@ namespace C3DProTools
         /// <summary>0 = nearest size, 1 = Method A (any-size families), 2 = Method B (add sizes to the catalog).</summary>
         public int SizeMode { get; set; } = 1;
         public bool AskSizeMode { get; set; } = true;
+        /// <summary>Navisworks to drawing coordinates: turned about the origin (degrees, counter-clockwise), then shifted (m).</summary>
+        public double TransformDx { get; set; }
+        public double TransformDy { get; set; }
+        public double TransformDz { get; set; }
+        public double TransformRotationDeg { get; set; }
 
         private static string FilePath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "NavisImport.json");

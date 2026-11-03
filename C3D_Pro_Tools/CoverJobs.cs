@@ -123,6 +123,32 @@ namespace C3DProTools
             /// <summary>Network new pipes go into (existing structures there are reused at the path ends); null = a new network.</summary>
             public ObjectId TargetNetworkId;
             public bool ReversePaths;
+            /// <summary>Plan outlines of the cover zones (paving): read once per batch with <see cref="ReadZonePolygons"/>.</summary>
+            public List<List<(double X, double Y)>> ZonePolygons = new List<List<(double X, double Y)>>();
+        }
+
+        /// <summary>
+        /// The closed polylines in model space on the rules' zone layers (comma-separated names, * and ? allowed), as plan
+        /// outlines (vertices; arc segments are taken by their chords).
+        /// </summary>
+        public static List<List<(double X, double Y)>> ReadZonePolygons(Transaction tr, Database db, CoverRules rules)
+        {
+            List<List<(double X, double Y)>> polygons = new List<List<(double X, double Y)>>();
+            string[] patterns = (rules?.ZoneLayers ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).Where(p => p.Length > 0).ToArray();
+            if (patterns.Length == 0) return polygons;
+            System.Text.RegularExpressions.Regex[] layers = patterns
+                .Select(p => new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)).ToArray();
+            BlockTableRecord ms = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+            foreach (ObjectId id in ms)
+            {
+                if (!(tr.GetObject(id, OpenMode.ForRead) is Polyline pl) || !pl.Closed || pl.NumberOfVertices < 3) continue;
+                if (!layers.Any(l => l.IsMatch(pl.Layer))) continue;
+                List<(double X, double Y)> outline = new List<(double X, double Y)>();
+                for (int i = 0; i < pl.NumberOfVertices; i++) { Point2d v = pl.GetPoint2dAt(i); outline.Add((v.X, v.Y)); }
+                polygons.Add(outline);
+            }
+            return polygons;
         }
 
         /// <summary>Reads the job's route from the drawing (or lays out its path), finds crossing pipes and checks the current cover.</summary>
@@ -160,12 +186,20 @@ namespace C3DProTools
             }
 
             if (job.Route.MissingGround == job.Route.Records.Count) { job.Error = "The surface does not cover the route."; job.Status = "Error"; return; }
-            if (o.CrossingClearance > 0)
+
+            // The route's own utility class sets the clearances; a dry route of an unknown kind counts as power (dry).
+            CoverRules rules = o.Rules ?? new CoverRules();
+            string networkName = !job.Route.NetworkId.IsNull && tr.GetObject(job.Route.NetworkId, OpenMode.ForRead) is Network routeNet ? routeNet.Name : "";
+            job.Route.Class = rules.Classify(networkName, false);
+            if (job.Route.Class == UtilityClass.Unknown && o.Mode == CoverMode.Dry) job.Route.Class = UtilityClass.DryPower;
+            if (o.CrossingClearance > 0 || rules.UseClearanceMatrix)
             {
                 HashSet<ObjectId> exclude = new HashSet<ObjectId>(batchPipes);
                 foreach ((ObjectId id, bool _) in job.Pipes) exclude.Add(id);
-                job.Route.FindCrossings(tr, doc, exclude);
+                job.Route.FindCrossings(tr, doc, exclude, rules, o.CrossingClearance);
             }
+            if (setup.ZonePolygons.Count > 0)
+                job.Route.AddZones(job.Route.Records.ConvertAll(r => (r.Plan.X, r.Plan.Y)), setup.ZonePolygons, rules.ZoneMinCover, rules.ZoneLabel);
 
             job.Options = o.ForRoute(double.NaN, double.NaN);
             // Gravity routes run in the flow direction; "start" and "end" level choices stay with the route as picked.
@@ -213,7 +247,9 @@ namespace C3DProTools
 
         /// <summary>
         /// Solves every prepared job. On gravity networks a route that ends in a structure another route leaves from is solved
-        /// after it, and may not arrive below that route's outgoing pipe (no backfall into the main line).
+        /// after it, and must arrive so the main line's outgoing pipe meets the junction rule and minimum drop (no backfall
+        /// into the main line); deeper than the maximum drop only with a backdrop, as the rules allow. Pure data only, so it
+        /// can run off the UI thread; <see cref="CoverOptions.Cancel"/> stops it (OperationCanceledException).
         /// </summary>
         public static void SolveAll(List<CoverJob> jobs)
         {
@@ -234,7 +270,9 @@ namespace C3DProTools
             void Solve(CoverJob job, HashSet<CoverJob> visiting)
             {
                 if (done.Contains(job)) return;
-                double endMin = double.NaN, endMax = double.NaN;
+                CoverRules rules = job.Options.Rules ?? new CoverRules();
+                double endMin = double.NaN, endMax = double.NaN, backdropMax = double.NaN;
+                string mainName = null;
                 if (gravity && !job.IsNew)
                 {
                     RunHub exit = job.Builder.HubAt(job.Steps[job.Steps.Count - 1], false);
@@ -243,31 +281,42 @@ namespace C3DProTools
                         visiting.Add(job);
                         Solve(main.job, visiting);
                         visiting.Remove(job);
-                        double outInvert = OutgoingInvert(main.job, main.pipe);
-                        if (!double.IsNaN(outInvert))
+                        (double zOut, double dOut, double sOut) = Outgoing(main.job, main.pipe);
+                        if (!double.IsNaN(zOut))
                         {
-                            endMin = outInvert + job.Route.Pipes[job.Route.Pipes.Count - 1].InnerHeight / 2.0;
+                            // The branch is the inlet: it arrives high enough for the main line's outlet to meet the rule.
+                            double dIn = job.Route.Pipes[job.Route.Pipes.Count - 1].InnerHeight;
+                            double turn = Math.Abs(Math.IEEERemainder(main.job.Route.PlanBearingAt(sOut) - job.Route.PlanBearingAt(job.Route.Length), 2 * Math.PI)) * 180 / Math.PI;
+                            endMin = CoverRules.MinInletCentre(rules.JunctionFor(CoverMode.Gravity), zOut, dIn, dOut, rules.MinDropFor(CoverMode.Gravity, turn));
+                            if (double.IsNaN(endMin)) endMin = zOut;
                             // The drop into the main line is limited like any other drop at a manhole.
-                            if (job.Options.MaxDrop > 0) endMax = endMin + job.Options.MaxDrop;
+                            if (rules.Backdrop != BackdropMode.UnrestrictedDrop && job.Options.MaxDrop > 0) endMax = endMin + job.Options.MaxDrop;
+                            if (rules.Backdrop == BackdropMode.CostedBackdropWithFlag) backdropMax = endMin + rules.MaxBackdropDrop;
+                            mainName = main.job.Name;
                         }
                     }
                 }
                 done.Add(job);
                 job.Options.EndMinZ = endMin;
                 job.Options.EndMaxZ = endMax;
-                bool dropRelaxed = false;
+                bool backdropAtJunction = false;
                 try
                 {
                     job.Solution = new CoverSolver(job.Route, job.Options).Solve();
-                    if (job.Solution == null && !double.IsNaN(endMax))
+                    if ((job.Solution == null || job.Solution.Relaxation > 1e-9) && !double.IsNaN(backdropMax))
                     {
-                        // No layout arrives within the drop: allow a deeper drop (a drop manhole) rather than none at all.
-                        job.Options.EndMaxZ = double.NaN;
-                        job.Solution = new CoverSolver(job.Route, job.Options).Solve();
-                        dropRelaxed = job.Solution != null;
+                        // No layout arrives within the standard drop: a backdrop into the main line, as the rules allow.
+                        job.Options.EndMaxZ = backdropMax;
+                        CoverSolution deeper = new CoverSolver(job.Route, job.Options).Solve();
+                        if (deeper != null && (job.Solution == null || deeper.Relaxation < job.Solution.Relaxation - 1e-9))
+                        {
+                            job.Solution = deeper;
+                            backdropAtJunction = true;
+                        }
+                        else job.Options.EndMaxZ = endMax;
                     }
                 }
-                catch (Exception ex) { job.Solution = null; job.Error = ex.Message; }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { job.Solution = null; job.Error = ex.Message; }
                 if (job.Solution == null)
                 {
                     job.Proposed = null;
@@ -283,19 +332,32 @@ namespace C3DProTools
                     ? $"{job.Solution.Pipes.Count} new pipe(s), {job.ProposedFailing} failing"
                     : $"Proposed {job.Solution.Pipes.Count} pipe(s) (now {now}), {job.ProposedFailing} failing";
                 if (job.Solution.Relaxation > 0.001) job.Status += $"; up to {job.Solution.Relaxation:0.00} m past the cover limits where nothing fits";
-                if (dropRelaxed) job.Status += "; drops into the main line by more than the max drop";
+                if (backdropAtJunction)
+                {
+                    ProfilePipe last = job.Solution.Pipes[job.Solution.Pipes.Count - 1];
+                    job.Status += $"; backdrop manhole required where it joins {mainName} (it arrives {last.Z1 - endMin:0.00} m above the matched level)";
+                }
+                int backdrops = job.Proposed.Count(r => r.Flags.Exists(f => f.StartsWith("Backdrop")));
+                int slabs = job.Proposed.Sum(r => r.Flags.Count(f => f.StartsWith("Protection slab")));
+                if (backdrops > 0) job.Status += $"; {backdrops} backdrop manhole(s)";
+                if (slabs > 0) job.Status += $"; {slabs} crossing(s) need a protection slab / HDD";
+                if (job.Route.Proximities.Count > 0) job.Status += $"; {job.Route.Proximities.Count} pipe(s) alongside closer than the horizontal clearance";
             }
 
-            foreach (CoverJob job in ready) Solve(job, new HashSet<CoverJob>());
+            foreach (CoverJob job in ready)
+            {
+                job.Options.Cancel.ThrowIfCancellationRequested();
+                Solve(job, new HashSet<CoverJob>());
+            }
         }
 
-        /// <summary>Invert of the solved pipe leaving the structure at step <paramref name="pipe"/> of a solved job, or NaN.</summary>
-        private static double OutgoingInvert(CoverJob job, int pipe)
+        /// <summary>Centreline, inner height and station of the solved pipe leaving the structure at step <paramref name="pipe"/> of a solved job (NaN when unsolved).</summary>
+        private static (double z, double d, double s) Outgoing(CoverJob job, int pipe)
         {
-            if (job.Solution == null) return double.NaN;
+            if (job.Solution == null) return (double.NaN, 0, 0);
             RoutePipe rp = job.Route.Pipes[pipe];
             ProfilePipe p = job.Solution.Pipes.Find(x => x.Section == rp.Section && x.S0 <= rp.S0 + 1e-6 && x.S1 >= rp.S0 - 1e-6);
-            return p == null ? double.NaN : p.ZAt(rp.S0) - p.Source.InnerHeight / 2.0;
+            return p == null ? (double.NaN, 0, 0) : (p.ZAt(rp.S0), p.Source.InnerHeight, rp.S0);
         }
 
         /// <summary>Names the proposed pipes the way they will be applied: reused originals keep their names, extras are new copies.</summary>

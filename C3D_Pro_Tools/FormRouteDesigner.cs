@@ -35,6 +35,9 @@ namespace C3DProTools
         private readonly List<(Control card, int[] sections)> _optionCards = new List<(Control, int[])>();
         private readonly ToolTip _tips = new ToolTip { AutoPopDelay = 20000 };
         private readonly Label _lblStatus = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Anchor = AnchorStyles.Left, Margin = new Padding(3, 10, 3, 3) };
+        /// <summary>Shown while routes are optimised (in the background): stops the search.</summary>
+        private readonly Button _btnCancelSolve = StyleUi.Secondary("Cancel");
+        private System.Threading.CancellationTokenSource _solving;
 
         private readonly Dictionary<string, ObjectId> _surfaces = new Dictionary<string, ObjectId>();
         private readonly Dictionary<string, ObjectId> _gravityNetworks = new Dictionary<string, ObjectId>(StringComparer.OrdinalIgnoreCase);
@@ -99,6 +102,14 @@ namespace C3DProTools
             };
             FormClosing += (s, e) =>
             {
+                // A search still running is stopped first; the window stays until it has finished.
+                if (_solving != null)
+                {
+                    _solving.Cancel();
+                    e.Cancel = true;
+                    SetStatus("Stopping the optimisation… close again when it has stopped.");
+                    return;
+                }
                 TryReadOptions(out _, false);
                 _s.Section = _nav.Selected;
                 _s.Width = ClientSize.Width;
@@ -124,9 +135,14 @@ namespace C3DProTools
 
         private Control BuildFooter()
         {
-            TableLayoutPanel footer = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, BackColor = StyleUi.Panel, Padding = new Padding(12, 4, 12, 6) };
+            TableLayoutPanel footer = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 2, BackColor = StyleUi.Panel, Padding = new Padding(12, 4, 12, 6) };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             footer.Paint += (s, e) => { using (Pen p = new Pen(StyleUi.Border)) e.Graphics.DrawLine(p, 0, 0, footer.Width, 0); };
-            footer.Controls.Add(_lblStatus);
+            footer.Controls.Add(_lblStatus, 0, 0);
+            _btnCancelSolve.Visible = false;
+            _btnCancelSolve.Click += (s, e) => { _solving?.Cancel(); SetStatus("Stopping…"); };
+            footer.Controls.Add(_btnCancelSolve, 1, 0);
             return footer;
         }
 
@@ -185,8 +201,14 @@ namespace C3DProTools
 
             TableLayoutPanel crossings = ToolUi.Card("Crossing pipes");
             ToolUi.Field(crossings, "Keep", ToolUi.WithUnit(_txtClearance, "m (0 = ignore)"), _tips,
-                "Pipes of other routes and networks crossing the route are passed under (or over, when under breaks the cover limits) with this clear distance.");
+                "Pipes of other routes and networks crossing the route are passed under (or over, when under breaks the cover limits) with this clear distance. " +
+                "With the clearance matrix on (Design rules), each crossing takes the clearance for its pair of utilities instead.");
             AddCard(stack, crossings, SCover, SDraw);
+
+            TableLayoutPanel rules = ToolUi.Card("Design rules",
+                "Junction matching, minimum drops and backdrops, slopes by size, cover margin and zones, dry utility bends and pulls, crossing clearances.");
+            ToolUi.Wide(rules, StyleUi.Secondary("Design rules…", (s, e) => EditRules()));
+            AddCard(stack, rules, SCover, SDraw);
 
             TableLayoutPanel reading = ToolUi.Card("Reading routes");
             ToolUi.Field(reading, "Max gap", ToolUi.WithUnit(_txtGap, "m"), _tips, "Pipe ends without a structure count as joined up to this distance apart.");
@@ -298,7 +320,8 @@ namespace C3DProTools
                 MinCover = minCover, MaxCover = maxCover, MinLength = minLength, MaxLength = maxLength,
                 MinSlope = minSlope / 100.0, MaxSlope = maxSlope / 100.0, MaxSlopeChange = maxChange / 100.0,
                 MaxDrop = maxDrop, StartFixed = _cbStart.SelectedIndex == 0, EndFixed = _cbEnd.SelectedIndex == 0,
-                PreferGentleBends = _cbPrefer.SelectedIndex == 0, CrossingClearance = clearance
+                PreferGentleBends = _cbPrefer.SelectedIndex == 0, CrossingClearance = clearance,
+                Rules = _s.Rules ?? new CoverRules()
             };
             _s.Mode = mode;
             _s.Surface = _cbSurface.Text;
@@ -318,6 +341,18 @@ namespace C3DProTools
             _s.Save();
             _settings.Save();
             return true;
+        }
+
+        private void EditRules()
+        {
+            using (FormCoverRules f = new FormCoverRules(_s.Rules))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                _s.Rules = f.Rules;
+            }
+            _s.Save();
+            InvalidateResults();
+            SetStatus("Design rules saved. Check or optimise the routes again to use them.");
         }
 
         private CoverJobs.Setup ReadSetup()

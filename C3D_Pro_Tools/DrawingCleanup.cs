@@ -88,7 +88,7 @@ namespace C3DProTools
                 {
                     side.ReadDwgFile(temp, FileOpenMode.OpenForReadAndAllShare, true, null);
                     side.CloseInput(true);
-                    VerifyCopy(doc.Database, side);
+                    VerifyCopy(doc.Database, side, report);
 
                     Database previous = HostApplicationServices.WorkingDatabase;
                     HostApplicationServices.WorkingDatabase = side;
@@ -118,16 +118,24 @@ namespace C3DProTools
 
         /// <summary>
         /// The copy must hold everything the drawing does; checked rather than assumed, since a copy missing something would
-        /// be saved as a wrong "cleaned" drawing.
+        /// be saved as a wrong "cleaned" drawing. Each count is compared and every difference reported exactly. Proxy objects
+        /// (custom objects whose application is not loaded) are the one thing Wblock may leave out: that is noted, not stopped.
         /// </summary>
-        private static void VerifyCopy(Database original, Database copy)
+        private static void VerifyCopy(Database original, Database copy, CleanupReport report)
         {
             Dictionary<string, int> a = Census(original), b = Census(copy);
-            List<string> lost = a.Where(kv => b.TryGetValue(kv.Key, out int n) && n < kv.Value).Select(kv => $"{kv.Value - b[kv.Key]} {kv.Key}").ToList();
+            List<string> deltas = a.Where(kv => b.TryGetValue(kv.Key, out int n) && n != kv.Value)
+                                   .Select(kv => $"{kv.Key}: {kv.Value} in the drawing, {b[kv.Key]} in the copy").ToList();
+            foreach (string d in deltas) report.Notes.Add("Copy check — " + d);
+            List<string> lost = a.Where(kv => kv.Key != ProxyKey && b.TryGetValue(kv.Key, out int n) && n < kv.Value).Select(kv => $"{kv.Value - b[kv.Key]} {kv.Key}").ToList();
             if (lost.Count > 0)
                 throw new InvalidOperationException("The copy of the drawing made for cleaning is missing " + string.Join(", ", lost) +
-                                                    ". Nothing was cleaned or saved, and the drawing on screen is unchanged.");
+                                                    " (" + string.Join("; ", deltas) + "). Nothing was cleaned or saved, and the drawing on screen is unchanged.");
+            if (b[ProxyKey] < a[ProxyKey])
+                report.Notes.Add($"{a[ProxyKey] - b[ProxyKey]} proxy object(s) (custom objects whose application is not loaded) were left out of the copy by AutoCAD.");
         }
+
+        private const string ProxyKey = "proxy objects";
 
         private static Dictionary<string, int> Census(Database db)
         {
@@ -135,7 +143,10 @@ namespace C3DProTools
             using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
             {
                 BlockTableRecord ms = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
-                c["model space objects"] = ms.Cast<ObjectId>().Count();
+                List<ObjectId> all = ms.Cast<ObjectId>().ToList();
+                int proxies = all.Count(id => id.ObjectClass.DxfName == "ACAD_PROXY_ENTITY");
+                c["model space objects"] = all.Count - proxies;
+                c[ProxyKey] = proxies;
                 DBDictionary layouts = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
                 c["layouts"] = layouts.Count;
                 CivilDocument civil = CivilDocument.GetCivilDocument(db);

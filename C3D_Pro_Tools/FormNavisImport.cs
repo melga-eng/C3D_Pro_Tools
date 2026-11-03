@@ -63,6 +63,11 @@ namespace C3DProTools
         private readonly TransientMarkers _markers = new TransientMarkers();
         /// <summary>Cancelled when the window closes, so a Navisworks request still waiting is given up.</summary>
         private readonly System.Threading.CancellationTokenSource _life = new System.Threading.CancellationTokenSource();
+        /// <summary>The "Get selection" request waiting for Navisworks (its Cancel button stops it).</summary>
+        private System.Threading.CancellationTokenSource _reading;
+        private readonly Button _btnCancelGet = StyleUi.Secondary("Cancel");
+        // Navisworks → drawing: turn (°) about the origin, then shift (m).
+        private readonly TextBox _txtDx = ToolUi.Number(0, 80), _txtDy = ToolUi.Number(0, 80), _txtDz = ToolUi.Number(0, 60), _txtRot = ToolUi.Number(0, 55);
         /// <summary>The drawing the matched parts, chosen parts (overrides) and "already imported" marks belong to.</summary>
         private Document _doc;
 
@@ -187,6 +192,10 @@ namespace C3DProTools
             Button get = StyleUi.Primary("⬇  Get selection from Navisworks", async (s, e) => await GetSelection());
             get.Margin = new Padding(8, 4, 3, 3);
             bar.Controls.Add(get);
+            _btnCancelGet.Margin = new Padding(3, 4, 3, 3);
+            _btnCancelGet.Visible = false;
+            _btnCancelGet.Click += (s, e) => _reading?.Cancel();
+            bar.Controls.Add(_btnCancelGet);
             _lblLink.Margin = new Padding(12, 10, 3, 3);
             bar.Controls.Add(_lblLink);
             return bar;
@@ -419,7 +428,10 @@ namespace C3DProTools
             _chkDrawingLists.CheckedChanged += (s, e) => { if (_plan.Count > 0) RunPlan(false); };
             StyleCard cParts = new StyleCard("Parts", "", parts);
 
-            TableLayoutPanel nets = Grid2(("Group by", _cbGrouping), ("Name prefix", _txtPrefix), ("Surface", _cbSurface));
+            FlowLayoutPanel shift = ToolUi.Inline(Small("X"), _txtDx, Small("Y"), _txtDy, Small("Z"), _txtDz, Small("turn"), _txtRot, Small("°"));
+            TableLayoutPanel nets = Grid2(("Group by", _cbGrouping), ("Name prefix", _txtPrefix), ("Surface", _cbSurface), ("Shift (m)", shift));
+            _tips.SetToolTip(shift, "For a model on a local or shared grid: Navisworks coordinates are turned about the origin (counter-clockwise), then shifted. " +
+                                    "Used when the selection is read: get the selection again after changing it.");
             StyleCard cNets = new StyleCard("Networks", "", nets);
 
             _cbNoSize.Items.AddRange(new object[] { "Import the exact 3D solid", "Use the nearest size anyway" });
@@ -462,7 +474,22 @@ namespace C3DProTools
             _cbGrouping.SelectedIndexChanged += (s, e) => RefreshNetworks();
             _txtPrefix.TextChanged += (s, e) => RefreshNetworks();
             _txtPartsList.Leave += (s, e) => InvalidatePlan();
+            _txtDx.Text = ToolUi.Format(_settings.TransformDx);
+            _txtDy.Text = ToolUi.Format(_settings.TransformDy);
+            _txtDz.Text = ToolUi.Format(_settings.TransformDz);
+            _txtRot.Text = ToolUi.Format(_settings.TransformRotationDeg);
+            foreach (TextBox box in new[] { _txtDx, _txtDy, _txtDz, _txtRot })
+                box.TextChanged += (s, e) => { if (_rows.Count > 0) SetStatus("The shift is used when the selection is read: click \"Get selection from Navisworks\" again.", true); };
             return row;
+        }
+
+        private static Label Small(string text) => new Label { Text = text, AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(4, 7, 2, 0) };
+
+        /// <summary>The shift and turn from the option boxes (a box that is not a number counts as 0).</summary>
+        private NavisTransform ReadTransform()
+        {
+            double Value(TextBox box) => ToolUi.TryNumber(box, out double v) ? v : 0;
+            return new NavisTransform { Dx = Value(_txtDx), Dy = Value(_txtDy), Dz = Value(_txtDz), RotationDeg = Value(_txtRot) };
         }
 
         /// <summary>Label / control pairs; labels are centred on their row, controls stretch, and the grid scrolls if the card is too small.</summary>
@@ -559,6 +586,8 @@ namespace C3DProTools
             _settings.MaxPartErrorMm = (int)_numMaxError.Value;
             _settings.NoSizeMode = Math.Max(0, _cbNoSize.SelectedIndex);
             _settings.SearchDrawingLists = _chkDrawingLists.Checked;
+            NavisTransform t = ReadTransform();
+            _settings.TransformDx = t.Dx; _settings.TransformDy = t.Dy; _settings.TransformDz = t.Dz; _settings.TransformRotationDeg = t.RotationDeg;
         }
 
         private NavisImportOptions Options()
@@ -691,18 +720,29 @@ namespace C3DProTools
             if (pipe == null) return;
             _busy = true;
             UseWaitCursor = true;
-            SetStatus("Reading the selection and its geometry from Navisworks…");
+            SetStatus("Reading the selection and its geometry from Navisworks… (Cancel stops waiting)");
             NavisResponse response;
             Stopwatch sw = Stopwatch.StartNew();
-            try { response = await Task.Run(() => NavisLinkWire.Send(pipe, new NavisRequest { Command = "selection" }, 3000, 120000, _life.Token)); }
+            _reading = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+            _btnCancelGet.Visible = true;
+            try
+            {
+                System.Threading.CancellationToken token = _reading.Token;
+                response = await Task.Run(() => NavisLinkWire.Send(pipe, new NavisRequest { Command = "selection" }, 3000, 120000, token));
+            }
             catch (Exception ex)
             {
                 if (IsDisposed) return;
                 _busy = false; UseWaitCursor = false;
-                SetStatus(ex is InvalidDataException ? ex.Message : "Navisworks did not answer: " + ex.Message, true);
+                SetStatus(ex is OperationCanceledException ? "Stopped waiting for Navisworks." : ex is InvalidDataException ? ex.Message : "Navisworks did not answer: " + ex.Message, true);
                 return;
             }
-            finally { if (!IsDisposed) UseWaitCursor = false; }
+            finally
+            {
+                _reading?.Dispose();
+                _reading = null;
+                if (!IsDisposed) { UseWaitCursor = false; _btnCancelGet.Visible = false; }
+            }
             // The window may have been closed while Navisworks was answering.
             if (IsDisposed) return;
             _busy = false;
@@ -711,10 +751,15 @@ namespace C3DProTools
 
             _sourceDocument = response.Document;
             _rows.Clear(); _plan.Clear(); _done.Clear(); _ticked.Clear(); _overrides.Clear();
+            NavisTransform transform = ReadTransform();
             foreach (NavisElement e in response.Elements)
             {
                 ImportCandidate c;
-                try { c = NavisInterpreter.Read(e); }
+                try
+                {
+                    c = NavisInterpreter.Read(e);
+                    transform.Apply(c);
+                }
                 catch (Exception ex) { c = new ImportCandidate { Source = e, Name = e.Name, Guid = e.Guid, Detected = ImportKind.Solid, Action = ImportKind.Solid }; c.Notes.Add("Could not be read: " + ex.Message); }
                 _rows.Add(c);
                 if (c.Action != ImportKind.Skip) _ticked.Add(c);
