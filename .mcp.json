@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "type": "stdio",
+      "command": "C:/Users/melga/.local/bin/graphify-mcp.exe",
+      "args": [
+        "graphify-out/graph.json"
+      ],
+      "env": {}
+    }
+  }
+}

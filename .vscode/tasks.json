@@ -1,0 +1,48 @@
+{
+    // Run with Ctrl+Shift+B (default build) or Terminal > Run Task...
+    // The installer tasks run build.ps1, which uses Visual Studio's own MSBuild.exe, because the WiX v3
+    // installer project cannot be built by the `dotnet` CLI that VS Code uses by default.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Plugin (Debug)",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/C3D_Pro_Tools/C3D_Pro_Tools.csproj", "-c", "Debug"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Build Plugin + Installer (Release)",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-Configuration", "Release"],
+            "group": "build",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Rebuild Plugin + Installer (Release)",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-Configuration", "Release", "-Rebuild"],
+            "group": "build",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Build Plugin + Installer (Debug)",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-Configuration", "Debug"],
+            "group": "build",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Install C3D Pro Tools (Release MSI)",
+            "type": "process",
+            "command": "msiexec.exe",
+            "args": ["/i", "${workspaceFolder}\\C3DProInstaller\\bin\\Release\\C3DProInstaller.msi"],
+            "dependsOn": "Build Plugin + Installer (Release)",
+            "problemMatcher": []
+        }
+    ]
+}

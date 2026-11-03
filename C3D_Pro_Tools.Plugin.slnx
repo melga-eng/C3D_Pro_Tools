@@ -1,0 +1,6 @@
+<!-- Plugin-only solution for VS Code's C# Dev Kit, which restores/builds with the `dotnet` CLI and cannot load
+     the WiX v3 installer project. Visual Studio uses C3D_Pro_Tools.slnx (plugin + installer). -->
+<Solution>
+  <Project Path="C3D_Pro_Tools/C3D_Pro_Tools.csproj" />
+  <Project Path="tests/C3D_Pro_Tools.Tests/C3D_Pro_Tools.Tests.csproj" />
+</Solution>

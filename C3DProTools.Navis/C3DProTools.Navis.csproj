@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Navisworks Manage 2026 add-in. Navisworks still runs on .NET Framework 4.8, so this is a separate, small assembly;
+	     the shared link protocol is compiled into both it and the Civil 3D plugin. Navisworks loads it from
+	     %ProgramData%\Autodesk\Navisworks Manage 2026\Plugins\C3DProTools.Navis\ (folder name = assembly name). -->
+	<PropertyGroup>
+		<TargetFramework>net48</TargetFramework>
+		<RootNamespace>C3DProTools.Navis</RootNamespace>
+		<AssemblyName>C3DProTools.Navis</AssemblyName>
+		<Version>1.1.0</Version>
+		<PlatformTarget>x64</PlatformTarget>
+		<LangVersion>latest</LangVersion>
+		<UseWindowsForms>true</UseWindowsForms>
+		<Nullable>disable</Nullable>
+		<NoWarn>MSB3277</NoWarn>
+	</PropertyGroup>
+	<PropertyGroup>
+		<!-- Where Navisworks Manage 2026 is installed. Override with -p:Navisworks2026Dir=... or a Navisworks2026Dir environment variable. -->
+		<Navisworks2026Dir Condition=" '$(Navisworks2026Dir)' == '' ">C:\Program Files\Autodesk\Navisworks Manage 2026\</Navisworks2026Dir>
+		<!-- A separate property: a value given on the command line cannot be changed by the project itself. -->
+		<NavisDir>$([MSBuild]::EnsureTrailingSlash('$(Navisworks2026Dir)'))</NavisDir>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="..\Shared\NavisLinkProtocol.cs" Link="Shared\NavisLinkProtocol.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<Reference Include="System.Runtime.Serialization" />
+		<Reference Include="Autodesk.Navisworks.Api"><HintPath>$(NavisDir)Autodesk.Navisworks.Api.dll</HintPath><Private>False</Private></Reference>
+		<Reference Include="Autodesk.Navisworks.ComApi"><HintPath>$(NavisDir)Autodesk.Navisworks.ComApi.dll</HintPath><Private>False</Private></Reference>
+		<Reference Include="Autodesk.Navisworks.Interop.ComApi"><HintPath>$(NavisDir)Autodesk.Navisworks.Interop.ComApi.dll</HintPath><Private>False</Private><EmbedInteropTypes>False</EmbedInteropTypes></Reference>
+	</ItemGroup>
+</Project>

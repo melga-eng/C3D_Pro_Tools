@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>C3DProTools</RootNamespace>
+		<AssemblyName>C3D_Pro_Tools</AssemblyName>
+		<Version>1.1.0</Version>
+		<Product>C3D Pro Tools</Product>
+		<Company>Mohamed Elgarhy</Company>
+		<Authors>Mohamed Elgarhy</Authors>
+		<Description>Civil 3D Pro Tools Suite: Style Manager, Navisworks Importer, Network Editor, Profile &amp; Cover Designer, Drawing Cleaner.</Description>
+		<UseWindowsForms>true</UseWindowsForms>
+		<UseWPF>true</UseWPF>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<PlatformTarget>x64</PlatformTarget>
+		<NoWarn>MSB3277</NoWarn>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- Where Civil 3D 2026 is installed. Override with -p:AutoCAD2026Dir=... or an AutoCAD2026Dir environment variable. -->
+		<AutoCAD2026Dir Condition=" '$(AutoCAD2026Dir)' == '' ">C:\Program Files\Autodesk\AutoCAD 2026\</AutoCAD2026Dir>
+		<!-- A separate property: a value given on the command line cannot be changed by the project itself. -->
+		<AcadDir>$([MSBuild]::EnsureTrailingSlash('$(AutoCAD2026Dir)'))</AcadDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Shared with the Navisworks add-in (C3DProTools.Navis), which runs on .NET Framework 4.8. -->
+		<Compile Include="..\Shared\NavisLinkProtocol.cs" Link="Shared\NavisLinkProtocol.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="acmgd">
+			<HintPath>$(AcadDir)acmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="acdbmgd">
+			<HintPath>$(AcadDir)acdbmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="accoremgd">
+			<HintPath>$(AcadDir)accoremgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AecBaseMgd">
+			<HintPath>$(AcadDir)Aca\AecBaseMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AeccDbMgd">
+			<HintPath>$(AcadDir)C3D\AeccDbMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AeccPressurePipesMgd">
+			<HintPath>$(AcadDir)C3D\AeccPressurePipesMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AdWindows">
+			<HintPath>$(AcadDir)AdWindows.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+	</ItemGroup>
+</Project>

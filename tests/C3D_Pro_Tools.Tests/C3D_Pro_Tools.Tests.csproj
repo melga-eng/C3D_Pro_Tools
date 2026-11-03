@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Offline tests for the plugin's pure engines. The engine source files are compiled in by link (no reference to the
+	     plugin assembly), so the tests need no AutoCAD / Civil 3D assemblies and run with plain `dotnet test`. -->
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>C3DProTools.Tests</RootNamespace>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<PlatformTarget>x64</PlatformTarget>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+		<!-- CS0649: some model fields are only written by the drawing side of the partial classes, which is not compiled here. -->
+		<NoWarn>$(NoWarn);CS0649</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Include="..\..\C3D_Pro_Tools\CoverRoute.Model.cs" Link="Engine\CoverRoute.Model.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\CoverSolver.cs" Link="Engine\CoverSolver.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\CoverEvaluation.cs" Link="Engine\CoverEvaluation.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NavisGeometryFit.cs" Link="Engine\NavisGeometryFit.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NavisInterpreter.cs" Link="Engine\NavisInterpreter.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NavisCatalogEditor.cs" Link="Engine\NavisCatalogEditor.cs" />
+		<Compile Include="..\..\Shared\NavisLinkProtocol.cs" Link="Engine\NavisLinkProtocol.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+		<PackageReference Include="xunit" Version="2.9.3" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+</Project>

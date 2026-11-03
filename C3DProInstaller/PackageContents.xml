@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" ProductType="Application" AppVersion="1.1.0" Name="C3D Pro Tools" Description="Civil 3D Pro Tools Suite" Author="Mohamed Elgarhy">
+	<CompanyDetails Name="Mohamed Elgarhy" />
+	<Components>
+		<!-- Built against the Civil 3D 2026 API on .NET 10 (requires Civil 3D 2026.2.2 or later updates of 2026). -->
+		<RuntimeRequirements OS="Win64" Platform="Civil3D" SeriesMin="R25.1" SeriesMax="R25.1" />
+		<ComponentEntry AppName="C3DProTools" ModuleName="./Contents/C3D_Pro_Tools.dll" AppDescription="C3D Pro Tools" LoadOnCommandInvocation="False" LoadOnAutoCADStartup="True" />
+	</Components>
+</ApplicationPackage>

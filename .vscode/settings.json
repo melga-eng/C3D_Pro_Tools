@@ -1,0 +1,4 @@
+{
+    // C# Dev Kit loads this plugin-only solution, so it never tries to restore the WiX v3 installer project.
+    "dotnet.defaultSolution": "C3D_Pro_Tools.Plugin.slnx"
+}

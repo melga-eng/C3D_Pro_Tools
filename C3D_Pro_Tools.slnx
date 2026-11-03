@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="C3D_Pro_Tools/C3D_Pro_Tools.csproj" />
+  <Project Path="C3DProTools.Navis/C3DProTools.Navis.csproj" />
+  <Project Path="tests/C3D_Pro_Tools.Tests/C3D_Pro_Tools.Tests.csproj" />
+  <Project Path="C3DProInstaller/C3DProInstaller.wixproj" Id="207450f3-2b55-48f3-aa4f-b8aca99bdaee">
+    <Platform Project="x86" />
+    <Build />
+  </Project>
+</Solution>
