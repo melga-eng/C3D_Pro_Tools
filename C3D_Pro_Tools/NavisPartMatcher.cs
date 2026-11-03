@@ -60,7 +60,7 @@ namespace C3DProTools
                 ctx.Pipe = NavisCatalogEditor.ActiveCatalog(ctx.All, PartsList.GetAvailablePartFamilies(DomainType.Pipe).Select(f => f.GUID).ToList());
                 ctx.Structure = NavisCatalogEditor.ActiveCatalog(ctx.All, PartsList.GetAvailablePartFamilies(DomainType.Structure).Select(f => f.GUID).ToList());
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return ctx;
         }
 
@@ -341,7 +341,7 @@ namespace C3DProTools
                 }
                 SetMaterial(rec, c.Material);
                 size.SizeDataRecord = rec;
-                try { size.Name = name; } catch (Exception) { }
+                try { size.Name = name; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             catch (Exception) { TryRemoveSize(fam, sizeId); if (added) RemoveFamily(fam); return null; }
 
@@ -376,7 +376,7 @@ namespace C3DProTools
                     if (NavisInterpreter.MaterialKey(option) == key || (key == "corrugated metal" && option.IndexOf("steel", StringComparison.OrdinalIgnoreCase) >= 0)) { f.Value = option; return; }
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         private static double Mm1(double metres) => Math.Round(metres * 1000);
@@ -788,7 +788,7 @@ namespace C3DProTools
 
         private void TryRemoveSize(PartFamily fam, ObjectId id)
         {
-            try { fam.RemovePartSize(id); } catch (Exception) { }
+            try { fam.RemovePartSize(id); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
         }
 
         private PartFamily EnsureFamily(DomainType domain, DataPartFamily data, out bool added)
@@ -815,7 +815,7 @@ namespace C3DProTools
                 CreatedFamilies.Remove(fam.ObjectId);
                 _list.RemovePartFamily(fam.ObjectId);
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         internal static SizeFilterField Param(SizeFilterRecord rec, PartContextType context)
@@ -854,7 +854,7 @@ namespace C3DProTools
                 if (f.IsFromList) { PartDataList list = f.ValueList; for (int i = 0; i < list.Count; i++) values.Add(list[i]); }
                 else values.Add(f.Value);
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return values;
         }
 
@@ -878,7 +878,7 @@ namespace C3DProTools
                     for (int i = 0; i < list.Count; i++) { object v = list[i]; values.Add((v, ToMetres(f, v))); }
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (values.Count == 0)
             {
                 try { values.Add((f.Value, ToMetres(f, f.Value))); } catch (Exception) { values.Add((null, 0)); }
@@ -898,7 +898,7 @@ namespace C3DProTools
         /// </summary>
         internal static double WallOf(PartFamily fam, PartDataRecord r)
         {
-            try { PartDataField f = r.GetDataFieldBy(PartContextType.WallThickness); if (f != null) return ToMetres(f, f.Value); } catch (Exception) { }
+            try { PartDataField f = r.GetDataFieldBy(PartContextType.WallThickness); if (f != null) return ToMetres(f, f.Value); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 SizeFilterRecord rec = new SizeFilterRecord(fam);
@@ -911,7 +911,7 @@ namespace C3DProTools
                         SizeFilterField filter = rec.GetParamByContextAndIndex(ctx, 0);
                         if (own != null && filter != null && !filter.IsReadOnly) filter.Value = own.Value;
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 SizeFilterField w = rec.GetParamByContextAndIndex(PartContextType.WallThickness, 0);
                 return w == null ? 0 : ToMetres(w, w.Value);

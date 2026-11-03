@@ -173,7 +173,7 @@ namespace C3DProTools.Navis
             response.SelectedCount = found.Count;
             if (found.Count > 0)
             {
-                try { ComApiBridge.State.ZoomInCurViewOnCurSel(); } catch (Exception) { }
+                try { ComApiBridge.State.ZoomInCurViewOnCurSel(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return response;
         }

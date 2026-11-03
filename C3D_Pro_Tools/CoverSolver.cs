@@ -474,7 +474,7 @@ namespace C3DProTools
             if (rule == JunctionMatchRule.None)
             {
                 // Free, but the invert steps at most this far up or down through the structure.
-                double step = _rules.FreeStepFor(_o.Mode), invIn = zIn - dIn / 2.0;
+                double step = _rules.FreeStepTolerance(_o.Mode), invIn = zIn - dIn / 2.0;
                 if (double.IsPositiveInfinity(step))
                     for (int k2 = _kLo[r2]; k2 <= _kHi[r2]; k2++) Mark(r2, k2, layer, e.Cost, e.Bend, e, double.NaN, 0, 0, list);
                 else MarkBand(r2, invIn - step + dOut / 2.0, invIn + step + dOut / 2.0, layer, e.Cost, e, list);

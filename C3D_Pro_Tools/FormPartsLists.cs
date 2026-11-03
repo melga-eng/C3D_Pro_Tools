@@ -208,7 +208,7 @@ namespace C3DProTools
                         int used = _usage.TryGetValue(n.SizeId, out int u) ? u : 0;
                         _title.Text = s.Name;
                         string dims = "";
-                        try { dims = PartsListTools.Describe(PartsListTools.ReadValues(f, s.SizeDataRecord)); } catch (Exception) { }
+                        try { dims = PartsListTools.Describe(PartsListTools.ReadValues(f, s.SizeDataRecord)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         _detail.Text = $"{f.Name} in \"{pl.Name}\". {dims}. " + (used > 0 ? $"{used} part(s) use this size." : "No part uses it.");
                         Action("New size…", () => NewSize(n.ListId, n.FamilyId));
                         Action("Remove size", () => RemoveSize(n.FamilyId, n.SizeId, s.Name), used == 0 && f.PartSizeCount > 1,

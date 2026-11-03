@@ -42,7 +42,7 @@ namespace C3DProTools.Navis
         {
             _stopping = true;
             // Wake the waiting server so the thread can end.
-            try { using (NamedPipeClientStream c = new NamedPipeClientStream(".", PipeName)) c.Connect(200); } catch (Exception) { }
+            try { using (NamedPipeClientStream c = new NamedPipeClientStream(".", PipeName)) c.Connect(200); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         private static void Serve()
@@ -65,7 +65,8 @@ namespace C3DProTools.Navis
                         {
                             response = new NavisResponse { Ok = false, Error = NavisLinkWire.Describe(ex) };
                         }
-                        try { NavisLinkWire.Write(pipe, response); } catch (Exception) { }
+                        // Civil 3D may have stopped waiting (timeout, window closed): the answer has no one to go to.
+                        try { NavisLinkWire.Write(pipe, response); } catch (Exception ex) { C3DProLogger.Warn("Navis link: the answer could not be sent back to Civil 3D", ex); }
                         Served++;
                     }
                 }

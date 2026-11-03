@@ -13,7 +13,7 @@ namespace C3DProTools
         public static ObjectId SizeIdOf(Transaction tr, Pipe pipe)
         {
             ObjectId sizeId = ObjectId.Null;
-            try { sizeId = pipe.GetPartSizeId(); } catch (Exception) { }
+            try { sizeId = pipe.GetPartSizeId(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return sizeId.IsNull ? ResolvePartSizeId(tr, pipe.PartFamilyId, pipe.PartSizeName) : sizeId;
         }
 

@@ -21,6 +21,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="..\Shared\NavisLinkProtocol.cs" Link="Shared\NavisLinkProtocol.cs" />
+		<Compile Include="..\Shared\C3DProLogger.cs" Link="Shared\C3DProLogger.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="System.Runtime.Serialization" />

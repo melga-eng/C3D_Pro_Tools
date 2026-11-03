@@ -128,7 +128,7 @@ namespace C3DProTools
                     if (rule == JunctionMatchRule.None)
                     {
                         double step = rules.FreeStepFor(o.Mode), change = (b.Z0 - dOut / 2.0) - (a.Z1 - dIn / 2.0);
-                        if (Math.Abs(change) > step + 1e-6) rows[i].Issue($"Invert steps {change:+0.00;-0.00} m through the structure, more than ±{step:0.00} m");
+                        if (Math.Abs(change) > rules.FreeStepTolerance(o.Mode) + 1e-6) rows[i].Issue($"Invert steps {change:+0.00;-0.00} m through the structure, more than ±{step:0.00} m");
                         continue;
                     }
                     double matched = CoverRules.MaxOutletCentre(rule, a.Z1, dIn, dOut);

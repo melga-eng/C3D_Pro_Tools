@@ -145,6 +145,12 @@ namespace C3DProTools
         /// <summary>The most the invert may step either way through a structure with a free junction (+∞ when not limited).</summary>
         public double FreeStepFor(CoverMode mode) => mode == CoverMode.Dry ? Math.Max(0, DryMaxStep) : double.PositiveInfinity;
 
+        /// <summary>
+        /// The step the solver and the checks accept: the rule's, but never less than half the solver's level grid, so a flush
+        /// (0 m) step between two sizes whose half-difference is not a whole number of grid steps still finds the nearest level.
+        /// </summary>
+        public double FreeStepTolerance(CoverMode mode) => Math.Max(FreeStepFor(mode), CoverSolver.ElevationStep * 0.5 + 1e-6);
+
         /// <summary>The minimum drop at a gravity manhole turning by <paramref name="deflectionDeg"/>; none for dry utilities.</summary>
         public double MinDropFor(CoverMode mode, double deflectionDeg)
         {

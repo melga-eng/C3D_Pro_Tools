@@ -26,6 +26,7 @@
 	<ItemGroup>
 		<!-- Shared with the Navisworks add-in (C3DProTools.Navis), which runs on .NET Framework 4.8. -->
 		<Compile Include="..\Shared\NavisLinkProtocol.cs" Link="Shared\NavisLinkProtocol.cs" />
+		<Compile Include="..\Shared\C3DProLogger.cs" Link="Shared\C3DProLogger.cs" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -58,8 +58,8 @@ namespace C3DProTools
                 foreach (RoutePipe rp in sec.Pipes)
                 {
                     Pipe pipe = (Pipe)tr.GetObject(rp.Id, OpenMode.ForWrite);
-                    try { if (!pipe.StartStructureId.IsNull) pipe.Disconnect(ConnectorPositionType.Start); } catch (Exception) { }
-                    try { if (!pipe.EndStructureId.IsNull) pipe.Disconnect(ConnectorPositionType.End); } catch (Exception) { }
+                    try { if (!pipe.StartStructureId.IsNull) pipe.Disconnect(ConnectorPositionType.Start); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { if (!pipe.EndStructureId.IsNull) pipe.Disconnect(ConnectorPositionType.End); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
 
                 List<(Pipe pipe, bool forward)> placed = new List<(Pipe, bool)>();
@@ -175,7 +175,7 @@ namespace C3DProTools
 
                 Connect(upstream.pipe, upstream.forward, false, structureId, ed);
                 Connect(downstream.pipe, downstream.forward, true, structureId, ed);
-                try { st.SumpElevation = lowestInvert; } catch (Exception) { }
+                try { st.SumpElevation = lowestInvert; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
                 result.NewStructures++;
                 result.StructureIds.Add(structureId);

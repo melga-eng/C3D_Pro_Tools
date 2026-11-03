@@ -84,15 +84,15 @@ namespace C3DProTools
         private static LabelInfo Read(Transaction tr, FeatureLabel fl, LabelKind kind)
         {
             LabelInfo info = new LabelInfo { Id = fl.ObjectId, Kind = kind };
-            try { info.Style = fl.StyleName; } catch (Exception) { }
+            try { info.Style = fl.StyleName; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try { info.Location = fl.LabelLocation; } catch (Exception) { return null; }
             try { info.Anchor = fl.AnchorInfo.Location; } catch (Exception) { info.Anchor = info.Location; }
-            try { info.Dragged = fl.Dragged; } catch (Exception) { }
+            try { info.Dragged = fl.Dragged; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             ObjectId feature = ObjectId.Null;
-            try { feature = fl.FeatureId; } catch (Exception) { }
+            try { feature = fl.FeatureId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (info.IsProfile)
             {
-                try { info.ViewId = fl.ViewId; } catch (Exception) { }
+                try { info.ViewId = fl.ViewId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (!feature.IsNull && tr.GetObject(feature, OpenMode.ForRead) is ProfileViewPart vp) { info.PartId = vp.ModelPartId; info.ViewPartId = feature; }
                 else info.PartId = feature;
             }
@@ -118,7 +118,7 @@ namespace C3DProTools
             double firstText = 0;
             textHeight = 0;
             DBObjectCollection parts = new DBObjectCollection();
-            try { label.Explode(parts); } catch (Exception) { }
+            try { label.Explode(parts); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             List<DBObject> toDispose = new List<DBObject>();
             void Collect(DBObject o, int depth)
             {
@@ -127,7 +127,7 @@ namespace C3DProTools
                 {
                     case BlockReference br when depth < 3:
                         DBObjectCollection sub = new DBObjectCollection();
-                        try { br.Explode(sub); } catch (Exception) { }
+                        try { br.Explode(sub); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         foreach (DBObject s in sub) Collect(s, depth + 1);
                         break;
                     case Leader _:
@@ -150,7 +150,7 @@ namespace C3DProTools
                 }
             }
             foreach (DBObject o in parts) Collect(o, 0);
-            foreach (DBObject o in toDispose) try { o.Dispose(); } catch (Exception) { }
+            foreach (DBObject o in toDispose) try { o.Dispose(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
             textHeight = firstText;
             if (pts.Count >= 2) return pts;
             // Labels Civil 3D will not break apart (profile structure labels, for one): their extents, leader included.
@@ -176,7 +176,7 @@ namespace C3DProTools
                     if (h > 0) return h * paperPerUnit;
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return 0;
         }
 
@@ -201,7 +201,7 @@ namespace C3DProTools
                 pts.Add(x.MinPoint); pts.Add(x.MaxPoint);
                 pts.Add(new Point3d(x.MinPoint.X, x.MaxPoint.Y, 0)); pts.Add(new Point3d(x.MaxPoint.X, x.MinPoint.Y, 0));
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         // ---------------- Locking hand-placed labels ----------------
@@ -231,7 +231,7 @@ namespace C3DProTools
                 DBObject obj = tr.GetObject(id, OpenMode.ForRead);
                 if (obj is CLabel label)
                 {
-                    try { if (!label.StyleId.IsNull) styles.Add(label.StyleId); } catch (Exception) { }
+                    try { if (!label.StyleId.IsNull) styles.Add(label.StyleId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 else if (obj is MLeader ml && ml.ContentType == ContentType.MTextContent)
                 {
@@ -290,7 +290,7 @@ namespace C3DProTools
                 double ratio = 0.5;
                 if (l.IsPipe && tr.GetObject(l.Id, OpenMode.ForRead) is DBObject o)
                 {
-                    try { ratio = o is PipeLabel pl ? pl.Ratio : o is PipeProfileLabel ppl ? ppl.Ratio : 0.5; } catch (Exception) { }
+                    try { ratio = o is PipeLabel pl ? pl.Ratio : o is PipeProfileLabel ppl ? ppl.Ratio : 0.5; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 // Positions near an end count as that end (labels "at the end" are a little inside it).
                 if (l.IsPipe) ratio = ratio < 0.15 ? 0 : ratio > 0.85 ? 1 : Math.Round(ratio, 2);
@@ -313,7 +313,7 @@ namespace C3DProTools
                 foreach (ObjectId id in styles)
                     if (tr.GetObject(id, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.LabelStyle s) names.Add(s.Name);
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             names.Sort(StringComparer.OrdinalIgnoreCase);
             return names;
         }
@@ -378,7 +378,7 @@ namespace C3DProTools
 
                 ObjectIdCollection views = new ObjectIdCollection();
                 if (items.Any(i => i.Kind == LabelKind.ProfilePipe || i.Kind == LabelKind.ProfileStructure))
-                    try { views = ((Part)part).GetProfileViewsDisplayingMe(); } catch (Exception) { }
+                    try { views = ((Part)part).GetProfileViewsDisplayingMe(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
                 // A part gets as many labels of a style as the set has (two end labels of one style, for example); those already
                 // there count.
@@ -444,7 +444,7 @@ namespace C3DProTools
             foreach (ObjectId id in ms)
             {
                 if (!id.ObjectClass.IsDerivedFrom(partClass)) continue;
-                try { map[((ProfileViewPart)tr.GetObject(id, OpenMode.ForRead)).ModelPartId] = id; } catch (Exception) { }
+                try { map[((ProfileViewPart)tr.GetObject(id, OpenMode.ForRead)).ModelPartId] = id; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return map;
         }    }

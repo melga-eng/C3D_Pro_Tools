@@ -345,9 +345,9 @@ namespace C3DProTools
             {
                 Part part = (Part)tr.GetObject(picked.ObjectId, OpenMode.ForRead);
                 partName = part.Name;
-                try { drawnSize = part.PartSizeName; } catch (Exception) { }
+                try { drawnSize = part.PartSizeName; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 ObjectId famId = ObjectId.Null, sizeId = ObjectId.Null;
-                try { famId = part.PartFamilyId; sizeId = part.GetPartSizeId(); } catch (Exception) { }
+                try { famId = part.PartFamilyId; sizeId = part.GetPartSizeId(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (PartCopy.IsFamily(tr, famId))
                 {
                     familyName = ((PartFamily)tr.GetObject(famId, OpenMode.ForRead)).Name;
@@ -362,7 +362,7 @@ namespace C3DProTools
                     {
                         values[PartContextType.PipeInnerWidth] = p.InnerDiameterOrWidth;
                         values[PartContextType.PipeInnerHeight] = p.InnerHeight;
-                        try { values[PartContextType.WallThickness] = Math.Max(0, p.WallThickness); } catch (Exception) { }
+                        try { values[PartContextType.WallThickness] = Math.Max(0, p.WallThickness); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     }
                     else if (part is Structure st)
                     {
@@ -370,7 +370,7 @@ namespace C3DProTools
                         values[PartContextType.StructInnerLength] = st.InnerLength;
                     }
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             _pickedPart = picked.ObjectId;
             if (listName != null && sizeName != null)

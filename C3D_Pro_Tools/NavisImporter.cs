@@ -368,7 +368,7 @@ namespace C3DProTools
                 case ExistingMode.Replace:
                     foreach (ObjectId id in ids)
                     {
-                        try { tr.GetObject(id, OpenMode.ForWrite, false, true).Erase(); } catch (Exception) { }
+                        try { tr.GetObject(id, OpenMode.ForWrite, false, true).Erase(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
                     }
                     outcome.Detail = (outcome.Detail + " Replaced the earlier import.").Trim();
                     return true;
@@ -472,7 +472,7 @@ namespace C3DProTools
             for (int i = 0; i < 50; i++)
             {
                 try { part.Name = i == 0 ? name : $"{name} ({i})"; return; }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
         }
 
@@ -596,7 +596,7 @@ namespace C3DProTools
                 if (zone.DrawingUnits == Autodesk.Civil.Settings.DrawingUnitType.Feet)
                     return zone.ImperialToMetricConversion == Autodesk.Civil.Settings.ImperialToMetricConversionType.UsSurveyFoot ? UsSurveyFeetPerMetre : 1 / 0.3048;
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             switch (db.Insunits)
             {
                 case UnitsValue.Millimeters: return 1000;

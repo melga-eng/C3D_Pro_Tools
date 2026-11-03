@@ -133,7 +133,7 @@ namespace C3DProTools
                 if (tr.GetObject(profileId, OpenMode.ForRead) is Profile profile)
                 {
                     try { highest = Math.Max(highest, profile.ElevationMax); lowest = Math.Min(lowest, profile.ElevationMin); }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
             }
         }
@@ -247,8 +247,8 @@ namespace C3DProTools
         private static void TrySetProfiles(ProfileViewBandItem item, ObjectId first, ObjectId second)
         {
             // Bands that don't use profiles (e.g. horizontal geometry) may refuse; they are simply left as they are.
-            try { item.Profile1Id = first; } catch (Exception) { }
-            try { item.Profile2Id = second; } catch (Exception) { }
+            try { item.Profile1Id = first; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { item.Profile2Id = second; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         public static void AddParts(Transaction tr, IEnumerable<ObjectId> partIds, ObjectId viewId, PartAddResult result, Editor ed)

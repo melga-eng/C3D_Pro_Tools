@@ -71,9 +71,9 @@ namespace C3DProTools
         public static double OuterHeightOf(Pipe pipe)
         {
             double outer = 0, inner = 0, wall = 0;
-            try { outer = pipe.OuterHeight; } catch (Exception) { }
-            try { inner = pipe.InnerHeight; } catch (Exception) { }
-            try { wall = Math.Max(0, pipe.WallThickness); } catch (Exception) { }
+            try { outer = pipe.OuterHeight; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { inner = pipe.InnerHeight; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { wall = Math.Max(0, pipe.WallThickness); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return Math.Max(outer, inner + 2 * wall);
         }
 
@@ -81,9 +81,9 @@ namespace C3DProTools
         public static double OuterWidthOf(Pipe pipe)
         {
             double outer = 0, inner = 0, wall = 0;
-            try { outer = pipe.OuterDiameterOrWidth; } catch (Exception) { }
-            try { inner = pipe.InnerDiameterOrWidth; } catch (Exception) { }
-            try { wall = Math.Max(0, pipe.WallThickness); } catch (Exception) { }
+            try { outer = pipe.OuterDiameterOrWidth; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { inner = pipe.InnerDiameterOrWidth; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { wall = Math.Max(0, pipe.WallThickness); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return Math.Max(outer, inner + 2 * wall);
         }
 

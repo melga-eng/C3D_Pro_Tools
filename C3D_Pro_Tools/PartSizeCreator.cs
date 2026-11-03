@@ -69,7 +69,7 @@ namespace C3DProTools
                 PartFamily any = (PartFamily)tr.GetObject(famId, OpenMode.ForWrite);
                 ObjectId size = PartsListTools.AddSize(tr, any, values, out error);
                 if (size.IsNull) return (famId, ObjectId.Null);
-                try { ((PartSize)tr.GetObject(size, OpenMode.ForWrite)).Name = PartsListTools.Describe(values) + " (any size)"; } catch (Exception) { }
+                try { ((PartSize)tr.GetObject(size, OpenMode.ForWrite)).Name = PartsListTools.Describe(values) + " (any size)"; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 log.Add($"Added {PartsListTools.Describe(values)} to \"{def.Description}\" (Method A).");
                 return (famId, size);
             }

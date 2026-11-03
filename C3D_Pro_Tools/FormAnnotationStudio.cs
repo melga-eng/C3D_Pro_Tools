@@ -281,12 +281,12 @@ namespace C3DProTools
                 PromptSelectionResult implied = ed.SelectImplied();
                 if (implied.Status == PromptStatus.OK && implied.Value.Count > 0) return implied.Value.GetObjectIds().ToList();
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             List<ObjectId> ids = null;
             _busy = true;
             try
             {
-                try { Autodesk.AutoCAD.Internal.Utils.SetFocusToDwgView(); } catch (Exception) { }
+                try { Autodesk.AutoCAD.Internal.Utils.SetFocusToDwgView(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 await AcadCoreApp.DocumentManager.ExecuteInCommandContextAsync(_ =>
                 {
                     PromptSelectionResult r = ed.GetSelection(new PromptSelectionOptions { MessageForAdding = prompt });
@@ -296,7 +296,7 @@ namespace C3DProTools
             }
             catch (Exception ex) { SetStatus("Could not select in the drawing: " + ex.Message); }
             finally { _busy = false; }
-            try { Activate(); } catch (Exception) { }
+            try { Activate(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return ids;
         }
 
@@ -1084,7 +1084,7 @@ namespace C3DProTools
             try
             {
                 using (_doc.LockDocument()) LayoutManager.Current.CurrentLayout = layout;
-                try { _doc.Editor.SwitchToPaperSpace(); } catch (Exception) { }
+                try { _doc.Editor.SwitchToPaperSpace(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (box is Box2 b)
                     ViewHelper.ZoomTo(new Extents3d(new Point3d(b.MinX, b.MinY, 0), new Point3d(b.MaxX, b.MaxY, 0)), 3.0, 60.0);
                 SetStatus("Sheet " + layout);

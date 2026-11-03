@@ -111,7 +111,7 @@ namespace C3DProTools
                     if (area <= viewportArea) continue;
                     viewportArea = area;
                     s.ViewportId = id; s.Scale = vp.CustomScale; s.Twist = vp.TwistAngle; s.Locked = vp.Locked;
-                    try { s.FrozenLayers = vp.GetFrozenLayers()?.Count ?? 0; } catch (Exception) { }
+                    try { s.FrozenLayers = vp.GetFrozenLayers()?.Count ?? 0; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 else if (e is BlockReference br) blocks.Add((br, br.AttributeCollection.Count));
                 else if (e is Hatch) hatches.Add((id, Center(e)));
@@ -494,7 +494,7 @@ namespace C3DProTools
                     Layout from = (Layout)st.GetObject(dict.GetAt(layoutName), OpenMode.ForRead);
                     ObjectId newId = LayoutManager.Current.CreateLayout(newName);
                     Layout to = (Layout)tr.GetObject(newId, OpenMode.ForWrite);
-                    try { to.CopyFrom(from); } catch (Exception) { }
+                    try { to.CopyFrom(from); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     ObjectIdCollection ids = new ObjectIdCollection();
                     foreach (ObjectId id in (BlockTableRecord)st.GetObject(from.BlockTableRecordId, OpenMode.ForRead))
                         if (!(st.GetObject(id, OpenMode.ForRead) is Viewport vp && IsPaperViewport(vp))) ids.Add(id);
@@ -927,15 +927,15 @@ namespace C3DProTools
                     finally
                     {
                         // Only reached with something open when a sheet failed; that failure is the one reported.
-                        if (pageOpen) try { engine.EndPage(null); } catch (Exception) { }
-                        if (documentOpen) try { engine.EndDocument(null); } catch (Exception) { }
-                        if (plotOpen) try { engine.EndPlot(null); } catch (Exception) { }
+                        if (pageOpen) try { engine.EndPage(null); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                        if (documentOpen) try { engine.EndDocument(null); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                        if (plotOpen) try { engine.EndPlot(null); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     }
                 }
             }
             finally
             {
-                try { lm.CurrentLayout = current; } catch (Exception) { }
+                try { lm.CurrentLayout = current; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 AcadCoreApp.SetSystemVariable("BACKGROUNDPLOT", background);
             }
             return files;

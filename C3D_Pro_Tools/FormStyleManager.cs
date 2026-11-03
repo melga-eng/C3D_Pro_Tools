@@ -555,7 +555,7 @@ namespace C3DProTools
         private static void TrySplit(SplitContainer split, int distance)
         {
             try { split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min(distance, (split.Orientation == Orientation.Vertical ? split.Width : split.Height) - split.Panel2MinSize - 10)); }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         private void SaveLayout()
@@ -1103,7 +1103,7 @@ namespace C3DProTools
                         if (ext.HasValue) { Extents3d x = ext.Value; x.AddExtents(e); ext = x; } else ext = e;
                         shown++;
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 tr.Commit();
                 if (ext.HasValue) ViewHelper.ZoomTo(ext.Value, 1.25, 5.0);
@@ -1126,7 +1126,7 @@ namespace C3DProTools
                     {
                         if (tr.GetObject(id, OpenMode.ForRead).OwnerId == space) here.Add(id); else other++;
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 tr.Commit();
             }

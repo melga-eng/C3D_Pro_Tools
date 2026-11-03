@@ -125,6 +125,25 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void ChamberEntry_WidthLongerThanLength_UsesTheLongerSizeAsTheAxis()
+        {
+            // Width 2.0 m along local X, length 1.2 m along Y: the narrow walls now face ±X.
+            var east = PlanGeometry.ChamberEntry(0, 0, 0, 1.0, 0.6, far: (20, 0), near: (0.5, 0));
+            Assert.Equal(PlanGeometry.ChamberWall.Narrow, east.wall);
+            Assert.Equal(0, east.skewDeg, 6);
+            var north = PlanGeometry.ChamberEntry(0, 0, 0, 1.0, 0.6, far: (0, 20), near: (0, 0.3));
+            Assert.Equal(PlanGeometry.ChamberWall.Long, north.wall);
+
+            // Squared to a pipe due east: no turn needed (X is the long axis); to one due north, a quarter turn.
+            Assert.Equal(0, PlanGeometry.AlignedRotation(0, 1.0, 0.6, new[] { 0.0 }).Value, 9);
+            double turned = PlanGeometry.AlignedRotation(0, 1.0, 0.6, new[] { Math.PI / 2 }).Value;
+            Assert.Equal(Math.PI / 2, Math.Abs(turned), 9);
+            var after = PlanGeometry.ChamberEntry(0, 0, turned, 1.0, 0.6, far: (0, 20), near: (0, 0.5));
+            Assert.Equal(PlanGeometry.ChamberWall.Narrow, after.wall);
+            Assert.Equal(0, after.skewDeg, 6);
+        }
+
+        [Fact]
         public void AlignedRotation_LeavesBendsAndSquareChambersAlone()
         {
             Assert.Null(PlanGeometry.AlignedRotation(0, HalfX, HalfY, new[] { 0.0, Math.PI / 2 }));

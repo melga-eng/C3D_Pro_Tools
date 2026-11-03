@@ -253,7 +253,7 @@ namespace C3DProTools
                     Box2 b = new Box2(x.MinPoint.X, x.MinPoint.Y, x.MaxPoint.X, x.MaxPoint.Y);
                     if (b.Overlaps(new Box2(v.PaperBox.MinPoint.X, v.PaperBox.MinPoint.Y, v.PaperBox.MaxPoint.X, v.PaperBox.MaxPoint.Y))) boxes.Add(b);
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return boxes;
         }

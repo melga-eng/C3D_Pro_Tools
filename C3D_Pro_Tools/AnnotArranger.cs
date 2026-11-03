@@ -135,7 +135,7 @@ namespace C3DProTools
                         }
                     }
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
         }
 
@@ -154,7 +154,7 @@ namespace C3DProTools
                 BlockTableRecord space = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
                 foreach (ObjectId id in space)
                     if (id.ObjectClass.DxfName == "INSERT" && tr.GetObject(id, OpenMode.ForRead) is BlockReference br && br.Visible)
-                        try { s.ReadXref(tr, br, br.BlockTransform, 0); } catch (Exception) { }
+                        try { s.ReadXref(tr, br, br.BlockTransform, 0); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             List<(Pipe pipe, ObjectIdCollection views)> profilePipes = new List<(Pipe, ObjectIdCollection)>();
             List<(Structure st, ObjectIdCollection views)> profileStructures = new List<(Structure, ObjectIdCollection)>();
@@ -168,13 +168,13 @@ namespace C3DProTools
                     if (p.SubEntityType == PipeSubEntityType.Curved && PipeArcGeometry.TryGetGravityArc(p, out ArcInfo a)) arc = a;
                     List<Point3d> path = PipeArcGeometry.SamplePath(p.StartPoint, p.EndPoint, arc, 2.0, 100);
                     for (int i = 1; i < path.Count; i++) s.PipeSegments.Add((path[i - 1], path[i], id));
-                    if (profiles) { try { ObjectIdCollection v = p.GetProfileViewsDisplayingMe(); if (v.Count > 0) profilePipes.Add((p, v)); } catch (Exception) { } }
+                    if (profiles) { try { ObjectIdCollection v = p.GetProfileViewsDisplayingMe(); if (v.Count > 0) profilePipes.Add((p, v)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
                 }
                 foreach (ObjectId id in net.GetStructureIds())
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Structure st)) continue;
-                    try { s.Structures.Add((Corners(st.GeometricExtents), id)); } catch (Exception) { }
-                    if (profiles) { try { ObjectIdCollection v = st.GetProfileViewsDisplayingMe(); if (v.Count > 0) profileStructures.Add((st, v)); } catch (Exception) { } }
+                    try { s.Structures.Add((Corners(st.GeometricExtents), id)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    if (profiles) { try { ObjectIdCollection v = st.GetProfileViewsDisplayingMe(); if (v.Count > 0) profileStructures.Add((st, v)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
                 }
             }
             foreach (ObjectId netId in doc.GetPressurePipeNetworkIds())
@@ -197,7 +197,7 @@ namespace C3DProTools
                         if (e is MText mt) { Point3dCollection c = mt.GetBoundingPoints(); s.Texts.Add(c.Cast<Point3d>().ToArray()); }
                         else s.Texts.Add(Corners(e.GeometricExtents));
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
             }
 
@@ -559,7 +559,7 @@ namespace C3DProTools
                 catch (Exception) { return false; }
                 List<Point3d> pts = AnnotLabels.Measure(label);
                 if (pts == null) return true;
-                try { anchor = label.AnchorInfo.Location; } catch (Exception) { }
+                try { anchor = label.AnchorInfo.Location; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 ap = v.ToPaper(anchor);
                 Box2 got = Box2.Empty;
                 foreach (Point3d p in pts) got = got.Add(new Point2d(ap.X + (p.X - anchor.X) * it.Factor, ap.Y + (p.Y - anchor.Y) * it.Factor));
@@ -569,7 +569,7 @@ namespace C3DProTools
                 Point3d now = label.LabelLocation;
                 loc = new Point2d(ap.X + (now.X - anchor.X) * it.Factor, ap.Y + (now.Y - anchor.Y) * it.Factor) + miss;
             }
-            try { label.LabelLocation = best; } catch (Exception) { }
+            try { label.LabelLocation = best; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return !label.LabelLocation.IsEqualTo(start, new Tolerance(1e-6, 1e-6));
         }
         /// <summary>For a label sitting on its pipe: positions along the pipe (nearest to where it was first); the label is left at the best.</summary>
@@ -591,7 +591,7 @@ namespace C3DProTools
                 foreach (Point3d p in pts) b = b.Add(new Point2d(ap.X + (p.X - anchor.X) * it.Factor, ap.Y + (p.Y - anchor.Y) * it.Factor));
                 if (inArea(it, b) && clear(b, it)) return (b, true);
             }
-            try { SetRatio(original); } catch (Exception) { }
+            try { SetRatio(original); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return (it.Box, false);
         }
 

@@ -560,7 +560,7 @@ namespace C3DProTools
                     _split.Panel2MinSize = 300;
                     _split.SplitterDistance = Math.Max(420, Math.Min(_split.Width - 300, _split.Width - _settings.DetailsWidth));
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             };
         }
 
@@ -683,7 +683,7 @@ namespace C3DProTools
                     }
                     // Listed, so its "Get selection" says what to do rather than the window never finding it.
                     catch (InvalidDataException) { list.Add((name, "C3D Pro Tools add-in of another release: install the same release", 0)); }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 return list;
             });
@@ -776,7 +776,8 @@ namespace C3DProTools
 
         private async void FindInstancesQuietly()
         {
-            try { await FindInstances(); } catch (Exception) { }
+            try { await FindInstances(); }
+            catch (Exception ex) { C3DProLogger.Warn("Navisworks Import: looking for instances in the background failed", ex); }
         }
 
         private void ShowInNavisworks()
@@ -1319,7 +1320,7 @@ namespace C3DProTools
                         Extents3d e = ent.GeometricExtents;
                         if (ext.HasValue) { Extents3d x = ext.Value; x.AddExtents(e); ext = x; } else ext = e;
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 tr.Commit();
                 if (ext.HasValue) ViewHelper.ZoomTo(ext.Value, 1.2, 10.0);
@@ -1346,7 +1347,7 @@ namespace C3DProTools
                     tr.Commit();
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             int index = 0;
             for (int i = 0; i < _cbSurface.Items.Count; i++) if (((Choice)_cbSurface.Items[i]).Text == wanted) index = i;
             _cbSurface.SelectedIndex = index;

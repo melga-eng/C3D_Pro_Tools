@@ -161,9 +161,11 @@ namespace C3DProTools
                 // The later of the two entry parameters is where the line actually enters the box (slab method).
                 xFace = tx > ty;
             }
-            // X faces (normal ±X) are the faces of length 2·halfY; Y faces are 2·halfX long.
-            bool narrow = xFace ? halfY < halfX : halfX < halfY;
-            if (Math.Abs(halfX - halfY) < 1e-6) narrow = true;
+            // The longer size is the chamber's long axis, whichever local axis it lies on (a box entered width > length, or a
+            // part with its sizes the other way round); the narrow walls are the two shorter faces across it.
+            bool yIsLongAxis = halfY >= halfX;
+            // X faces (normal ±X) lie across the X axis; they are the narrow walls when X is the long axis.
+            bool narrow = Math.Abs(halfX - halfY) < 1e-6 || (xFace ? !yIsLongAxis : yIsLongAxis);
             double cosToNormal = xFace ? Math.Abs(dx) : Math.Abs(dy);
             double skew = Math.Acos(Math.Max(-1, Math.Min(1, cosToNormal))) * 180 / Math.PI;
             return (narrow ? ChamberWall.Narrow : ChamberWall.Long, skew);
@@ -187,8 +189,9 @@ namespace C3DProTools
                 double b1 = bearings[1] + Math.PI;
                 axis = Math.Atan2(Math.Sin(axis) + Math.Sin(b1), Math.Cos(axis) + Math.Cos(b1));
             }
-            // The longer axis must lie along the pipe: Y (rotation + 90°) when the length is the longer size, else X.
-            double target = halfY > halfX ? axis - Math.PI / 2 : axis;
+            // The long axis must lie along the pipe: local Y (rotation + 90°) when Y is the longer size, else local X.
+            bool yIsLongAxis = halfY >= halfX;
+            double target = yIsLongAxis ? axis - Math.PI / 2 : axis;
             // Either way round will do (a rectangle turned 180° is the same): the smaller change.
             double change = Math.IEEERemainder(target - rotation, Math.PI);
             return rotation + change;

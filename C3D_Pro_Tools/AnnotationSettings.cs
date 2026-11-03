@@ -57,7 +57,7 @@ namespace C3DProTools
                     return s;
                 }
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("AnnotationSettings: the settings file could not be read", ex); }
             return new AnnotationSettings();
         }
 
@@ -69,7 +69,7 @@ namespace C3DProTools
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("AnnotationSettings: the settings file could not be written", ex); }
         }
     }
 }

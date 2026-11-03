@@ -61,6 +61,27 @@ namespace C3DProTools.Tests
             Assert.True(double.IsPositiveInfinity(new CoverRules().FreeStepFor(CoverMode.Gravity)));
         }
 
+        [Fact]
+        public void DryFlushStep_BetweenTwoSizes_FindsTheNearestGridLevel()
+        {
+            // DN100 into DN160: the centres differ by 0.03 m for flush inverts, not a whole number of 25 mm grid steps.
+            CoverRoute route = Routes.Build(new[]
+            {
+                new SectionSpec { Length = 20, Inner = 0.10, Outer = 0.12 },
+                new SectionSpec { Length = 20, Inner = 0.16, Outer = 0.18, ManholeBefore = true }
+            }, s => 100.0);
+            CoverOptions o = Routes.Options(CoverMode.Dry);
+            o.Rules.DryMaxStep = 0;
+            CoverSolution solution = new CoverSolver(route, o).Solve();
+            Assert.NotNull(solution);
+            ProfilePipe a = solution.Pipes.FindLast(p => p.Section == 0), b = solution.Pipes.Find(p => p.Section == 1);
+            double step = (b.Z0 - 0.08) - (a.Z1 - 0.05);
+            Assert.True(Math.Abs(step) <= CoverSolver.ElevationStep / 2 + 1e-6, $"invert step {step:0.0000}");
+            Assert.All(CoverEvaluation.Evaluate(route, solution.Pipes, o), r => Assert.False(r.Failed, r.Status));
+            Assert.Equal(CoverSolver.ElevationStep / 2 + 1e-6, o.Rules.FreeStepTolerance(CoverMode.Dry), 12);
+            Assert.Equal(0.30, new CoverRules().FreeStepTolerance(CoverMode.Dry), 12);
+        }
+
         // ---------------- B. Encasement envelope ----------------
 
         [Fact]

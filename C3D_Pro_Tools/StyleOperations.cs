@@ -266,7 +266,7 @@ namespace C3DProTools
                         {
                             result.Failed++;
                             result.Log.Add($"{p.OldValue} → {p.NewValue}: {ex.Message}");
-                            try { StyleCatalog.SetName(tr, obj, p.OldValue); } catch (Exception) { }
+                            try { StyleCatalog.SetName(tr, obj, p.OldValue); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         }
                     }
                 }
@@ -404,7 +404,7 @@ namespace C3DProTools
                     p.SetValue(obj, to);
                     changed = true;
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return changed;
         }

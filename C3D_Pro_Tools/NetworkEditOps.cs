@@ -34,15 +34,15 @@ namespace C3DProTools
         public static StructureFootprint Of(Structure st)
         {
             StructureFootprint fp = new StructureFootprint { Id = st.ObjectId, Name = st.Name, Center = new Point2d(st.Location.X, st.Location.Y), Rotation = st.Rotation };
-            try { fp.Round = st.BoundingShape == BoundingShapeType.Cylinder; } catch (Exception) { }
-            try { fp.Wall = Math.Max(0, st.WallThickness); } catch (Exception) { }
+            try { fp.Round = st.BoundingShape == BoundingShapeType.Cylinder; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { fp.Wall = Math.Max(0, st.WallThickness); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 double w = st.InnerDiameterOrWidth, l = fp.Round ? w : st.InnerLength;
                 fp.HalfX = Math.Max(0, w / 2.0);
                 fp.HalfY = Math.Max(0, l / 2.0);
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 Extents3d e = st.GeometricExtents;
@@ -393,9 +393,9 @@ namespace C3DProTools
             if (surface != null)
             {
                 double g = CoverRoute.GroundAt(surface, st.Location.X, st.Location.Y);
-                if (!double.IsNaN(g)) try { st.RimElevation = g; } catch (Exception) { }
+                if (!double.IsNaN(g)) try { st.RimElevation = g; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
-            try { st.ControlSumpBy = StructureControlSumpType.ByElevation; st.SumpElevation = lowestInvert; } catch (Exception) { }
+            try { st.ControlSumpBy = StructureControlSumpType.ByElevation; st.SumpElevation = lowestInvert; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         // =====================================================================================
@@ -509,8 +509,8 @@ namespace C3DProTools
                             newGravity = Network.Create(doc, ref name);
                             Network created = (Network)tr.GetObject(newGravity, OpenMode.ForWrite);
                             Network srcNet = (Network)tr.GetObject(src.NetworkId, OpenMode.ForRead);
-                            try { created.PartsListId = o.PartsListId.IsNull ? srcNet.PartsListId : o.PartsListId; } catch (Exception) { }
-                            try { created.ReferenceSurfaceId = srcNet.ReferenceSurfaceId; } catch (Exception) { }
+                            try { created.PartsListId = o.PartsListId.IsNull ? srcNet.PartsListId : o.PartsListId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                            try { created.ReferenceSurfaceId = srcNet.ReferenceSurfaceId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         }
                         targetId = newGravity;
                     }
@@ -609,7 +609,7 @@ namespace C3DProTools
                         {
                             newPressure = PressurePipeNetwork.Create(db, UniquePressureNetworkName(doc, tr, o.NewNetworkName));
                             if (tr.GetObject(pp.NetworkId, OpenMode.ForRead) is PressurePipeNetwork srcNet && tr.GetObject(newPressure, OpenMode.ForWrite) is PressurePipeNetwork created)
-                                try { created.PartsListId = srcNet.PartsListId; } catch (Exception) { }
+                                try { created.PartsListId = srcNet.PartsListId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         }
                         targetId = newPressure;
                     }
@@ -854,7 +854,7 @@ namespace C3DProTools
                 }
                 catch (Exception ex)
                 {
-                    try { pipe.StartPoint = a.OrigStart; pipe.EndPoint = a.OrigEnd; } catch (Exception) { }
+                    try { pipe.StartPoint = a.OrigStart; pipe.EndPoint = a.OrigEnd; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     ed.WriteMessage($"\n[Error] Fitting pipe <{a.Name}>: {ex.Message}");
                     c.Failed++;
                 }
@@ -912,7 +912,7 @@ namespace C3DProTools
                     if (pp.IsCurve)
                     {
                         PipeCurveGeometry geom = null;
-                        try { geom = pp.CurveGeometry; } catch (Exception) { }
+                        try { geom = pp.CurveGeometry; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         if (geom == null) geom = new PipeCurveGeometry(pp.StartPoint, pp.EndPoint, pp.Bulge);
                         try { newId = target.AddCurvePipe(familyId, sizeId, geom, false); }
                         finally { geom.Dispose(); }

@@ -51,7 +51,7 @@ namespace C3DProTools
             (double X, double Y) At(double s)
             {
                 double x = 0, y = 0;
-                try { al.PointLocation(s, 0, ref x, ref y); } catch (Exception) { }
+                try { al.PointLocation(s, 0, ref x, ref y); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 return (x, y);
             }
             List<(double s0, double s1)> ranges = ProfileViewMath.ZoneRanges(s0, s1, SampleStep, At, zones);

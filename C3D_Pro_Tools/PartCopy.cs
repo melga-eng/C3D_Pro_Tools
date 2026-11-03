@@ -65,8 +65,8 @@ namespace C3DProTools
             if (copy.IsNull) copy = Clone(tr, source.ObjectId);
             Pipe p2 = (Pipe)tr.GetObject(copy, OpenMode.ForWrite);
             // A copy keeps no structure connections; its ends go where they are asked for.
-            try { if (!p2.StartStructureId.IsNull) p2.Disconnect(ConnectorPositionType.Start); } catch (Exception) { }
-            try { if (!p2.EndStructureId.IsNull) p2.Disconnect(ConnectorPositionType.End); } catch (Exception) { }
+            try { if (!p2.StartStructureId.IsNull) p2.Disconnect(ConnectorPositionType.Start); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!p2.EndStructureId.IsNull) p2.Disconnect(ConnectorPositionType.End); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             p2.StartPoint = start;
             p2.EndPoint = end;
             if (!p2.StartPoint.IsEqualTo(start)) p2.StartPoint = start;
@@ -141,17 +141,19 @@ namespace C3DProTools
 
             Pipe copy = (Pipe)tr.GetObject(newId, OpenMode.ForWrite);
             source.UpgradeOpen();
-            try { if (!copy.StartStructureId.IsNull) copy.Disconnect(ConnectorPositionType.Start); } catch (Exception) { }
-            try { if (!copy.EndStructureId.IsNull) copy.Disconnect(ConnectorPositionType.End); } catch (Exception) { }
-            try { if (!source.StartStructureId.IsNull && source.StartStructureId != ss) source.Disconnect(ConnectorPositionType.Start); } catch (Exception) { }
-            try { if (!source.EndStructureId.IsNull && source.EndStructureId != es) source.Disconnect(ConnectorPositionType.End); } catch (Exception) { }
+            try { if (!copy.StartStructureId.IsNull) copy.Disconnect(ConnectorPositionType.Start); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!copy.EndStructureId.IsNull) copy.Disconnect(ConnectorPositionType.End); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!source.StartStructureId.IsNull && source.StartStructureId != ss) source.Disconnect(ConnectorPositionType.Start); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!source.EndStructureId.IsNull && source.EndStructureId != es) source.Disconnect(ConnectorPositionType.End); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (!st.Location.IsEqualTo(anchorAt)) st.Location = anchorAt;
             if (Math.Abs(st.Rotation - anchorRotation) > 1e-12) st.Rotation = anchorRotation;
             source.StartPoint = s;
             source.EndPoint = e;
             if (!source.StartPoint.IsEqualTo(s)) source.StartPoint = s;
-            try { if (!ss.IsNull && source.StartStructureId != ss) source.ConnectToStructure(ConnectorPositionType.Start, ss, false); } catch (Exception) { }
-            try { if (!es.IsNull && source.EndStructureId != es) source.ConnectToStructure(ConnectorPositionType.End, es, false); } catch (Exception) { }
+            try { if (!ss.IsNull && source.StartStructureId != ss) source.ConnectToStructure(ConnectorPositionType.Start, ss, false); }
+            catch (Exception ex) { C3DProLogger.Warn($"Part copy: pipe {source.Name} could not be reconnected at its start", ex); }
+            try { if (!es.IsNull && source.EndStructureId != es) source.ConnectToStructure(ConnectorPositionType.End, es, false); }
+            catch (Exception ex) { C3DProLogger.Warn($"Part copy: pipe {source.Name} could not be reconnected at its end", ex); }
             // Connecting may pull an end onto the structure; the pipe keeps its own 3D points.
             if (!source.StartPoint.IsEqualTo(s)) source.StartPoint = s;
             if (!source.EndPoint.IsEqualTo(e)) source.EndPoint = e;

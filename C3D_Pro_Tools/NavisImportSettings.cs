@@ -47,7 +47,7 @@ namespace C3DProTools
                 if (File.Exists(FilePath))
                     return JsonSerializer.Deserialize<NavisImportSettings>(File.ReadAllText(FilePath)) ?? new NavisImportSettings();
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("NavisImportSettings: the settings file could not be read", ex); }
             return new NavisImportSettings();
         }
 
@@ -59,7 +59,7 @@ namespace C3DProTools
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("NavisImportSettings: the settings file could not be written", ex); }
         }
     }
 }

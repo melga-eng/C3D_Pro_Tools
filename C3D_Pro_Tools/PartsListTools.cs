@@ -207,7 +207,7 @@ namespace C3DProTools
                     }
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return Sorted(sizes, keys);
         }
 
@@ -295,11 +295,11 @@ namespace C3DProTools
                     }
                     size.SizeDataRecord = own;
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             if (!Same(values, ReadValues(fam, size.SizeDataRecord)))
             {
-                try { fam.RemovePartSize(added); } catch (Exception) { }
+                try { fam.RemovePartSize(added); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
                 error = "Civil 3D built a different size from these values.";
                 return ObjectId.Null;
             }
@@ -311,9 +311,9 @@ namespace C3DProTools
         private static void CopyLook(Transaction tr, ObjectId templateId, PartSize size)
         {
             if (templateId.IsNull || !(tr.GetObject(templateId, OpenMode.ForRead) is PartSize t)) return;
-            try { if (!t.PartStyleId.IsNull) size.PartStyleId = t.PartStyleId; } catch (Exception) { }
-            try { if (!t.RulesStyleId.IsNull) size.RulesStyleId = t.RulesStyleId; } catch (Exception) { }
-            try { if (!t.MaterialStyleId.IsNull) size.MaterialStyleId = t.MaterialStyleId; } catch (Exception) { }
+            try { if (!t.PartStyleId.IsNull) size.PartStyleId = t.PartStyleId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!t.RulesStyleId.IsNull) size.RulesStyleId = t.RulesStyleId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (!t.MaterialStyleId.IsNull) size.MaterialStyleId = t.MaterialStyleId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         /// <summary>
@@ -345,7 +345,7 @@ namespace C3DProTools
                     listId = net.PartsListId;
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (listId.IsNull) listId = pick.PartsListId;
 
             string why = null;
@@ -422,7 +422,7 @@ namespace C3DProTools
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Part part)) continue;
                     Count(part.PartFamilyId);
-                    try { Count(part.GetPartSizeId()); } catch (Exception) { }
+                    try { Count(part.GetPartSizeId()); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
             }
             return used;
@@ -460,11 +460,11 @@ namespace C3DProTools
                         if (copy.IsNull) { log.Add($"{src.Name} · {sname}: {error}"); continue; }
                         PartSize from = (PartSize)tr.GetObject(sid, OpenMode.ForRead), to = (PartSize)tr.GetObject(copy, OpenMode.ForWrite);
                         CopyLook(tr, sid, to);
-                        try { to.Name = from.Name; } catch (Exception) { }
+                        try { to.Name = from.Name; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     }
                     foreach (ObjectId d in defaults)
                         if (tr.GetObject(d, OpenMode.ForRead) is PartSize ds && !wanted.Any(w => Same(w, ReadValues(fam, ds.SizeDataRecord))))
-                            try { fam.RemovePartSize(d); } catch (Exception) { }
+                            try { fam.RemovePartSize(d); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
                 }
             return id;
         }

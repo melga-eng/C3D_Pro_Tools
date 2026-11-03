@@ -86,7 +86,7 @@ namespace C3DProTools
             {
                 if (File.Exists(FilePath)) return JsonSerializer.Deserialize<SheetManagerSettings>(File.ReadAllText(FilePath)) ?? new SheetManagerSettings();
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("SheetManagerSettings: the settings file could not be read", ex); }
             return new SheetManagerSettings();
         }
 
@@ -98,7 +98,7 @@ namespace C3DProTools
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("SheetManagerSettings: the settings file could not be written", ex); }
         }
     }
 }

@@ -473,8 +473,8 @@ namespace C3DProTools
                         string made = name;
                         netId = Network.Create(doc, ref made);
                         Network created = (Network)tr.GetObject(netId, OpenMode.ForWrite);
-                        try { created.PartsListId = pick.PartsListId; } catch (Exception) { }
-                        if (surface != null) try { created.ReferenceSurfaceId = surface.ObjectId; } catch (Exception) { }
+                        try { created.PartsListId = pick.PartsListId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                        if (surface != null) try { created.ReferenceSurfaceId = surface.ObjectId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         networks[name] = netId;
                         madeNetwork = name;
                         inNetwork[netId] = new List<StructureFootprint>();
@@ -592,11 +592,11 @@ namespace C3DProTools
                 {
                     // Nothing half made: a line that fails leaves no pipes or structures behind.
                     foreach (ObjectId id in madeIds)
-                        try { if (!id.IsErased) tr.GetObject(id, OpenMode.ForWrite).Erase(); } catch (Exception) { }
+                        try { if (!id.IsErased) tr.GetObject(id, OpenMode.ForWrite).Erase(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
                     foreach (List<StructureFootprint> l in inNetwork.Values) l.RemoveAll(f => madeIds.Contains(f.Id));
                     if (madeNetwork != null && networks.TryGetValue(madeNetwork, out ObjectId emptyId))
                     {
-                        try { tr.GetObject(emptyId, OpenMode.ForWrite).Erase(); } catch (Exception) { }
+                        try { tr.GetObject(emptyId, OpenMode.ForWrite).Erase(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
                         networks.Remove(madeNetwork);
                         inNetwork.Remove(emptyId);
                         result.Networks--;
@@ -691,7 +691,7 @@ namespace C3DProTools
             using (LineSegment3d line = new LineSegment3d(near, near + new Vector3d(1, 0, 0))) network.AddLinePipe(familyId, sizeId, line, ref id, false);
             Pipe probe = (Pipe)tr.GetObject(id, OpenMode.ForWrite);
             double inner = 0;
-            try { inner = probe.InnerHeight; } catch (Exception) { }
+            try { inner = probe.InnerHeight; } catch (Exception failure) when (C3DProLogger.IsProbeFailure(failure)) { }
             double outer = CoverRoute.OuterHeightOf(probe);
             probe.Erase();
             return (inner, Math.Max(inner, outer));
@@ -715,8 +715,8 @@ namespace C3DProTools
             ObjectId id = ObjectId.Null;
             network.AddStructure(familyId, sizeId, new Point3d(at.X, at.Y, rim), rotation, ref id, false);
             Structure st = (Structure)tr.GetObject(id, OpenMode.ForWrite);
-            try { st.RimElevation = rim; } catch (Exception) { }
-            try { st.ControlSumpBy = StructureControlSumpType.ByElevation; st.SumpElevation = invert; } catch (Exception) { }
+            try { st.RimElevation = rim; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { st.ControlSumpBy = StructureControlSumpType.ByElevation; st.SumpElevation = invert; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return id;
         }
 

@@ -165,7 +165,7 @@ namespace C3DProTools
         public static Func<double, string> StationText(Alignment alignment)
         {
             bool equations = false;
-            try { equations = alignment != null && alignment.StationEquations.Count > 0; } catch (Exception) { }
+            try { equations = alignment != null && alignment.StationEquations.Count > 0; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (!equations) return Station;
             return s =>
             {
@@ -219,7 +219,7 @@ namespace C3DProTools
                     foreach (ObjectId id in doc.Styles.ProfileViewBandSetStyles) { bandSet = id; break; }
                     p.ViewId = ProfileView.Create(src.AlignmentId, target, name, bandSet, src.StyleId);
                     ProfileView v = (ProfileView)tr.GetObject(p.ViewId, OpenMode.ForWrite);
-                    try { v.Layer = src.Layer; } catch (Exception) { }
+                    try { v.Layer = src.Layer; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     SetStations(v, p.S0, p.S1);
                     v.ElevationRangeMode = ElevationRangeType.UserSpecified;
                     if (p.Low < v.ElevationMax) { v.ElevationMin = p.Low; v.ElevationMax = p.High; }
@@ -309,28 +309,28 @@ namespace C3DProTools
                 for (int i = 0; i < Math.Min(from.Count, to.Count); i++)
                 {
                     ProfileViewBandItem a = from[i], b = to[i];
-                    try { b.Gap = a.Gap; b.Weeding = a.Weeding; b.ShowLabels = a.ShowLabels; } catch (Exception) { }
-                    try { b.LabelAtStartStation = a.LabelAtStartStation; b.LabelAtEndStation = a.LabelAtEndStation; } catch (Exception) { }
-                    try { b.MajorInterval = a.MajorInterval; b.MinorInterval = a.MinorInterval; } catch (Exception) { }
-                    try { if (!a.Profile1Id.IsNull) b.Profile1Id = a.Profile1Id; } catch (Exception) { }
-                    try { if (!a.Profile2Id.IsNull) b.Profile2Id = a.Profile2Id; } catch (Exception) { }
+                    try { b.Gap = a.Gap; b.Weeding = a.Weeding; b.ShowLabels = a.ShowLabels; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { b.LabelAtStartStation = a.LabelAtStartStation; b.LabelAtEndStation = a.LabelAtEndStation; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { b.MajorInterval = a.MajorInterval; b.MinorInterval = a.MinorInterval; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { if (!a.Profile1Id.IsNull) b.Profile1Id = a.Profile1Id; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { if (!a.Profile2Id.IsNull) b.Profile2Id = a.Profile2Id; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
                 try { if (top) v.Bands.SetTopBandItems(items); else v.Bands.SetBottomBandItems(items); }
                 catch (Exception ex) { log.Add($"{v.Name}: setting the bands failed: {ex.Message}"); }
             }
-            try { v.Bands.MatchIncrementToGridIntervals = src.Bands.MatchIncrementToGridIntervals; } catch (Exception) { }
+            try { v.Bands.MatchIncrementToGridIntervals = src.Bands.MatchIncrementToGridIntervals; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         /// <summary>Which profiles the source shows, and any style it overrides them with.</summary>
         private static void CopyProfileOverrides(ProfileView src, ProfileView v)
         {
             Dictionary<ObjectId, ProfileOverride> from = new Dictionary<ObjectId, ProfileOverride>();
-            foreach (ProfileOverride o in src.GraphOverrides) try { from[o.ProfileId] = o; } catch (Exception) { }
+            foreach (ProfileOverride o in src.GraphOverrides) try { from[o.ProfileId] = o; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             foreach (ProfileOverride o in v.GraphOverrides)
             {
                 if (!from.TryGetValue(o.ProfileId, out ProfileOverride a)) continue;
-                try { o.Draw = a.Draw; } catch (Exception) { }
-                try { if (a.UseOverrideStyle) { o.OverrideStyleId = a.OverrideStyleId; o.UseOverrideStyle = true; } else o.UseOverrideStyle = false; } catch (Exception) { }
+                try { o.Draw = a.Draw; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                try { if (a.UseOverrideStyle) { o.OverrideStyleId = a.OverrideStyleId; o.UseOverrideStyle = true; } else o.UseOverrideStyle = false; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
         }
 
@@ -339,20 +339,20 @@ namespace C3DProTools
         {
             ObjectId Model(ObjectId id) { try { return tr.GetObject(id, OpenMode.ForRead) is ProfileViewPart vp ? vp.ModelPartId : id; } catch (Exception) { return id; } }
             Dictionary<ObjectId, (bool draw, ObjectId style)> pipes = new Dictionary<ObjectId, (bool, ObjectId)>(), structures = new Dictionary<ObjectId, (bool, ObjectId)>();
-            try { foreach (PipeOverride o in src.PipeOverrides) pipes[Model(o.PipeId)] = (o.Draw, o.OverrideStyleId); } catch (Exception) { }
-            try { foreach (StructureOverride o in src.StructureOverrides) structures[Model(o.StructId)] = (o.Draw, o.OverrideStyleId); } catch (Exception) { }
+            try { foreach (PipeOverride o in src.PipeOverrides) pipes[Model(o.PipeId)] = (o.Draw, o.OverrideStyleId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { foreach (StructureOverride o in src.StructureOverrides) structures[Model(o.StructId)] = (o.Draw, o.OverrideStyleId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 foreach (PipeOverride o in v.PipeOverrides)
-                    if (pipes.TryGetValue(Model(o.PipeId), out var a)) { try { o.Draw = a.draw; if (!a.style.IsNull) o.OverrideStyleId = a.style; } catch (Exception) { } }
+                    if (pipes.TryGetValue(Model(o.PipeId), out var a)) { try { o.Draw = a.draw; if (!a.style.IsNull) o.OverrideStyleId = a.style; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 foreach (StructureOverride o in v.StructureOverrides)
-                    if (structures.TryGetValue(Model(o.StructId), out var a)) { try { o.Draw = a.draw; if (!a.style.IsNull) o.OverrideStyleId = a.style; } catch (Exception) { } }
+                    if (structures.TryGetValue(Model(o.StructId), out var a)) { try { o.Draw = a.draw; if (!a.style.IsNull) o.OverrideStyleId = a.style; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         private static void SetStations(ProfileView v, double s0, double s1)
@@ -374,7 +374,7 @@ namespace C3DProTools
             List<double> stations = new List<double>();
             foreach (Point3d pt in points)
             {
-                try { double st = 0, off = 0; al.StationOffset(pt.X, pt.Y, ref st, ref off); stations.Add(st); } catch (Exception) { }
+                try { double st = 0, off = 0; al.StationOffset(pt.X, pt.Y, ref st, ref off); stations.Add(st); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             if (stations.Count == 0) return true;
             return stations.Max() >= s0 - StationTolerance && stations.Min() <= s1 + StationTolerance;
@@ -472,10 +472,10 @@ namespace C3DProTools
             void Add(ObjectId id)
             {
                 if (id.IsNull || id.IsErased) return;
-                try { if (tr.GetObject(id, OpenMode.ForRead) is ProfileViewPart vp && !vp.ModelPartId.IsNull) map[vp.ModelPartId] = id; } catch (Exception) { }
+                try { if (tr.GetObject(id, OpenMode.ForRead) is ProfileViewPart vp && !vp.ModelPartId.IsNull) map[vp.ModelPartId] = id; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
-            try { foreach (PipeOverride o in v.PipeOverrides) Add(o.PipeId); } catch (Exception) { }
-            try { foreach (StructureOverride o in v.StructureOverrides) Add(o.StructId); } catch (Exception) { }
+            try { foreach (PipeOverride o in v.PipeOverrides) Add(o.PipeId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { foreach (StructureOverride o in v.StructureOverrides) Add(o.StructId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return map;
         }
 
@@ -491,11 +491,12 @@ namespace C3DProTools
         private static void CopyPlacement(Transaction tr, Label from, ObjectId toId)
         {
             if (!(tr.GetObject(toId, OpenMode.ForWrite) is Label to)) return;
-            try { if (to.StyleId != from.StyleId) to.StyleId = from.StyleId; } catch (Exception) { }
-            try { if (from.AllowsFlipping) to.Flipped = from.Flipped; } catch (Exception) { }
-            try { if (from.AllowsReversing) to.Reversed = from.Reversed; } catch (Exception) { }
-            try { if (from.AllowsDimensionAnchors) { to.DimensionAnchorOption = from.DimensionAnchorOption; to.DimensionAnchorValue = from.DimensionAnchorValue; } } catch (Exception) { }
-            try { if (from.Dragged) to.DraggedOffset = from.DraggedOffset; } catch (Exception) { }
+            try { if (to.StyleId != from.StyleId) to.StyleId = from.StyleId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (from.AllowsFlipping) to.Flipped = from.Flipped; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (from.AllowsReversing) to.Reversed = from.Reversed; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { if (from.AllowsDimensionAnchors) { to.DimensionAnchorOption = from.DimensionAnchorOption; to.DimensionAnchorValue = from.DimensionAnchorValue; } } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            // Dragged: the same offset from its anchor (LabelLocation in place of the obsolete DraggedOffset setter).
+            try { if (from.Dragged) to.LabelLocation = to.AnchorInfo.Location + (from.LabelLocation - from.AnchorInfo.Location); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         private static int CountProjectionLabels(Transaction tr, ProfileView src, double s0, double s1)
@@ -513,7 +514,7 @@ namespace C3DProTools
                     double st = 0, el = 0;
                     if (src.FindStationAndElevationAtXY((x.MinPoint.X + x.MaxPoint.X) / 2, x.MinPoint.Y, ref st, ref el) && st >= s0 && st <= s1) n++;
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return n;
         }

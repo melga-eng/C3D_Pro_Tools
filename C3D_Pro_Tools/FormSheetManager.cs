@@ -196,7 +196,7 @@ namespace C3DProTools
                     done = work(tr);
                     tr.Commit();
                 }
-                try { _doc.Editor.Regen(); } catch (Exception) { }
+                try { _doc.Editor.Regen(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             catch (Exception ex)
             {
@@ -312,7 +312,7 @@ namespace C3DProTools
 
             Control nav = Bar(StyleUi.Primary("Go to sheet", (s, e) => GoTo(Chosen().FirstOrDefault())),
                 StyleUi.Secondary("◀", (s, e) => Step(-1)), StyleUi.Secondary("▶", (s, e) => Step(1)),
-                StyleUi.Secondary("Move up", (s, e) => Move(-1)), StyleUi.Secondary("Move down", (s, e) => Move(1)), sort,
+                StyleUi.Secondary("Move up", (s, e) => MoveSheets(-1)), StyleUi.Secondary("Move down", (s, e) => MoveSheets(1)), sort,
                 Hint("Edit Layout, Tile or Part in the list: the sheet's texts, title block, key plan and match lines follow."));
             Control make = Bar(StyleUi.Secondary("Duplicate…", (s, e) => Duplicate()), StyleUi.Secondary("Complete the tile…", (s, e) => CompleteTile()),
                 StyleUi.Secondary("New from template…", (s, e) => NewFromTemplate()), StyleUi.Secondary("Rename / renumber…", (s, e) => RenameMany()),
@@ -383,7 +383,7 @@ namespace C3DProTools
             try
             {
                 using (_doc.LockDocument()) LayoutManager.Current.CurrentLayout = s.Layout;
-                try { _doc.Editor.SwitchToPaperSpace(); } catch (Exception) { }
+                try { _doc.Editor.SwitchToPaperSpace(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 SetStatus("Sheet " + s.Layout);
                 _selected.Clear(); _selected.Add(s.Layout);
                 ApplySelection(GridOf(_nav.Selected));
@@ -395,12 +395,12 @@ namespace C3DProTools
         {
             if (_sheets.Count == 0 || !Ready()) return;
             string cur = "";
-            try { cur = LayoutManager.Current.CurrentLayout; } catch (Exception) { }
+            try { cur = LayoutManager.Current.CurrentLayout; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             int i = _sheets.FindIndex(s => s.Layout == cur);
             GoTo(_sheets[i < 0 ? 0 : (i + by + _sheets.Count) % _sheets.Count]);
         }
 
-        private void Move(int by)
+        private void MoveSheets(int by)
         {
             List<SheetRecord> chosen = Chosen();
             if (chosen.Count == 0) return;
@@ -1054,7 +1054,7 @@ namespace C3DProTools
                 using (_doc.LockDocument())
                     files = SheetManager.Publish(_doc.Database, chosen, folder, _txtPdfName.Text, _rbPdfOne.Checked, _chkPdfForce.Checked, P, t => { SetStatus(t); _lblStatus.Refresh(); });
                 SetStatus($"{files.Count} PDF file(s) written to {folder}.");
-                if (_chkPdfOpen.Checked) try { System.Diagnostics.Process.Start("explorer.exe", folder); } catch (Exception) { }
+                if (_chkPdfOpen.Checked) try { System.Diagnostics.Process.Start("explorer.exe", folder); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             catch (Exception ex) { MessageBox.Show(this, "Publishing stopped: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             finally { _busy = false; Cursor = Cursors.Default; }

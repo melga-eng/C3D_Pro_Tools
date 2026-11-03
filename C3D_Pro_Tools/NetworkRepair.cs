@@ -35,7 +35,7 @@ namespace C3DProTools
                 if (!members.TryGetValue(p.NetworkId, out HashSet<ObjectId> set))
                 {
                     set = new HashSet<ObjectId>();
-                    try { if (tr.GetObject(p.NetworkId, OpenMode.ForRead) is Network n) foreach (ObjectId m in n.GetPipeIds()) set.Add(m); } catch (Exception) { }
+                    try { if (tr.GetObject(p.NetworkId, OpenMode.ForRead) is Network n) foreach (ObjectId m in n.GetPipeIds()) set.Add(m); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     members[p.NetworkId] = set;
                 }
                 if (set.Contains(id)) continue;
@@ -58,7 +58,7 @@ namespace C3DProTools
                     Point3d s = old.StartPoint, e = old.EndPoint;
                     ObjectId ss = old.StartStructureId, es = old.EndStructureId;
                     List<ObjectId> views = new List<ObjectId>();
-                    try { foreach (ObjectId v in old.GetProfileViewsDisplayingMe()) views.Add(v); } catch (Exception) { }
+                    try { foreach (ObjectId v in old.GetProfileViewsDisplayingMe()) views.Add(v); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
                     ObjectId newId = PartCopy.CopyPipe(tr, net, old, s, e);
                     Pipe copy = (Pipe)tr.GetObject(newId, OpenMode.ForWrite);
@@ -70,18 +70,29 @@ namespace C3DProTools
                     }
                     copy.StyleId = old.StyleId;
                     copy.Layer = old.Layer;
-                    try { copy.Description = old.Description; } catch (Exception) { }
-                    try { if (!ss.IsNull && !ss.IsErased) copy.ConnectToStructure(ConnectorPositionType.Start, ss, false); } catch (Exception) { }
-                    try { if (!es.IsNull && !es.IsErased) copy.ConnectToStructure(ConnectorPositionType.End, es, false); } catch (Exception) { }
+                    try { copy.Description = old.Description; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    // Reconnected to both its structures, or it is not counted as repaired (and the report says so).
+                    bool reconnected = true;
+                    foreach ((ObjectId sid, ConnectorPositionType end) in new[] { (ss, ConnectorPositionType.Start), (es, ConnectorPositionType.End) })
+                    {
+                        if (sid.IsNull || sid.IsErased) continue;
+                        try { copy.ConnectToStructure(end, sid, false); }
+                        catch (Exception ex)
+                        {
+                            reconnected = false;
+                            C3DProLogger.Warn($"Repair: pipe {o.Name} could not be reconnected at its {end.ToString().ToLowerInvariant()}", ex);
+                        }
+                    }
                     if (!copy.StartPoint.IsEqualTo(s)) copy.StartPoint = s;
                     if (!copy.EndPoint.IsEqualTo(e)) copy.EndPoint = e;
                     // The erased pipe keeps its name until the end of the transaction, so it gives it up first.
                     string name = old.Name;
-                    try { old.Name = name + " (replaced " + old.Handle + ")"; } catch (Exception) { }
+                    try { old.Name = name + " (replaced " + old.Handle + ")"; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     old.Erase();
-                    try { copy.Name = name; } catch (Exception) { }
-                    foreach (ObjectId v in views) try { if (!v.IsErased) copy.AddToProfileView(v); } catch (Exception) { }
-                    fixedCount++;
+                    try { copy.Name = name; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    foreach (ObjectId v in views) try { if (!v.IsErased) copy.AddToProfileView(v); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    if (reconnected) fixedCount++;
+                    else log.Add($"{o.Name}: rebuilt, but it could not be reconnected to its structure(s); connect it by hand (details in {C3DProLogger.LogPath}).");
                 }
                 catch (Exception ex) { log.Add($"{o.Name}: {ex.Message}"); }
             }

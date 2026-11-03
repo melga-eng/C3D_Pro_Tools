@@ -51,7 +51,7 @@ namespace C3DProTools
                 if (File.Exists(FilePath))
                     return JsonSerializer.Deserialize<NetworkFromLinesSettings>(File.ReadAllText(FilePath)) ?? new NetworkFromLinesSettings();
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("NetworkFromLinesSettings: the settings file could not be read", ex); }
             return new NetworkFromLinesSettings();
         }
 
@@ -63,7 +63,7 @@ namespace C3DProTools
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
             }
-            catch (Exception) { }
+            catch (Exception ex) { C3DProLogger.Warn("NetworkFromLinesSettings: the settings file could not be written", ex); }
         }
     }
 }

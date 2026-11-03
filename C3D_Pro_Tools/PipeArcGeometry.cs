@@ -22,7 +22,7 @@ namespace C3DProTools
             {
                 if (TryReadArc(pipe.Curve2d, out arc)) return true;
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
             try
             {
@@ -31,7 +31,7 @@ namespace C3DProTools
                     if (geom != null && TryReadArc(geom.GetArc2d(), out arc)) return true;
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
             arc = default;
             return false;
@@ -46,7 +46,7 @@ namespace C3DProTools
                     if (geom != null && TryReadArc(geom.GetArc2d(), out arc)) return true;
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
             arc = default;
             return false;

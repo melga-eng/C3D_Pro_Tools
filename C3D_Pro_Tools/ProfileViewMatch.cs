@@ -95,7 +95,7 @@ namespace C3DProTools
                 foreach (ObjectId id in doc.GetSurfaceIds())
                 {
                     try { if (tr.GetObject(id, OpenMode.ForRead) is Surface s) All.Add((s.Name, id, s)); }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
             }
 
@@ -124,7 +124,7 @@ namespace C3DProTools
                             al.PointLocation(st, 0, ref x, ref y);
                             samples.Add((x, y, p.ElevationAt(st)));
                         }
-                        catch (Exception) { }
+                        catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     }
                     int bestHits = 1;
                     foreach ((string name, ObjectId _, Surface s) in All)
@@ -172,16 +172,16 @@ namespace C3DProTools
             }
             Dictionary<ObjectId, bool> drawn = new Dictionary<ObjectId, bool>();
             foreach (ProfileOverride o in view.GraphOverrides)
-                try { drawn[o.ProfileId] = o.Draw; } catch (Exception) { }
+                try { drawn[o.ProfileId] = o.Draw; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
             List<ViewProfile> list = new List<ViewProfile>();
             foreach (ObjectId id in al.GetProfileIds())
             {
                 if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Profile p)) continue;
                 ViewProfile vp = new ViewProfile { Id = id, Name = p.Name, Layer = p.Layer, InBands = inBands.Contains(id), Drawn = !drawn.TryGetValue(id, out bool d) || d };
-                try { vp.Reference = p.IsReferenceObject; } catch (Exception) { }
+                try { vp.Reference = p.IsReferenceObject; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 ProfileType type = ProfileType.FG;
-                try { type = p.ProfileType; } catch (Exception) { }
+                try { type = p.ProfileType; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 vp.SurfaceProfile = type == ProfileType.EG;
                 if (vp.SurfaceProfile)
                 {
@@ -213,7 +213,7 @@ namespace C3DProTools
             {
                 if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Profile p)) continue;
                 ProfileType type = ProfileType.FG;
-                try { type = p.ProfileType; } catch (Exception) { }
+                try { type = p.ProfileType; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (type != ProfileType.EG) continue;
                 string s = surfaces.SourceOf(p, al);
                 if (s.Length > 0 && !names.Contains(s)) names.Add(s);
@@ -224,8 +224,8 @@ namespace C3DProTools
         private static IEnumerable<ProfileViewBandItem> AllBands(ProfileView view)
         {
             List<ProfileViewBandItem> all = new List<ProfileViewBandItem>();
-            try { foreach (ProfileViewBandItem b in view.Bands.GetBottomBandItems()) all.Add(b); } catch (Exception) { }
-            try { foreach (ProfileViewBandItem b in view.Bands.GetTopBandItems()) all.Add(b); } catch (Exception) { }
+            try { foreach (ProfileViewBandItem b in view.Bands.GetBottomBandItems()) all.Add(b); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { foreach (ProfileViewBandItem b in view.Bands.GetTopBandItems()) all.Add(b); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return all;
         }
 
@@ -250,7 +250,7 @@ namespace C3DProTools
                     case "Geometry": return ProfileHorizontalGeometryPointLabelGroup.GetAvailableLabelGroupIds(viewId, profileId);
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return new ObjectIdCollection();
         }
 
@@ -282,7 +282,7 @@ namespace C3DProTools
             {
                 if (!(o is ObjectId id) || id.IsErased) continue;
                 try { if (tr.GetObject(id, OpenMode.ForRead) is StyleBase s && s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return id; }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             return ObjectId.Null;
         }
@@ -298,15 +298,15 @@ namespace C3DProTools
                 foreach (ProfileViewBandItem b in items)
                 {
                     BandRecipe br = new BandRecipe { Top = top, BandType = b.BandType.ToString(), Style = StyleName(tr, b.BandStyleId) };
-                    try { br.Gap = b.Gap; br.Weeding = b.Weeding; br.ShowLabels = b.ShowLabels; } catch (Exception) { }
-                    try { br.LabelAtStart = b.LabelAtStartStation; br.LabelAtEnd = b.LabelAtEndStation; } catch (Exception) { }
-                    try { br.MajorInterval = b.MajorInterval; br.MinorInterval = b.MinorInterval; } catch (Exception) { }
-                    try { br.Profile1 = RoleOf(b.Profile1Id); br.Profile2 = RoleOf(b.Profile2Id); } catch (Exception) { }
+                    try { br.Gap = b.Gap; br.Weeding = b.Weeding; br.ShowLabels = b.ShowLabels; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { br.LabelAtStart = b.LabelAtStartStation; br.LabelAtEnd = b.LabelAtEndStation; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { br.MajorInterval = b.MajorInterval; br.MinorInterval = b.MinorInterval; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { br.Profile1 = RoleOf(b.Profile1Id); br.Profile2 = RoleOf(b.Profile2Id); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     recipe.Bands.Add(br);
                 }
 
             Dictionary<ObjectId, ProfileOverride> overrides = new Dictionary<ObjectId, ProfileOverride>();
-            foreach (ProfileOverride o in view.GraphOverrides) try { overrides[o.ProfileId] = o; } catch (Exception) { }
+            foreach (ProfileOverride o in view.GraphOverrides) try { overrides[o.ProfileId] = o; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             foreach (ProfileRole role in Roles)
             {
                 ObjectId pid = RoleProfile(profiles, role);
@@ -323,7 +323,7 @@ namespace C3DProTools
                     {
                         if (!(tr.GetObject(gid, OpenMode.ForRead) is LabelGroup g)) continue;
                         LabelGroupRecipe lg = new LabelGroupRecipe { Kind = kind, Style = StyleName(tr, g.StyleId) };
-                        if (g is ProfileStationLabelGroup sg) try { lg.Increment = sg.Increment; } catch (Exception) { }
+                        if (g is ProfileStationLabelGroup sg) try { lg.Increment = sg.Increment; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         rr.Labels.Add(lg);
                     }
                 recipe.Roles.Add(rr);
@@ -385,7 +385,7 @@ namespace C3DProTools
 
             // 4. Role profiles' styles, visibility and labels.
             Dictionary<ObjectId, ProfileOverride> overrides = new Dictionary<ObjectId, ProfileOverride>();
-            foreach (ProfileOverride ov in view.GraphOverrides) try { overrides[ov.ProfileId] = ov; } catch (Exception) { }
+            foreach (ProfileOverride ov in view.GraphOverrides) try { overrides[ov.ProfileId] = ov; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             foreach (ProfileRole role in Roles)
             {
                 RoleRecipe rr = recipe.RoleOf(role);
@@ -515,7 +515,7 @@ namespace C3DProTools
                         if (h.LabelAtStartStation != w.LabelAtStart) { change(label + " label at start", h.LabelAtStartStation ? "on" : "off", w.LabelAtStart ? "on" : "off"); if (write) h.LabelAtStartStation = w.LabelAtStart; }
                         if (h.LabelAtEndStation != w.LabelAtEnd) { change(label + " label at end", h.LabelAtEndStation ? "on" : "off", w.LabelAtEnd ? "on" : "off"); if (write) h.LabelAtEndStation = w.LabelAtEnd; }
                     }
-                    catch (Exception) { }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     SetProfile(label + " profile 1", w.Profile1, () => h.Profile1Id, id => h.Profile1Id = id);
                     SetProfile(label + " profile 2", w.Profile2, () => h.Profile2Id, id => h.Profile2Id = id);
                 }
@@ -530,7 +530,7 @@ namespace C3DProTools
             {
                 if (Math.Abs(now - want) < 1e-6) return;
                 change(what, ToolUi.Format(now), ToolUi.Format(want));
-                if (write) try { set(want); } catch (Exception) { }
+                if (write) try { set(want); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
 
             void SetProfile(string what, ProfileRole role, Func<ObjectId> get, Action<ObjectId> set)
@@ -567,7 +567,7 @@ namespace C3DProTools
             if (!write) return;
             // Minor station labels hang off their major group, so they go first and come last.
             foreach (var h in have.OrderBy(h => h.kind == "MinorStation" ? 0 : 1))
-                try { if (!h.id.IsErased) tr.GetObject(h.id, OpenMode.ForWrite).Erase(); } catch (Exception) { }
+                try { if (!h.id.IsErased) tr.GetObject(h.id, OpenMode.ForWrite).Erase(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
             ObjectId major = ObjectId.Null;
             foreach (LabelGroupRecipe l in rr.Labels.OrderBy(l => l.Kind == "MinorStation" ? 1 : 0))
             {
@@ -667,7 +667,7 @@ namespace C3DProTools
                 try { a = Math.Max(s0, p.StartingStation); b = Math.Min(s1, p.EndingStation); } catch (Exception) { continue; }
                 if (b < a) continue;
                 int n = Math.Max(2, Math.Min(400, (int)Math.Ceiling((b - a) / 2.0)));
-                for (int i = 0; i <= n; i++) try { Add(p.ElevationAt(a + (b - a) * i / n)); } catch (Exception) { }
+                for (int i = 0; i <= n; i++) try { Add(p.ElevationAt(a + (b - a) * i / n)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             Alignment al = (Alignment)tr.GetObject(view.AlignmentId, OpenMode.ForRead);
             foreach (ObjectId partId in PartsInView(tr, view, index))
@@ -679,11 +679,11 @@ namespace C3DProTools
                     foreach (Point3d pt in new[] { pipe.StartPoint, pipe.EndPoint })
                         if (InRange(al, pt, s0, s1)) { Add(pt.Z - half); Add(pt.Z + half); }
                 }
-                else if (obj is Structure st && InRange(al, st.Location, s0, s1)) { try { Add(st.SumpElevation); } catch (Exception) { } }
+                else if (obj is Structure st && InRange(al, st.Location, s0, s1)) { try { Add(st.SumpElevation); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
                 else if (obj is PressurePipe pp)
                 {
                     double half = 0;
-                    try { half = pp.OuterDiameter / 2.0; } catch (Exception) { }
+                    try { half = pp.OuterDiameter / 2.0; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     foreach (Point3d pt in new[] { pp.StartPoint, pp.EndPoint })
                         if (InRange(al, pt, s0, s1)) { Add(pt.Z - half); Add(pt.Z + half); }
                 }
@@ -749,16 +749,16 @@ namespace C3DProTools
             void AddGravity(ObjectId id)
             {
                 if (id.IsNull || id.IsErased) return;
-                try { ids.Add(tr.GetObject(id, OpenMode.ForRead) is ProfileViewPart vp ? vp.ModelPartId : id); } catch (Exception) { }
+                try { ids.Add(tr.GetObject(id, OpenMode.ForRead) is ProfileViewPart vp ? vp.ModelPartId : id); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
-            try { foreach (PipeOverride o in view.PipeOverrides) AddGravity(o.PipeId); } catch (Exception) { }
-            try { foreach (StructureOverride o in view.StructureOverrides) AddGravity(o.StructId); } catch (Exception) { }
+            try { foreach (PipeOverride o in view.PipeOverrides) AddGravity(o.PipeId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try { foreach (StructureOverride o in view.StructureOverrides) AddGravity(o.StructId); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             try
             {
                 foreach (ObjectId id in view.GetPressureNetworkPartsInGraph())
                     if (tr.GetObject(id, OpenMode.ForRead, false, true) is ProfileViewPressurePart vp && !vp.ModelPartId.IsNull) ids.Add(vp.ModelPartId);
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return ids.Where(id => !id.IsErased).Distinct().ToList();
         }
 
@@ -845,7 +845,7 @@ namespace C3DProTools
         private static ProfileRole RoleOfForeign(Transaction tr, Profile p, ProfileRoleRules rules, Surfaces surfaces)
         {
             ProfileType type = ProfileType.FG;
-            try { type = p.ProfileType; } catch (Exception) { }
+            try { type = p.ProfileType; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (type != ProfileType.EG) return IsTopName(p.Name, rules) ? ProfileRole.Top : ProfileRole.None;
             if (!(tr.GetObject(p.AlignmentId, OpenMode.ForRead) is Alignment al)) return ProfileRole.None;
             string s = surfaces.SourceOf(p, al);
@@ -866,7 +866,7 @@ namespace C3DProTools
         {
             ProfileView v = (ProfileView)tr.GetObject(viewId, OpenMode.ForWrite);
             foreach (ProfileOverride o in v.GraphOverrides)
-                try { if (ids.Contains(o.ProfileId)) o.Draw = false; } catch (Exception) { }
+                try { if (ids.Contains(o.ProfileId)) o.Draw = false; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
         }
 
         // =====================================================================================

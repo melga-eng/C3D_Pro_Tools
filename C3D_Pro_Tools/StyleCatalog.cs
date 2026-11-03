@@ -78,7 +78,7 @@ namespace C3DProTools
             HashSet<ObjectId> seen = new HashSet<ObjectId>();
 
             CivilDocument cdoc = null;
-            try { cdoc = CivilDocument.GetCivilDocument(db); } catch (Exception) { }
+            try { cdoc = CivilDocument.GetCivilDocument(db); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (cdoc != null)
             {
                 StylesRoot root = cdoc.Styles;
@@ -141,7 +141,7 @@ namespace C3DProTools
                     AddCivilStyle(id, category, category, category, ObjectId.Null, items, seen, tr);
                 }
             }
-            catch (Exception) { }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             return true;
         }
 
@@ -168,14 +168,14 @@ namespace C3DProTools
                 ModifiedBy = Try(() => style.ModifiedBy) ?? ""
             };
             // Civil 3D returns the date as text.
-            try { if (DateTime.TryParse(style.DateModified, out DateTime modified)) item.Modified = modified; } catch (Exception) { }
+            try { if (DateTime.TryParse(style.DateModified, out DateTime modified)) item.Modified = modified; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             items.Add(item);
 
             // Label styles can have child styles, named uniquely under their parent.
             if (style is LabelStyle label)
             {
                 int count = 0;
-                try { count = label.ChildrenCount; } catch (Exception) { }
+                try { count = label.ChildrenCount; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 for (int i = 0; i < count; i++)
                 {
                     ObjectId childId;

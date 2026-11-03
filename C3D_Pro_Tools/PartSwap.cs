@@ -497,10 +497,10 @@ namespace C3DProTools
             {
                 if (kv.Key.IsErased || !(tr.GetObject(kv.Key, OpenMode.ForWrite) is Structure st)) continue;
                 StructureLevels l = kv.Value;
-                try { if (new Point2d(st.Location.X, st.Location.Y).GetDistanceTo(new Point2d(l.Location.X, l.Location.Y)) > 1e-6) st.Location = new Point3d(l.Location.X, l.Location.Y, st.Location.Z); } catch (Exception) { }
-                try { if (Math.Abs(st.Rotation - l.Rotation) > 1e-9) st.Rotation = l.Rotation; } catch (Exception) { }
+                try { if (new Point2d(st.Location.X, st.Location.Y).GetDistanceTo(new Point2d(l.Location.X, l.Location.Y)) > 1e-6) st.Location = new Point3d(l.Location.X, l.Location.Y, st.Location.Z); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                try { if (Math.Abs(st.Rotation - l.Rotation) > 1e-9) st.Rotation = l.Rotation; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (l.AutoRim) { if (Math.Abs(st.RimElevation - l.Rim) > 0.001) surfaceRims++; }
-                else try { if (Math.Abs(st.RimElevation - l.Rim) > 1e-6) st.RimElevation = l.Rim; } catch (Exception) { }
+                else try { if (Math.Abs(st.RimElevation - l.Rim) > 1e-6) st.RimElevation = l.Rim; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 try
                 {
                     if (st.ControlSumpBy != l.By) st.ControlSumpBy = l.By;
@@ -511,7 +511,7 @@ namespace C3DProTools
                         for (int i = 0; i < 3 && Math.Abs(st.SumpElevation - l.Sump) > 1e-4; i++) st.SumpDepth = st.SumpDepth + (st.SumpElevation - l.Sump);
                     }
                 }
-                catch (Exception) { }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
             if (surfaceRims > 0)
                 c.Log.Add($"{surfaceRims} structure rim(s) follow the surface (\"Automatic surface adjustment\"), so Civil 3D set them on the surface again for the new part.");
