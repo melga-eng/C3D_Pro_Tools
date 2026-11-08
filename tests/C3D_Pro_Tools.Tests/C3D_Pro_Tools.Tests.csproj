@@ -28,6 +28,8 @@
 		<Compile Include="..\..\C3D_Pro_Tools\NetworkMerge.cs" Link="Engine\NetworkMerge.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\RimRules.cs" Link="Engine\RimRules.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\ArrangeCase.cs" Link="Engine\ArrangeCase.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\SheetRefs.cs" Link="Engine\SheetRefs.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\BatchTargets.cs" Link="Engine\BatchTargets.cs" />
 		<Compile Include="..\..\Shared\NavisLinkProtocol.cs" Link="Engine\NavisLinkProtocol.cs" />
 		<Compile Include="..\..\Shared\C3DProLogger.cs" Link="Engine\C3DProLogger.cs" />
 	</ItemGroup>

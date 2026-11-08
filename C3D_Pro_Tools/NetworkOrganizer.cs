@@ -58,6 +58,20 @@ namespace C3DProTools
             catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return ""; }
         }
 
+        /// <summary>The part family's name ("" for a part without a family, such as a duct bank built by copying).</summary>
+        private static string FamilyOf(Part p)
+        {
+            try { return p.PartFamilyName ?? ""; }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return ""; }
+        }
+
+        /// <summary>The pipe's bulge from start to end (0: straight). NaN when it cannot be read, so the pipe matches no other.</summary>
+        private static double BulgeOf(Pipe p)
+        {
+            try { using (PipeCurveGeometry g = p.CurveGeometry) return g?.Bulge ?? 0.0; }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return double.NaN; }
+        }
+
         /// <summary>The parts of these networks for merging, each with how much it is used.</summary>
         private static List<(MergePart part, ObjectId id, ObjectId network)> Parts(Transaction tr, IEnumerable<ObjectId> networks, ObjectId target, Dictionary<ObjectId, int> labels)
         {
@@ -69,7 +83,7 @@ namespace C3DProTools
                     if (tr.GetObject(id, OpenMode.ForRead) is Pipe p)
                         list.Add((new MergePart
                         {
-                            Id = id.Handle.ToString(), Name = p.Name, Network = net.Name, IsPipe = true, Size = SizeOf(p), InTarget = netId == target,
+                            Id = id.Handle.ToString(), Name = p.Name, Network = net.Name, IsPipe = true, Family = FamilyOf(p), Size = SizeOf(p), Bulge = BulgeOf(p), InTarget = netId == target,
                             A = (p.StartPoint.X, p.StartPoint.Y, p.StartPoint.Z), B = (p.EndPoint.X, p.EndPoint.Y, p.EndPoint.Z),
                             Uses = (labels.TryGetValue(id, out int c) ? c : 0) + Views(p)
                         }, id, netId));
@@ -77,7 +91,7 @@ namespace C3DProTools
                     if (tr.GetObject(id, OpenMode.ForRead) is Structure st)
                         list.Add((new MergePart
                         {
-                            Id = id.Handle.ToString(), Name = st.Name, Network = net.Name, IsPipe = false, Size = SizeOf(st), InTarget = netId == target,
+                            Id = id.Handle.ToString(), Name = st.Name, Network = net.Name, IsPipe = false, Family = FamilyOf(st), Size = SizeOf(st), InTarget = netId == target,
                             A = (st.Location.X, st.Location.Y, st.Location.Z), Uses = (labels.TryGetValue(id, out int c) ? c : 0) + Views(st)
                         }, id, netId));
             }

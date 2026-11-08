@@ -184,6 +184,16 @@ namespace C3DProTools
             public readonly List<ObjectId> NewIds = new List<ObjectId>();
             /// <summary>Parts list changes made on the way (families and sizes added, networks switched to another list).</summary>
             public readonly List<string> Log = new List<string>();
+            /// <summary>The counts as they are now, to put back when an operation is rolled back.</summary>
+            internal (int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds) Snapshot() =>
+                (Done, Created, Skipped, Structures, Joined, Copied, Unconnected, NewIds.Count);
+
+            internal void Restore((int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds) s)
+            {
+                (Done, Created, Skipped, Structures, Joined, Copied, Unconnected) = (s.done, s.created, s.skipped, s.structures, s.joined, s.copied, s.unconnected);
+                if (NewIds.Count > s.newIds) NewIds.RemoveRange(s.newIds, NewIds.Count - s.newIds);
+            }
+
             private readonly Dictionary<ObjectId, (ObjectId family, ObjectId size)> _resolved = new Dictionary<ObjectId, (ObjectId, ObjectId)>();
 
             /// <summary>The chosen part in a network's parts list (added there, or the network switched, once per network).</summary>
@@ -307,8 +317,8 @@ namespace C3DProTools
             Counts c = new Counts();
             foreach (SplitPlan plan in plans)
             {
-                Pipe pipe = (Pipe)tr.GetObject(plan.PipeId, OpenMode.ForWrite);
-                Network network = (Network)tr.GetObject(pipe.NetworkId, OpenMode.ForWrite);
+                // Read here; written only inside the operation's own transaction, so a split that fails leaves the pipe as it was.
+                Network network = (Network)tr.GetObject(((Pipe)tr.GetObject(plan.PipeId, OpenMode.ForRead)).NetworkId, OpenMode.ForRead);
                 ObjectId structureFamilyId = ObjectId.Null, structureSizeId = ObjectId.Null;
                 if (structure != null)
                 {
@@ -316,42 +326,71 @@ namespace C3DProTools
                     if (structureSizeId.IsNull) ed.WriteMessage($"\n[Warning] {structure.Label} could not be put in the parts list of network {network.Name}; {plan.Name} is split without structures.");
                 }
                 bool addStructures = !structureFamilyId.IsNull && !structureSizeId.IsNull;
-                Autodesk.Civil.DatabaseServices.Surface surface = network.ReferenceSurfaceId.IsNull ? null : tr.GetObject(network.ReferenceSurfaceId, OpenMode.ForRead) as Autodesk.Civil.DatabaseServices.Surface;
+                ObjectId networkId = network.ObjectId, surfaceId = network.ReferenceSurfaceId;
                 try
                 {
-                    if (plan.Curved) { SplitCurved(tr, network, pipe, plan, addStructures, structureFamilyId, structureSizeId, surface, c); continue; }
-
-                    ObjectId familyId = pipe.PartFamilyId, sizeId = PipePartCatalog.SizeIdOf(tr, pipe);
-                    Point3d start = pipe.StartPoint, end = pipe.EndPoint;
-                    ObjectId endStructure = pipe.EndStructureId;
-                    if (!endStructure.IsNull) pipe.Disconnect(ConnectorPositionType.End);
-                    pipe.EndPoint = plan.Points[0];
-                    if (!pipe.StartPoint.IsEqualTo(start)) pipe.StartPoint = start;
-
-                    Pipe previous = pipe;
-                    for (int i = 0; i < plan.Points.Count; i++)
+                    Atomic(tr, c, t =>
                     {
-                        Point3d a = plan.Points[i], b = i + 1 < plan.Points.Count ? plan.Points[i + 1] : end;
-                        ObjectId newId = ObjectId.Null;
-                        using (LineSegment3d line = new LineSegment3d(a, b)) network.AddLinePipe(familyId, sizeId, line, ref newId, false);
-                        Pipe piece = (Pipe)tr.GetObject(newId, OpenMode.ForWrite);
-                        piece.StyleId = pipe.StyleId;
-                        piece.Layer = pipe.Layer;
-                        c.Created++;
-                        c.NewIds.Add(newId);
-                        if (addStructures) JoinAtStructure(tr, network, previous, piece, a, Math.Atan2(end.Y - start.Y, end.X - start.X), structureFamilyId, structureSizeId, surface, c, ed);
-                        previous = piece;
-                    }
-                    if (!endStructure.IsNull) CoverApply.Connect(previous, true, false, endStructure, ed);
-                    c.Done++;
+                        Pipe pipe = (Pipe)t.GetObject(plan.PipeId, OpenMode.ForWrite);
+                        Network net = (Network)t.GetObject(networkId, OpenMode.ForWrite);
+                        Autodesk.Civil.DatabaseServices.Surface surface = surfaceId.IsNull ? null : t.GetObject(surfaceId, OpenMode.ForRead) as Autodesk.Civil.DatabaseServices.Surface;
+                        if (plan.Curved) { SplitCurved(t, net, pipe, plan, addStructures, structureFamilyId, structureSizeId, surface, c); return; }
+
+                        ObjectId familyId = pipe.PartFamilyId, sizeId = PipePartCatalog.SizeIdOf(t, pipe);
+                        Point3d start = pipe.StartPoint, end = pipe.EndPoint;
+                        ObjectId endStructure = pipe.EndStructureId;
+                        if (!endStructure.IsNull) pipe.Disconnect(ConnectorPositionType.End);
+                        pipe.EndPoint = plan.Points[0];
+                        if (!pipe.StartPoint.IsEqualTo(start)) pipe.StartPoint = start;
+
+                        Pipe previous = pipe;
+                        for (int i = 0; i < plan.Points.Count; i++)
+                        {
+                            Point3d a = plan.Points[i], b = i + 1 < plan.Points.Count ? plan.Points[i + 1] : end;
+                            ObjectId newId = ObjectId.Null;
+                            using (LineSegment3d line = new LineSegment3d(a, b)) net.AddLinePipe(familyId, sizeId, line, ref newId, false);
+                            Pipe piece = (Pipe)t.GetObject(newId, OpenMode.ForWrite);
+                            piece.StyleId = pipe.StyleId;
+                            piece.Layer = pipe.Layer;
+                            c.Created++;
+                            c.NewIds.Add(newId);
+                            if (addStructures) JoinAtStructure(t, net, previous, piece, a, Math.Atan2(end.Y - start.Y, end.X - start.X), structureFamilyId, structureSizeId, surface, c, ed);
+                            previous = piece;
+                        }
+                        if (!endStructure.IsNull) ConnectOrThrow(previous, ConnectorPositionType.End, endStructure);
+                        c.Done++;
+                    });
                 }
                 catch (Exception ex)
                 {
-                    ed.WriteMessage($"\n[Error] Splitting pipe <{plan.Name}>: {ex.Message}");
+                    ed.WriteMessage($"\n[Error] Splitting pipe <{plan.Name}>: {ex.Message} The pipe is left as it was.");
                     c.Failed++;
                 }
             }
             return c;
+        }
+
+        /// <summary>
+        /// Runs one operation in its own nested transaction: kept when it succeeds; undone, with its counts, when it throws (the
+        /// exception is passed on). The operation opens what it changes through the transaction it is given.
+        /// </summary>
+        private static void Atomic(Transaction tr, Counts c, Action<Transaction> operation)
+        {
+            var before = c.Snapshot();
+            using (Transaction t = tr.TransactionManager.StartTransaction())
+            {
+                try
+                {
+                    operation(t);
+                    t.Commit();
+                }
+                catch
+                {
+                    t.Abort();
+                    c.Restore(before);
+                    throw;
+                }
+            }
         }
 
         private static void SplitCurved(Transaction tr, Network network, Pipe pipe, SplitPlan plan, bool addStructures, ObjectId familyId, ObjectId sizeId,
@@ -382,8 +421,8 @@ namespace C3DProTools
             ObjectId structureId = ObjectId.Null;
             network.AddStructure(familyId, sizeId, at, rotation, ref structureId, false);
             c.Structures++;
-            CoverApply.Connect(upstream, true, false, structureId, ed);
-            CoverApply.Connect(downstream, true, true, structureId, ed);
+            ConnectOrThrow(upstream, ConnectorPositionType.End, structureId);
+            ConnectOrThrow(downstream, ConnectorPositionType.Start, structureId);
             SetRimAndSump(tr, structureId, surface, Math.Min(upstream.EndPoint.Z - upstream.InnerHeight / 2.0, downstream.StartPoint.Z - downstream.InnerHeight / 2.0));
         }
 
@@ -876,6 +915,22 @@ namespace C3DProTools
             }
         }
 
+        /// <summary>
+        /// Connects a pipe end to a structure, keeps both pipe ends where they were, and throws when the end is not connected
+        /// afterwards: inside <see cref="Atomic"/>, a connection that fails undoes the whole operation instead of leaving the
+        /// pipe disconnected.
+        /// </summary>
+        internal static void ConnectOrThrow(Pipe pipe, ConnectorPositionType position, ObjectId structureId)
+        {
+            Point3d start = pipe.StartPoint, end = pipe.EndPoint;
+            ConnectEnd(pipe, position, structureId);
+            if (!pipe.StartPoint.IsEqualTo(start)) pipe.StartPoint = start;
+            if (!pipe.EndPoint.IsEqualTo(end)) pipe.EndPoint = end;
+            ObjectId now = position == ConnectorPositionType.Start ? pipe.StartStructureId : pipe.EndStructureId;
+            if (now != structureId)
+                throw new InvalidOperationException($"Pipe <{pipe.Name}> did not stay connected at its {(position == ConnectorPositionType.Start ? "start" : "end")}.");
+        }
+
         private static bool TryConnect(Pipe pipe, ConnectorPositionType position, ObjectId structureId)
         {
             try { ConnectEnd(pipe, position, structureId); return true; }
@@ -1007,18 +1062,22 @@ namespace C3DProTools
             {
                 try
                 {
-                    Pipe first = (Pipe)tr.GetObject(plan.Pipes[0], OpenMode.ForWrite);
-                    Pipe last = (Pipe)tr.GetObject(plan.Pipes[plan.Pipes.Count - 1], OpenMode.ForWrite);
-                    Point3d start = first.StartPoint, end = last.EndPoint;
-                    ObjectId endStructure = last.EndStructureId;
-                    if (!endStructure.IsNull) last.Disconnect(ConnectorPositionType.End);
-                    for (int i = 1; i < plan.Pipes.Count; i++) { tr.GetObject(plan.Pipes[i], OpenMode.ForWrite).Erase(); c.Skipped++; }
-                    first.EndPoint = end;
-                    if (!first.StartPoint.IsEqualTo(start)) first.StartPoint = start;
-                    if (!endStructure.IsNull) CoverApply.Connect(first, true, false, endStructure, ed);
-                    c.Done++;
+                    // In its own transaction: a merge that fails puts the erased pipes back.
+                    Atomic(tr, c, t =>
+                    {
+                        Pipe first = (Pipe)t.GetObject(plan.Pipes[0], OpenMode.ForWrite);
+                        Pipe last = (Pipe)t.GetObject(plan.Pipes[plan.Pipes.Count - 1], OpenMode.ForWrite);
+                        Point3d start = first.StartPoint, end = last.EndPoint;
+                        ObjectId endStructure = last.EndStructureId;
+                        if (!endStructure.IsNull) last.Disconnect(ConnectorPositionType.End);
+                        for (int i = 1; i < plan.Pipes.Count; i++) { t.GetObject(plan.Pipes[i], OpenMode.ForWrite).Erase(); c.Skipped++; }
+                        first.EndPoint = end;
+                        if (!first.StartPoint.IsEqualTo(start)) first.StartPoint = start;
+                        if (!endStructure.IsNull) ConnectOrThrow(first, ConnectorPositionType.End, endStructure);
+                        c.Done++;
+                    });
                 }
-                catch (Exception ex) { ed.WriteMessage($"\n[Error] Merging {plan.Names}: {ex.Message}"); c.Failed++; }
+                catch (Exception ex) { ed.WriteMessage($"\n[Error] Merging {plan.Names}: {ex.Message} The pipes are left as they were."); c.Failed++; }
             }
             return c;
         }

@@ -302,7 +302,7 @@ namespace C3DProTools
         {
             RegisterApp(tr, db);
             Dictionary<string, List<ObjectId>> existing = FindExisting(tr, db);
-            BlockTableRecord ms = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForWrite);
+            ObjectId msId = SymbolUtilityServices.GetBlockModelSpaceId(db);
             Dictionary<string, ObjectId> networks = new Dictionary<string, ObjectId>(StringComparer.OrdinalIgnoreCase);
             // Structures by network and Navisworks name, so pipes can find the structures they were connected to.
             Dictionary<string, Dictionary<string, (ObjectId id, ImportCandidate row)>> structures = new Dictionary<string, Dictionary<string, (ObjectId, ImportCandidate)>>();
@@ -311,55 +311,104 @@ namespace C3DProTools
             foreach (ImportCandidate c in rows.Where(r => r.Action == ImportKind.Structure).Concat(rows.Where(r => r.IsLinear)).Concat(rows.Where(r => r.Action == ImportKind.Solid)))
             {
                 RowOutcome outcome = report.Rows[c];
-                if (!PrepareExisting(tr, c, existing, o, outcome)) continue;
-                try
+                if (!PrepareExisting(c, existing, o, outcome, out List<ObjectId> replaced)) continue;
+                bool asSolid = c.Action == ImportKind.Solid || outcome.AsSolid;
+                PartChoice p = asSolid ? null : parts[c];
+                if (!asSolid && p.SizeId.IsNull)
                 {
-                    if (c.Action == ImportKind.Solid || outcome.AsSolid)
+                    outcome.Status = "Not imported";
+                    outcome.Failed = true;
+                    if (replaced.Count > 0) outcome.Detail = (outcome.Detail + " The earlier import was kept.").Trim();
+                    continue;
+                }
+                // Each row in its own transaction: its new objects are made, then the earlier import it replaces is erased, and
+                // all of it is kept only when the row succeeds. A row that fails leaves the drawing as it was, including any
+                // object Civil 3D made before the error.
+                int before = outcome.Created.Count;
+                string netName = asSolid ? null : NetworkFor(c, o);
+                bool newNetwork = false;
+                using (Transaction t = tr.TransactionManager.StartTransaction())
+                {
+                    try
                     {
-                        ObjectId id = CreateSolid(tr, db, ms, c, o, s, outcome);
-                        Tag(tr, id, c);
-                        outcome.Created.Add(id);
+                        if (asSolid)
+                        {
+                            BlockTableRecord ms = (BlockTableRecord)t.GetObject(msId, OpenMode.ForWrite);
+                            ObjectId id = CreateSolid(t, db, ms, c, o, s, outcome);
+                            Tag(t, id, c);
+                            outcome.Created.Add(id);
+                        }
+                        else
+                        {
+                            if (!networks.TryGetValue(netName, out ObjectId netId)) { networks[netName] = netId = EnsureNetwork(t, cdoc, netName, partsListId, o.SurfaceId); newNetwork = true; }
+                            Network network = (Network)t.GetObject(netId, OpenMode.ForWrite);
+                            if (c.Action == ImportKind.Structure)
+                            {
+                                ObjectId id = CreateStructure(t, network, c, p, s);
+                                Tag(t, id, c);
+                                outcome.Created.Add(id);
+                            }
+                            else
+                            {
+                                structures.TryGetValue(netName, out var byName);
+                                for (int b = 0; b < c.Barrels.Count; b++)
+                                {
+                                    ObjectId id = CreatePipe(t, network, c, p, b, s);
+                                    Tag(t, id, c);
+                                    outcome.Created.Add(id);
+                                    if (o.ConnectToStructures && byName != null) Connect(t, id, c, byName, s, outcome);
+                                }
+                            }
+                            outcome.Status = outcome.Status == "Exact" || outcome.Status == "Nearest size" ? "Imported" + (outcome.Status == "Nearest size" ? " (nearest size)" : "") : outcome.Status;
+                        }
+                        EraseReplaced(t, replaced, outcome);
+                        t.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        t.Abort();
+                        outcome.Created.RemoveRange(before, outcome.Created.Count - before);
+                        // A network made by this row went with it; EnsureNetwork finds it again by name if it stayed.
+                        if (newNetwork) networks.Remove(netName);
+                        outcome.Status = "Failed";
+                        outcome.Failed = true;
+                        outcome.Detail = ex.Message + (replaced.Count > 0 ? " The earlier import was kept." : "");
                         continue;
                     }
-                    PartChoice p = parts[c];
-                    if (p.SizeId.IsNull) { outcome.Status = "Not imported"; outcome.Failed = true; continue; }
-                    string netName = NetworkFor(c, o);
-                    if (!networks.TryGetValue(netName, out ObjectId netId)) networks[netName] = netId = EnsureNetwork(tr, cdoc, netName, partsListId, o.SurfaceId);
-                    Network network = (Network)tr.GetObject(netId, OpenMode.ForWrite);
-
-                    if (c.Action == ImportKind.Structure)
-                    {
-                        ObjectId id = CreateStructure(tr, network, c, p, s);
-                        Tag(tr, id, c);
-                        outcome.Created.Add(id);
-                        if (!structures.TryGetValue(netName, out var byName)) structures[netName] = byName = new Dictionary<string, (ObjectId, ImportCandidate)>(StringComparer.OrdinalIgnoreCase);
-                        byName[c.Name] = (id, c);
-                    }
-                    else
-                    {
-                        structures.TryGetValue(netName, out var byName);
-                        for (int b = 0; b < c.Barrels.Count; b++)
-                        {
-                            ObjectId id = CreatePipe(tr, network, c, p, b, s);
-                            Tag(tr, id, c);
-                            outcome.Created.Add(id);
-                            if (o.ConnectToStructures && byName != null) Connect(tr, id, c, byName, s, outcome);
-                        }
-                    }
-                    outcome.Status = outcome.Status == "Exact" || outcome.Status == "Nearest size" ? "Imported" + (outcome.Status == "Nearest size" ? " (nearest size)" : "") : outcome.Status;
                 }
-                catch (Exception ex)
+                // Pipes connect only to structures whose rows were kept.
+                if (!asSolid && c.Action == ImportKind.Structure && outcome.Created.Count > before)
                 {
-                    outcome.Status = "Failed";
-                    outcome.Failed = true;
-                    outcome.Detail = ex.Message;
+                    if (!structures.TryGetValue(netName, out var byName)) structures[netName] = byName = new Dictionary<string, (ObjectId, ImportCandidate)>(StringComparer.OrdinalIgnoreCase);
+                    byName[c.Name] = (outcome.Created[before], c);
                 }
             }
         }
 
-        /// <summary>Applies the "already imported" choice. Returns false when the row must not be created.</summary>
-        private static bool PrepareExisting(Transaction tr, ImportCandidate c, Dictionary<string, List<ObjectId>> existing, NavisImportOptions o, RowOutcome outcome)
+        /// <summary>
+        /// Erases a replaced row's earlier import, now that its new objects are made. An object that cannot be erased throws,
+        /// so the row's transaction is undone: the earlier import stays whole and the new objects go.
+        /// </summary>
+        private static void EraseReplaced(Transaction tr, List<ObjectId> replaced, RowOutcome outcome)
         {
+            if (replaced.Count == 0) return;
+            foreach (ObjectId id in replaced)
+            {
+                // Already gone (erased by an earlier row of this import): nothing to replace.
+                if (id.IsErased) continue;
+                try { tr.GetObject(id, OpenMode.ForWrite, false, true).Erase(); }
+                catch (Exception ex) { throw new InvalidOperationException($"An object of the earlier import ({id.Handle}) could not be erased: {ex.Message}", ex); }
+            }
+            outcome.Detail = (outcome.Detail + " Replaced the earlier import.").Trim();
+        }
+
+        /// <summary>
+        /// Applies the "already imported" choice. Returns false when the row must not be created. <paramref name="replaced"/>:
+        /// the earlier import to erase once the row's new objects are made (nothing is erased here).
+        /// </summary>
+        private static bool PrepareExisting(ImportCandidate c, Dictionary<string, List<ObjectId>> existing, NavisImportOptions o, RowOutcome outcome, out List<ObjectId> replaced)
+        {
+            replaced = new List<ObjectId>();
             if (string.IsNullOrEmpty(c.Guid) || !existing.TryGetValue(c.Guid, out List<ObjectId> ids) || ids.Count == 0) return true;
             switch (o.Existing)
             {
@@ -368,11 +417,7 @@ namespace C3DProTools
                     outcome.Created.AddRange(ids);
                     return false;
                 case ExistingMode.Replace:
-                    foreach (ObjectId id in ids)
-                    {
-                        try { tr.GetObject(id, OpenMode.ForWrite, false, true).Erase(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
-                    }
-                    outcome.Detail = (outcome.Detail + " Replaced the earlier import.").Trim();
+                    replaced.AddRange(ids.Where(id => !id.IsNull && !id.IsErased));
                     return true;
                 default:
                     return true;

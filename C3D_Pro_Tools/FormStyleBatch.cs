@@ -233,7 +233,20 @@ namespace C3DProTools
             if ((o.ImportMissing || o.OverwriteFromTemplate) && !File.Exists(o.TemplatePath)) { _status.Text = "The template file is needed for the template steps."; return; }
             if (o.ApplyMapping && !File.Exists(o.MappingPath)) { _status.Text = "The mapping file is needed for the mapping step."; return; }
             if (!o.Overwrite && o.OutputFolder.Length == 0) { _status.Text = "Choose the output folder."; return; }
-            string warning = o.Overwrite ? "Each drawing will be saved over (a .bak copy is kept next to it)." : $"Copies will be saved into {o.OutputFolder}.";
+            BatchTargetPlan targets = null;
+            if (!o.Overwrite)
+            {
+                targets = BatchTargets.Plan(rows.Select(r => (string)r.Tag).ToList(), o.OutputFolder);
+                if (!targets.Ok)
+                {
+                    MessageBox.Show(this, "No drawing was processed:\n\n" + string.Join("\n", targets.Problems.Take(8)) + (targets.Problems.Count > 8 ? $"\n…and {targets.Problems.Count - 8} more." : ""),
+                        "Batch processor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _status.Text = "The copies' paths clash; choose another output folder.";
+                    return;
+                }
+            }
+            string warning = o.Overwrite ? "Each drawing will be saved over (a .bak copy is kept next to it)."
+                : $"Copies will be saved into {o.OutputFolder}, keeping their subfolders." + (targets.Existing > 0 ? $"\n{targets.Existing} copy(ies) already there will be replaced." : "");
             if (MessageBox.Show(this, $"Process {rows.Count} drawing(s)?\n\n{warning}", "Batch processor", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             SaveChoices();
 
@@ -271,7 +284,7 @@ namespace C3DProTools
                     // Between drawings the window takes its messages (Stop, repaint). A short delay rather than Task.Yield,
                     // which would queue ahead of mouse input so Stop could not be clicked.
                     await System.Threading.Tasks.Task.Delay(1);
-                    BatchFileResult r = StyleBatch.Process(path, o, template, mapping, s => { _status.Text = $"{Path.GetFileName(path)}: {s}"; _status.Refresh(); });
+                    BatchFileResult r = StyleBatch.Process(path, targets?.Targets[Path.GetFullPath(path)], o, template, mapping, s => { _status.Text = $"{Path.GetFileName(path)}: {s}"; _status.Refresh(); });
                     Fill(row, r);
                     if (r.Status == "Done") done++; else failed++;
                     _progress.Value++;

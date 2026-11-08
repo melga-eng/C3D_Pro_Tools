@@ -6,11 +6,11 @@ namespace C3DProTools.Tests
     /// <summary>Merging networks: copies found by place, the most used copy kept, other sizes left to choose, the rest moved.</summary>
     public class NetworkMergeTests
     {
-        private static MergePart Pipe(string id, string net, double x0, double x1, string size = "DN300", int uses = 0, bool inTarget = false) =>
-            new MergePart { Id = id, Name = id, Network = net, IsPipe = true, A = (x0, 0, 100), B = (x1, 0, 99.5), Size = size, Uses = uses, InTarget = inTarget };
+        private static MergePart Pipe(string id, string net, double x0, double x1, string size = "DN300", int uses = 0, bool inTarget = false, string family = "Concrete Pipe") =>
+            new MergePart { Id = id, Name = id, Network = net, IsPipe = true, A = (x0, 0, 100), B = (x1, 0, 99.5), Family = family, Size = size, Uses = uses, InTarget = inTarget };
 
-        private static MergePart Structure(string id, string net, double x, string size = "MH-1200", int uses = 0, bool inTarget = false) =>
-            new MergePart { Id = id, Name = id, Network = net, IsPipe = false, A = (x, 0, 98), Size = size, Uses = uses, InTarget = inTarget };
+        private static MergePart Structure(string id, string net, double x, string size = "MH-1200", int uses = 0, bool inTarget = false, string family = "Manhole") =>
+            new MergePart { Id = id, Name = id, Network = net, IsPipe = false, A = (x, 0, 98), Family = family, Size = size, Uses = uses, InTarget = inTarget };
 
         [Fact]
         public void FourAndSixPipesSharingThree_GiveSevenPipes()
@@ -63,6 +63,50 @@ namespace C3DProTools.Tests
             Assert.Single(rows, r => r.Action == MergeAction.DeleteCopy);
             Assert.Equal(1, NetworkMerge.CopiesByNetwork(parts)["A"]);
             Assert.False(NetworkMerge.CopiesByNetwork(parts).ContainsKey("B"));
+        }
+
+        [Fact]
+        public void AChainOfNearParts_NeverDeletesAPartFarFromItsKeeper()
+        {
+            // a–b and b–c are each 0.8 mm apart (within 1 mm), but a–c are 1.6 mm apart: c is not a copy of a.
+            MergePart a = Structure("a", "A", 0, uses: 5), b = Structure("b", "B", 0.0008), c = Structure("c", "C", 0.0016);
+            List<MergeRow> rows = NetworkMerge.Plan(new[] { a, b, c });
+            Assert.All(rows.Where(r => r.Keeper != null), r => Assert.True(NetworkMerge.SamePlace(r.Part, r.Keeper)));
+            Assert.Equal(MergeAction.DeleteCopy, rows.Single(r => r.Part.Id == "b").Action);
+            Assert.Equal(MergeAction.Move, rows.Single(r => r.Part.Id == "c").Action);
+        }
+
+        [Fact]
+        public void ACurvedPipe_IsNotACopyOfAStraightOne_BetweenTheSameEnds()
+        {
+            MergePart straight = Pipe("s", "A", 0, 10, inTarget: true), curved = Pipe("c", "B", 0, 10);
+            curved.Bulge = 0.2;
+            Assert.False(NetworkMerge.SamePlace(straight, curved));
+            Assert.DoesNotContain(NetworkMerge.Plan(new[] { straight, curved }), r => r.Action == MergeAction.DeleteCopy);
+            // The same arc drawn the other way round is a copy.
+            MergePart reversed = new MergePart { IsPipe = true, A = curved.B, B = curved.A, Bulge = -0.2 };
+            Assert.True(NetworkMerge.SamePlace(curved, reversed));
+            // A bulge that could not be read matches nothing.
+            Assert.False(NetworkMerge.SamePlace(straight, new MergePart { IsPipe = true, A = straight.A, B = straight.B, Bulge = double.NaN }));
+        }
+
+        [Fact]
+        public void AnotherFamilyOrAnUnknownSize_IsLeftToChoose_NotDeleted()
+        {
+            MergePart concrete = Pipe("concrete", "A", 0, 10, inTarget: true), pvc = Pipe("pvc", "B", 0, 10), unknown = Pipe("unknown", "C", 0, 10, size: "");
+            concrete.Family = "Concrete Pipe"; pvc.Family = "PVC Pipe"; unknown.Family = "Concrete Pipe";
+            List<MergeRow> rows = NetworkMerge.Plan(new[] { concrete, pvc, unknown });
+            Assert.Equal(MergeAction.SamePlaceOtherSize, rows.Single(r => r.Part.Id == "pvc").Action);
+            Assert.Equal(MergeAction.SamePlaceOtherSize, rows.Single(r => r.Part.Id == "unknown").Action);
+        }
+
+        [Fact]
+        public void PartsWithoutAFamily_AreNeverDeletedAsCopies()
+        {
+            // Two duct banks (no part family) of the same size name in the same place: left for you to choose, not deleted.
+            List<MergeRow> rows = NetworkMerge.Plan(new[] { Pipe("d1", "A", 0, 10, "Duct 2x3", inTarget: true, family: ""), Pipe("d2", "B", 0, 10, "Duct 2x3", family: "") });
+            Assert.DoesNotContain(rows, r => r.Action == MergeAction.DeleteCopy);
+            Assert.Equal(MergeAction.SamePlaceOtherSize, rows.Single(r => r.Part.Id == "d2").Action);
         }
     }
 }
