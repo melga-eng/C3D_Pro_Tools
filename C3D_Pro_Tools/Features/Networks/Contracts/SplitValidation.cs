@@ -21,6 +21,8 @@ namespace C3DProTools.Features.Networks.Contracts
         public const string PartsRange = "split.parts.range";
         public const string EveryRange = "split.every.range";
         public const string StructureIncomplete = "split.structure.incomplete";
+        /// <summary>The structure is only a template to copy (its family is in no parts list); the split does not copy structures yet.</summary>
+        public const string StructureTemplateOnly = "split.structure.templateOnly";
         /// <summary>Preview: picked points not on any pipe (ignored).</summary>
         public const string PicksMissed = "split.picks.missed";
         /// <summary>Preview: no pipe can be split as asked (too short, or no point on a pipe).</summary>
@@ -43,7 +45,13 @@ namespace C3DProTools.Features.Networks.Contracts
         public const string ItemConnectionFailed = "split.item.connection";
         /// <summary>Apply: the structure could not be put in this network's parts list; the pipe is split without structures.</summary>
         public const string StructureUnavailable = "split.structure.unavailable";
+        /// <summary>Apply: a parts list was changed on the way (family or size added, or a network switched to the chosen list).</summary>
+        public const string PartsListChanged = "split.partsList.changed";
         public const string Cancelled = "split.cancelled";
+        /// <summary>Apply: the run's final state is not known (an unexpected error, a failed commit, or an unconfirmed undo); read the drawing again.</summary>
+        public const string OutcomeUnknown = "split.outcomeUnknown";
+        /// <summary>Apply: the split was saved, but releasing the drawing (lock or transaction) reported a problem.</summary>
+        public const string SessionNotClosed = "split.session.notClosed";
     }
 
     internal static class SplitValidation
@@ -100,8 +108,12 @@ namespace C3DProTools.Features.Networks.Contracts
             }
 
             SplitStructureChoice st = request.Structure;
-            if (st != null && (!st.PartsList.IsValid || string.IsNullOrWhiteSpace(st.SizeName) || (string.IsNullOrWhiteSpace(st.FamilyGuid) && string.IsNullOrWhiteSpace(st.FamilyName))))
+            if (st != null && (!st.IsComplete || st.Dimensions.Values.Any(v => !double.IsFinite(v))))
                 issues.Add(OperationIssue.Error(SplitIssueCodes.StructureIncomplete, "Choose the structure for the split points (parts list, family, size).", nameof(SplitRequest.Structure)));
+            // Copying a structure from the drawing (no parts list part) is not done by the split yet: refused, rather than
+            // splitting without the structures asked for.
+            else if (st != null && !st.PartsList.IsValid)
+                issues.Add(OperationIssue.Error(SplitIssueCodes.StructureTemplateOnly, "The split cannot copy a structure from the drawing yet. Choose a parts list structure (parts list, family, size) for the split points.", nameof(SplitRequest.Structure)));
             return issues;
         }
 
@@ -168,7 +180,11 @@ namespace C3DProTools.Features.Networks.Contracts
                 return OperationIssue.Error(SplitIssueCodes.PipeMissing, $"{item.PipeName} is no longer in the drawing; it was not split.", null, item.Pipe);
             List<string> what = new List<string>();
             if (planned.Start.DistanceTo(current.Start) > PositionTolerance || planned.End.DistanceTo(current.End) > PositionTolerance) what.Add("moved");
-            if (planned.Curved != current.Curved || Math.Abs(planned.Bulge - current.Bulge) > BulgeTolerance) what.Add("its curve changed");
+            // A bulge that could not be read (NaN) matches only another unread bulge; NaN never slips through as "unchanged".
+            bool sameBulge = double.IsNaN(planned.Bulge) || double.IsNaN(current.Bulge)
+                ? double.IsNaN(planned.Bulge) && double.IsNaN(current.Bulge)
+                : Math.Abs(planned.Bulge - current.Bulge) <= BulgeTolerance;
+            if (planned.Curved != current.Curved || !sameBulge) what.Add("its curve changed");
             if (planned.PartFamily != current.PartFamily) what.Add("its part family changed");
             if (planned.PartSize != current.PartSize || !string.Equals(planned.PartSizeName ?? "", current.PartSizeName ?? "", StringComparison.OrdinalIgnoreCase)) what.Add("its size changed");
             if (planned.Network != current.Network) what.Add("it moved to another network");

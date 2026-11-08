@@ -11,5 +11,10 @@ namespace C3DProTools.Features.Networks.Contracts
     internal static class Frozen
     {
         public static IReadOnlyList<T> List<T>(IEnumerable<T> items) => items == null ? ImmutableArray<T>.Empty : ImmutableArray.CreateRange(items);
+
+        /// <summary>A frozen copy of a map, its keys compared ordinally, ignoring case.</summary>
+        public static IReadOnlyDictionary<string, double> Map(IEnumerable<KeyValuePair<string, double>> items) =>
+            items == null ? ImmutableDictionary<string, double>.Empty.WithComparers(System.StringComparer.OrdinalIgnoreCase)
+                          : ImmutableDictionary.CreateRange(System.StringComparer.OrdinalIgnoreCase, items);
     }
 }

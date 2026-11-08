@@ -35,20 +35,53 @@ namespace C3DProTools.Features.Networks.Contracts
         public const double MaxPickTolerance = 100.0;
         /// <summary>The most pieces one pipe may be split into. A deliberate safeguard (a tiny fixed length on a long pipe): today there is no limit.</summary>
         public const int MaxPiecesPerPipe = 1000;
+
+        /// <summary>
+        /// How many pieces a fixed-length split makes of a pipe, counted without making any point: points at every, 2 every, …
+        /// while more than <see cref="MinPieceLength"/> short of the end (the last piece takes the rest). The planner checks it
+        /// against <see cref="MaxPiecesPerPipe"/> first, so a tiny length on a long pipe never builds a huge plan.
+        /// </summary>
+        public static double PiecesForFixedLength(double length, double every)
+        {
+            if (!(every > 0) || !double.IsFinite(length)) return 1;
+            double room = (length - MinPieceLength) / every;
+            return room <= 1 ? 1 : Math.Ceiling(room - 1e-12);
+        }
     }
 
     /// <summary>
-    /// The structure placed at every split point, joining the two pieces there. The adapter finds it in the drawing's parts
-    /// list (adding the family or size to the network's own list, or switching the network to this list, as Network Editor
-    /// does today); when it cannot be put in a network's list, that network's pipes are split without structures, with a warning.
+    /// The structure placed at every split point, joining the two pieces there, as the part chooser picked it. The adapter puts
+    /// it in each network's parts list (adding the family or size to the network's own list, or switching the network to this
+    /// list, as Network Editor does today); when it cannot be put in a network's list, that network's pipes are split without
+    /// structures, with a warning. Either a parts list part (<see cref="PartsList"/>, family and size), or only a
+    /// <see cref="Template"/> to copy (a structure whose family is in no parts list).
     /// </summary>
-    /// <param name="PartsList">The parts list the structure was chosen from.</param>
+    /// <param name="PartsList">The parts list the structure was chosen from; default (none) when only a template is copied.</param>
     /// <param name="FamilyGuid">The catalog family's GUID; empty for a family without one (then <paramref name="FamilyName"/> is used).</param>
     /// <param name="Template">A structure in the drawing to copy when the part cannot be built (no family or catalog); null for none.</param>
     /// <param name="SwitchNetwork">True: a network on another parts list is switched to <paramref name="PartsList"/>; false: the part is added to the network's own list.</param>
     internal sealed record SplitStructureChoice(DrawingObjectRef PartsList, string FamilyGuid, string FamilyName, string SizeName,
         DrawingObjectRef? Template = null, bool SwitchNetwork = false)
     {
+        private readonly IReadOnlyDictionary<string, double> _dimensions = Frozen.Map(null);
+
+        /// <summary>The parts list's name, for messages.</summary>
+        public string PartsListName { get; init; } = "";
+        /// <summary>The family in the drawing, when it is in a parts list already; null for a catalog family not added yet.</summary>
+        public DrawingObjectRef? Family { get; init; }
+        /// <summary>The size in the parts list; null for a catalog size not in the list yet (it is added, from <see cref="Dimensions"/>).</summary>
+        public DrawingObjectRef? Size { get; init; }
+        /// <summary>
+        /// The size's dimensions, by part parameter name (e.g. "StructInnerDiameter"), in drawing units; used to find or add
+        /// the size in each network's list. Frozen when set.
+        /// </summary>
+        public IReadOnlyDictionary<string, double> Dimensions { get => _dimensions; init => _dimensions = Frozen.Map(value); }
+
+        /// <summary>True when the choice names a part: a parts list with family and size, or a template to copy.</summary>
+        public bool IsComplete =>
+            (Template?.IsValid ?? false)
+            || (PartsList.IsValid && !string.IsNullOrWhiteSpace(SizeName) && !(string.IsNullOrWhiteSpace(FamilyGuid) && string.IsNullOrWhiteSpace(FamilyName)));
+
         /// <summary>As the form shows it: "family · size".</summary>
         public string Label => $"{FamilyName} · {SizeName}";
     }

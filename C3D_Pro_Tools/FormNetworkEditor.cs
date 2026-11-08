@@ -3,10 +3,14 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.DatabaseServices;
+using C3DProTools.Features.Networks.Application;
+using C3DProTools.Features.Networks.Civil3D;
+using C3DProTools.Features.Networks.Contracts;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 using ColumnStyle = System.Windows.Forms.ColumnStyle;
@@ -48,6 +52,8 @@ namespace C3DProTools
         private readonly TextBox _txtEvery = ToolUi.Number(20), _txtPickTol = ToolUi.Number(1);
         private readonly CheckBox _chkSplitStructure = ToolUi.Check("Add a structure at every split point, connected to both pieces");
         private readonly PartChooser _splitPart = new PartChooser(DomainType.Structure);
+        /// <summary>The split operation: the form collects input and renders results; the workflow owns the drawing changes.</summary>
+        private readonly ISplitOperation _split = new SplitWorkflow(new SplitCivil3DAccess());
         // Parallel copies
         private readonly ComboBox _cbPreset = ToolUi.Combo();
         private readonly TextBox _txtH = new TextBox(), _txtV = new TextBox();
@@ -1168,63 +1174,121 @@ namespace C3DProTools
             Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
             List<ObjectId> gravity = GravityPipes();
             if (_chkSplitStructure.Checked && _splitPart.Pick == null) { MessageBox.Show(this, "Choose the structure for the split points (parts list, family, size).", Text); return; }
-            List<NetworkEditOps.SplitPlan> plans;
-            int missed = 0;
-            if (_cbSplitMode.SelectedIndex == 0)
+            SplitMode mode = (SplitMode)_cbSplitMode.SelectedIndex;
+            SplitRequest request = new SplitRequest
+            {
+                Drawing = DrawingRefs3D.Identity(acDoc),
+                Mode = mode,
+                Pipes = gravity.Select(DrawingRefs3D.Ref).ToList(),
+                Parts = (int)_numParts.Value,
+                Structure = _chkSplitStructure.Checked ? SplitCivil3DAccess.ToChoice(_splitPart.Pick) : null
+            };
+            // Quick feedback here; the workflow validates again and is authoritative.
+            if (mode == SplitMode.AtPoints)
             {
                 if (!ToolUi.TryNumber(_txtPickTol, out double tol) || tol <= 0) { MessageBox.Show(this, "Enter a positive pick distance.", Text); return; }
-                List<ObjectId> candidates = gravity;
-                if (candidates.Count == 0)
-                    using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                        foreach (ObjectId netId in CivilApplication.ActiveDocument.GetPipeNetworkIds())
-                            if (tr.GetObject(netId, OpenMode.ForRead) is Network n) candidates.AddRange(n.GetPipeIds().Cast<ObjectId>());
-                List<Point3d> picks = new List<Point3d>();
-                Hide();
-                try
-                {
-                    using (TransientMarkers markers = new TransientMarkers())
-                    {
-                        while (true)
-                        {
-                            PromptPointOptions ppo = new PromptPointOptions($"\nPick split point {picks.Count + 1} on a pipe (Enter when done): ") { AllowNone = true };
-                            PromptPointResult r = acDoc.Editor.GetPoint(ppo);
-                            if (r.Status == PromptStatus.None) break;
-                            if (r.Status != PromptStatus.OK) { picks.Clear(); break; }
-                            picks.Add(r.Value);
-                            markers.AddRing(r.Value, 0.5, 1, 0.12);
-                            acDoc.Editor.UpdateScreen();
-                        }
-                    }
-                }
-                finally { Show(); }
+                List<Point3d> picks = PickSplitPoints(acDoc);
                 if (picks.Count == 0) return;
-                using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                    plans = NetworkEditOps.PlanSplitAtPoints(tr, candidates, picks, tol, out missed);
+                request = request with { PickTolerance = tol, Picks = picks.Select(DrawingRefs3D.Point).ToList() };
             }
             else
             {
                 if (!NeedGravity(gravity)) return;
-                double every = 0;
-                if (_cbSplitMode.SelectedIndex == 2 && (!ToolUi.TryNumber(_txtEvery, out every) || every <= 0)) { MessageBox.Show(this, "Enter a positive length.", Text); return; }
-                using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                    plans = NetworkEditOps.PlanSplit(tr, gravity, (int)_numParts.Value, _cbSplitMode.SelectedIndex == 2 ? every : 0);
+                if (mode == SplitMode.FixedLength)
+                {
+                    if (!ToolUi.TryNumber(_txtEvery, out double every) || every <= 0) { MessageBox.Show(this, "Enter a positive length.", Text); return; }
+                    request = request with { Every = every };
+                }
             }
-            if (plans.Count == 0) { MessageBox.Show(this, missed > 0 ? $"None of the {missed} picked point(s) lies on a pipe (within the pick distance, and not at an end)." : "No pipe is long enough to split that way.", Text); return; }
 
-            List<PreviewRow> rows = plans.Select(p => new PreviewRow
+            SplitPreview preview = _split.Preview(request, CancellationToken.None);
+            if (preview.Status != OperationStatus.Succeeded)
             {
-                Tag = p,
-                Cells = new[] { p.Name, p.Curved ? "Curved" : "Straight", ToolUi.Format(Math.Round(p.Length, 2)), (p.Points.Count + 1).ToString(),
+                MessageBox.Show(this, IssueText(preview.Issues), Text, MessageBoxButtons.OK, preview.Status == OperationStatus.Rejected ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                return;
+            }
+
+            string unit = preview.Drawing.Unit;
+            List<PreviewRow> rows = preview.Items.Select(p => new PreviewRow
+            {
+                Tag = p.Pipe,
+                Cells = new[] { p.PipeName, p.Curved ? "Curved" : "Straight", ToolUi.Format(Math.Round(p.Length, 2)), p.PieceCount.ToString(),
                     string.Join("; ", p.Points.Take(4).Select(pt => $"{pt.X:0.00}, {pt.Y:0.00}")) + (p.Points.Count > 4 ? " …" : "") }
             }).ToList();
-            string intro = $"{plans.Count} pipe(s) will be split{(missed > 0 ? $"; {missed} picked point(s) were not on a pipe and are ignored" : "")}." +
-                           (_chkSplitStructure.Checked ? $" A {_splitPart.Pick?.Label} joins the pieces at every split point." : " The pieces are left touching, without structures.");
-            if (!Confirm("Split pipes", intro, new[] { "Pipe", "Type", "Length (m)", "Pieces", "Split points" }, rows, "Split")) return;
+            int leftOut = preview.Issues.Count(i => i.Code == SplitIssueCodes.TooManyPieces || i.Code == SplitIssueCodes.ItemPointsInvalid || i.Code == SplitIssueCodes.PipeMissing);
+            string intro = $"{preview.Items.Count} pipe(s) will be split{(preview.MissedPicks > 0 ? $"; {preview.MissedPicks} picked point(s) were not used and are ignored" : "")}" +
+                           (leftOut > 0 ? $"; {leftOut} pipe(s) are left out (see the list after the split)" : "") + "." +
+                           (request.Structure != null ? $" A {request.Structure.Label} joins the pieces at every split point." : " The pieces are left touching, without structures.");
+            if (!Confirm("Split pipes", intro, new[] { "Pipe", "Type", $"Length ({unit})", "Pieces", "Split points" }, rows, "Split")) return;
 
-            List<NetworkEditOps.SplitPlan> chosen = rows.Select(r => (NetworkEditOps.SplitPlan)r.Tag).ToList();
-            NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplySplit(tr, chosen, _chkSplitStructure.Checked ? _splitPart.Pick : null, ed));
-            string spanWarning = SpanWarning(chosen.Select(p => p.PipeId).Concat(c.NewIds));
-            Report($"Split {c.Done} pipe(s) into {c.Done + c.Created} pieces.", c, ((c.Structures > 0 ? $"Structures added: {c.Structures}\n" : "") + spanWarning).Trim());
+            List<DrawingObjectRef> chosen = rows.Select(r => (DrawingObjectRef)r.Tag).ToList();
+            SplitResult result = _split.Apply(new SplitApplyRequest(preview, chosen), null, CancellationToken.None);
+            ViewHelper.Regen(acDoc);
+            IEnumerable<DrawingObjectRef> touched = result.Items.Where(i => i.Status == ItemStatus.Committed).SelectMany(i => new[] { i.Pipe }.Concat(i.NewPipes));
+            string spanWarning = SpanWarning(DrawingRefs3D.ObjectIds(acDoc.Database, touched));
+            ReportSplit(result, preview, spanWarning);
+        }
+
+        /// <summary>Points picked on the pipes (the form hides while picking); empty when cancelled or none picked.</summary>
+        private List<Point3d> PickSplitPoints(Document acDoc)
+        {
+            List<Point3d> picks = new List<Point3d>();
+            Hide();
+            try
+            {
+                using (TransientMarkers markers = new TransientMarkers())
+                {
+                    while (true)
+                    {
+                        PromptPointOptions ppo = new PromptPointOptions($"\nPick split point {picks.Count + 1} on a pipe (Enter when done): ") { AllowNone = true };
+                        PromptPointResult r = acDoc.Editor.GetPoint(ppo);
+                        if (r.Status == PromptStatus.None) break;
+                        if (r.Status != PromptStatus.OK) { picks.Clear(); break; }
+                        picks.Add(r.Value);
+                        markers.AddRing(r.Value, 0.5, 1, 0.12);
+                        acDoc.Editor.UpdateScreen();
+                    }
+                }
+            }
+            finally { Show(); }
+            return picks;
+        }
+
+        /// <summary>Shows what the split did: committed counts only, then each pipe not split and why, then notes.</summary>
+        private void ReportSplit(SplitResult r, SplitPreview preview, string spanWarning)
+        {
+            string what = r.Status switch
+            {
+                OperationStatus.Succeeded => $"Split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces.",
+                OperationStatus.PartiallySucceeded => $"Split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces; {r.Items.Count - r.PipesSplit} pipe(s) were not split.",
+                OperationStatus.RolledBack => "No pipe was split: each one failed and was left as it was.",
+                OperationStatus.Rejected => "Nothing was split.",
+                OperationStatus.NoChange => "Nothing to split.",
+                OperationStatus.Cancelled => $"Cancelled after splitting {r.PipesSplit} pipe(s).",
+                _ => "The split may not have finished. Check the drawing before trying again."
+            };
+            List<string> parts = new List<string>();
+            if (r.StructuresAdded > 0) parts.Add($"Structures added: {r.StructuresAdded}");
+            List<string> notSplit = r.Items.Where(i => i.Status != ItemStatus.Committed && i.Issue != null).Select(i => "• " + i.Issue.Message).ToList();
+            if (notSplit.Count > 0) parts.Add("Not split:\n" + string.Join("\n", notSplit.Take(10)) + (notSplit.Count > 10 ? $"\n• …and {notSplit.Count - 10} more (see the command line)." : ""));
+            List<string> warnings = r.Items.Where(i => i.Status == ItemStatus.Committed && i.Issue != null).Select(i => "• " + i.Issue.Message)
+                .Concat(preview.Issues.Where(i => i.Severity == IssueSeverity.Warning).Select(i => "• " + i.Message)).Distinct().ToList();
+            if (warnings.Count > 0) parts.Add("Notes:\n" + string.Join("\n", warnings.Take(10)));
+            List<string> lists = r.Issues.Where(i => i.Code == SplitIssueCodes.PartsListChanged).Select(i => i.Message).ToList();
+            if (lists.Count > 0) parts.Add("Parts lists:\n• " + string.Join("\n• ", lists));
+            List<string> others = r.Issues.Where(i => i.Code != SplitIssueCodes.PartsListChanged).Select(i => i.Message).ToList();
+            if (others.Count > 0) parts.Add(string.Join("\n", others));
+            if (!string.IsNullOrWhiteSpace(spanWarning)) parts.Add(spanWarning.Trim());
+            if (r.PipesSplit > 0) parts.Add("UNDO reverses the whole change.");
+            _lblStatus.Text = what;
+            MessageBox.Show(this, (what + "\n\n" + string.Join("\n\n", parts)).Trim(), Text, MessageBoxButtons.OK,
+                r.Status == OperationStatus.Succeeded ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        private static string IssueText(IEnumerable<OperationIssue> issues)
+        {
+            List<string> lines = issues.Select(i => i.Message).Distinct().ToList();
+            return lines.Count == 0 ? "Nothing to split." : string.Join("\n", lines);
         }
 
         private void RunParallel()

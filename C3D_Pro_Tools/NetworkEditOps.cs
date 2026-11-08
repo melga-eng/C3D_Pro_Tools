@@ -184,22 +184,43 @@ namespace C3DProTools
             public readonly List<ObjectId> NewIds = new List<ObjectId>();
             /// <summary>Parts list changes made on the way (families and sizes added, networks switched to another list).</summary>
             public readonly List<string> Log = new List<string>();
-            /// <summary>The counts as they are now, to put back when an operation is rolled back.</summary>
-            internal (int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds) Snapshot() =>
-                (Done, Created, Skipped, Structures, Joined, Copied, Unconnected, NewIds.Count);
+            /// <summary>Structures made (split: at the split points), in the order made.</summary>
+            public readonly List<ObjectId> NewStructureIds = new List<ObjectId>();
+            /// <summary>Items that failed and were undone: the pipe, why, and whether a connection was what failed.</summary>
+            public readonly List<(ObjectId pipe, string message, bool connection)> Failures = new List<(ObjectId, string, bool)>();
+            /// <summary>Warnings about items that went ahead differently (e.g. split without structures).</summary>
+            public readonly List<(ObjectId pipe, string message)> Warnings = new List<(ObjectId, string)>();
+            /// <summary>
+            /// The counts as they are now, to put back when an operation is rolled back: its counts, new objects, parts list
+            /// notes and warnings, and the parts resolved for networks during it (their parts list edits are undone with it).
+            /// </summary>
+            internal (int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds, int newStructures, int log, int warnings, int resolved) Snapshot() =>
+                (Done, Created, Skipped, Structures, Joined, Copied, Unconnected, NewIds.Count, NewStructureIds.Count, Log.Count, Warnings.Count, _resolvedOrder.Count);
 
-            internal void Restore((int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds) s)
+            internal void Restore((int done, int created, int skipped, int structures, int joined, int copied, int unconnected, int newIds, int newStructures, int log, int warnings, int resolved) s)
             {
                 (Done, Created, Skipped, Structures, Joined, Copied, Unconnected) = (s.done, s.created, s.skipped, s.structures, s.joined, s.copied, s.unconnected);
-                if (NewIds.Count > s.newIds) NewIds.RemoveRange(s.newIds, NewIds.Count - s.newIds);
+                Trim(NewIds, s.newIds);
+                Trim(NewStructureIds, s.newStructures);
+                Trim(Log, s.log);
+                Trim(Warnings, s.warnings);
+                for (int i = _resolvedOrder.Count - 1; i >= s.resolved; i--) _resolved.Remove(_resolvedOrder[i]);
+                Trim(_resolvedOrder, s.resolved);
             }
 
+            private static void Trim<T>(List<T> list, int count) { if (list.Count > count) list.RemoveRange(count, list.Count - count); }
+
             private readonly Dictionary<ObjectId, (ObjectId family, ObjectId size)> _resolved = new Dictionary<ObjectId, (ObjectId, ObjectId)>();
+            private readonly List<ObjectId> _resolvedOrder = new List<ObjectId>();
 
             /// <summary>The chosen part in a network's parts list (added there, or the network switched, once per network).</summary>
             public (ObjectId family, ObjectId size) PartFor(Transaction tr, ObjectId networkId, PartPick pick)
             {
-                if (!_resolved.TryGetValue(networkId, out var ids)) _resolved[networkId] = ids = PartsListTools.Resolve(tr, networkId, ObjectId.Null, pick, Log);
+                if (!_resolved.TryGetValue(networkId, out var ids))
+                {
+                    _resolved[networkId] = ids = PartsListTools.Resolve(tr, networkId, ObjectId.Null, pick, Log);
+                    _resolvedOrder.Add(networkId);
+                }
                 return ids;
             }
         }
@@ -215,7 +236,13 @@ namespace C3DProTools
             public bool Curved;
             /// <summary>Split points, ordered from the pipe's start; each lies on the pipe (Z on its centreline).</summary>
             public readonly List<Point3d> Points = new List<Point3d>();
+            /// <summary>Each point's plan distance from the pipe's start (along its arc when curved), in the order of <see cref="Points"/>.</summary>
+            public readonly List<double> Along = new List<double>();
             public double Length;
+            /// <summary>When above 0: the pieces the pipe would have needed, more than the planner's limit; it has no points and is not split.</summary>
+            public int TooManyPieces;
+
+            public void Add(Point3d point, double along) { Points.Add(point); Along.Add(along); }
         }
 
         /// <summary>Plan length and the point at a plan distance from the start, for straight and curved pipes.</summary>
@@ -242,22 +269,31 @@ namespace C3DProTools
             return (length, d => s + (e - s) * (d / Math.Max(1e-9, length)));
         }
 
-        /// <summary>Splits into equal parts, or every <paramref name="every"/> m from the start (the last piece takes the rest).</summary>
-        public static List<SplitPlan> PlanSplit(Transaction tr, IEnumerable<ObjectId> pipeIds, int parts, double every)
+        /// <summary>
+        /// Splits into equal parts, or every <paramref name="every"/> from the start (the last piece takes the rest). A pipe that
+        /// would need more than <paramref name="maxPieces"/> pieces gets no points, only <see cref="SplitPlan.TooManyPieces"/>
+        /// (counted before any point is made). Stops between pipes when <paramref name="cancel"/> is set.
+        /// </summary>
+        public static List<SplitPlan> PlanSplit(Transaction tr, IEnumerable<ObjectId> pipeIds, int parts, double every,
+            int maxPieces = int.MaxValue, System.Threading.CancellationToken cancel = default)
         {
             List<SplitPlan> plans = new List<SplitPlan>();
             foreach (ObjectId id in pipeIds)
             {
+                if (cancel.IsCancellationRequested) break;
                 if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe pipe)) continue;
                 (double length, Func<double, Point3d> at) = Measure(pipe);
                 SplitPlan plan = new SplitPlan { PipeId = id, Name = pipe.Name, Curved = pipe.SubEntityType == PipeSubEntityType.Curved, Length = length };
+                // Counted before any point is made (the same rule as the loop below).
+                double wanted = every > 0 ? C3DProTools.Features.Networks.Contracts.SplitLimits.PiecesForFixedLength(length, every) : parts;
+                if (wanted > maxPieces) { plan.TooManyPieces = wanted >= int.MaxValue ? int.MaxValue : (int)wanted; plans.Add(plan); continue; }
                 if (every > 0)
                 {
-                    for (double d = every; d < length - MinPipeLength; d += every) plan.Points.Add(at(d));
+                    for (double d = every; d < length - MinPipeLength; d += every) plan.Add(at(d), d);
                 }
                 else
                 {
-                    for (int i = 1; i < parts; i++) plan.Points.Add(at(length * i / parts));
+                    for (int i = 1; i < parts; i++) plan.Add(at(length * i / parts), length * i / parts);
                 }
                 if (plan.Points.Count > 0) plans.Add(plan);
             }
@@ -265,7 +301,8 @@ namespace C3DProTools
         }
 
         /// <summary>Splits the pipe nearest each picked point (within <paramref name="tolerance"/> in plan) at that point.</summary>
-        public static List<SplitPlan> PlanSplitAtPoints(Transaction tr, IEnumerable<ObjectId> candidatePipes, List<Point3d> picks, double tolerance, out int missed)
+        public static List<SplitPlan> PlanSplitAtPoints(Transaction tr, IEnumerable<ObjectId> candidatePipes, List<Point3d> picks, double tolerance, out int missed,
+            System.Threading.CancellationToken cancel = default)
         {
             missed = 0;
             Dictionary<ObjectId, SplitPlan> byPipe = new Dictionary<ObjectId, SplitPlan>();
@@ -274,6 +311,7 @@ namespace C3DProTools
                 .Select(p => { var m = Measure(p); return (p, m.length, m.at); }).ToList();
             foreach (Point3d pick in picks)
             {
+                if (cancel.IsCancellationRequested) break;
                 Pipe best = null;
                 double bestDist = tolerance, bestAlong = 0, bestLength = 0;
                 Func<double, Point3d> bestAt = null;
@@ -296,13 +334,15 @@ namespace C3DProTools
                 if (best == null || bestAlong < MinPipeLength || bestAlong > bestLength - MinPipeLength) { missed++; continue; }
                 if (!byPipe.TryGetValue(best.ObjectId, out SplitPlan plan))
                     byPipe[best.ObjectId] = plan = new SplitPlan { PipeId = best.ObjectId, Name = best.Name, Curved = best.SubEntityType == PipeSubEntityType.Curved, Length = bestLength };
-                plan.Points.Add(bestAt(bestAlong));
+                plan.Add(bestAt(bestAlong), bestAlong);
             }
+            // Ordered from the start along the pipe (along its arc when curved).
             foreach (SplitPlan plan in byPipe.Values)
             {
-                Pipe pipe = (Pipe)tr.GetObject(plan.PipeId, OpenMode.ForRead);
-                Point3d s = pipe.StartPoint;
-                plan.Points.Sort((a, b) => new Point2d(s.X, s.Y).GetDistanceTo(new Point2d(a.X, a.Y)).CompareTo(new Point2d(s.X, s.Y).GetDistanceTo(new Point2d(b.X, b.Y))));
+                var ordered = plan.Points.Zip(plan.Along, (pt, d) => (pt, d)).OrderBy(x => x.d).ToList();
+                plan.Points.Clear();
+                plan.Along.Clear();
+                foreach ((Point3d pt, double d) in ordered) plan.Add(pt, d);
             }
             return byPipe.Values.ToList();
         }
@@ -317,22 +357,28 @@ namespace C3DProTools
             Counts c = new Counts();
             foreach (SplitPlan plan in plans)
             {
-                // Read here; written only inside the operation's own transaction, so a split that fails leaves the pipe as it was.
-                Network network = (Network)tr.GetObject(((Pipe)tr.GetObject(plan.PipeId, OpenMode.ForRead)).NetworkId, OpenMode.ForRead);
-                ObjectId structureFamilyId = ObjectId.Null, structureSizeId = ObjectId.Null;
-                if (structure != null)
-                {
-                    (structureFamilyId, structureSizeId) = c.PartFor(tr, network.ObjectId, structure);
-                    if (structureSizeId.IsNull) ed.WriteMessage($"\n[Warning] {structure.Label} could not be put in the parts list of network {network.Name}; {plan.Name} is split without structures.");
-                }
-                bool addStructures = !structureFamilyId.IsNull && !structureSizeId.IsNull;
-                ObjectId networkId = network.ObjectId, surfaceId = network.ReferenceSurfaceId;
                 try
                 {
+                    // Everything for this pipe, including putting the structure in its network's parts list, is in its own
+                    // transaction: a split that fails leaves the pipe, the network and its parts list as they were.
                     Atomic(tr, c, t =>
                     {
                         Pipe pipe = (Pipe)t.GetObject(plan.PipeId, OpenMode.ForWrite);
+                        ObjectId networkId = pipe.NetworkId;
+                        ObjectId structureFamilyId = ObjectId.Null, structureSizeId = ObjectId.Null;
+                        if (structure != null)
+                        {
+                            (structureFamilyId, structureSizeId) = c.PartFor(t, networkId, structure);
+                            if (structureSizeId.IsNull)
+                            {
+                                string warning = $"{structure.Label} could not be put in the parts list of network {((Network)t.GetObject(networkId, OpenMode.ForRead)).Name}; {plan.Name} is split without structures.";
+                                ed.WriteMessage($"\n[Warning] {warning}");
+                                c.Warnings.Add((plan.PipeId, warning));
+                            }
+                        }
+                        bool addStructures = !structureFamilyId.IsNull && !structureSizeId.IsNull;
                         Network net = (Network)t.GetObject(networkId, OpenMode.ForWrite);
+                        ObjectId surfaceId = net.ReferenceSurfaceId;
                         Autodesk.Civil.DatabaseServices.Surface surface = surfaceId.IsNull ? null : t.GetObject(surfaceId, OpenMode.ForRead) as Autodesk.Civil.DatabaseServices.Surface;
                         if (plan.Curved) { SplitCurved(t, net, pipe, plan, addStructures, structureFamilyId, structureSizeId, surface, c); return; }
 
@@ -365,6 +411,7 @@ namespace C3DProTools
                 {
                     ed.WriteMessage($"\n[Error] Splitting pipe <{plan.Name}>: {ex.Message} The pipe is left as it was.");
                     c.Failed++;
+                    c.Failures.Add((plan.PipeId, ex.Message, ex is PipeConnectionException));
                 }
             }
             return c;
@@ -406,6 +453,7 @@ namespace C3DProTools
                 {
                     network.AddStructure(familyId, sizeId, p, 0, ref structureId, false);
                     c.Structures++;
+                    c.NewStructureIds.Add(structureId);
                 }
                 ObjectId newId = ObjectId.Null;
                 network.BreakPipe(current, p, structureId, ref newId);
@@ -421,6 +469,7 @@ namespace C3DProTools
             ObjectId structureId = ObjectId.Null;
             network.AddStructure(familyId, sizeId, at, rotation, ref structureId, false);
             c.Structures++;
+            c.NewStructureIds.Add(structureId);
             ConnectOrThrow(upstream, ConnectorPositionType.End, structureId);
             ConnectOrThrow(downstream, ConnectorPositionType.Start, structureId);
             SetRimAndSump(tr, structureId, surface, Math.Min(upstream.EndPoint.Z - upstream.InnerHeight / 2.0, downstream.StartPoint.Z - downstream.InnerHeight / 2.0));
@@ -922,13 +971,21 @@ namespace C3DProTools
         /// </summary>
         internal static void ConnectOrThrow(Pipe pipe, ConnectorPositionType position, ObjectId structureId)
         {
+            string which = position == ConnectorPositionType.Start ? "start" : "end";
             Point3d start = pipe.StartPoint, end = pipe.EndPoint;
-            ConnectEnd(pipe, position, structureId);
+            try { ConnectEnd(pipe, position, structureId); }
+            catch (Exception ex) { throw new PipeConnectionException($"Pipe <{pipe.Name}> could not be connected at its {which}: {ex.Message}", ex); }
             if (!pipe.StartPoint.IsEqualTo(start)) pipe.StartPoint = start;
             if (!pipe.EndPoint.IsEqualTo(end)) pipe.EndPoint = end;
             ObjectId now = position == ConnectorPositionType.Start ? pipe.StartStructureId : pipe.EndStructureId;
             if (now != structureId)
-                throw new InvalidOperationException($"Pipe <{pipe.Name}> did not stay connected at its {(position == ConnectorPositionType.Start ? "start" : "end")}.");
+                throw new PipeConnectionException($"Pipe <{pipe.Name}> did not stay connected at its {which}.");
+        }
+
+        /// <summary>A pipe end that could not be connected (or did not stay connected) to its structure.</summary>
+        internal sealed class PipeConnectionException : InvalidOperationException
+        {
+            public PipeConnectionException(string message, Exception inner = null) : base(message, inner) { }
         }
 
         private static bool TryConnect(Pipe pipe, ConnectorPositionType position, ObjectId structureId)
