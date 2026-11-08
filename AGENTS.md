@@ -30,6 +30,7 @@ Tools: `c3d_status`, `c3d_list_objects`, `c3d_get_object`, `c3d_list_civil`, `c3
 
 - **Read before you write.** Use `c3d_status` and the list/get tools to see the drawing before changing anything.
 - **The user's drawing is real work.** Before anything that modifies the drawing (`c3d_run_command` that edits, `c3d_execute_csharp` that writes), say what it will change and wait for the user's go-ahead, unless they already asked for exactly that change.
+- **Name the drawing.** `c3d_run_command` and `c3d_execute_csharp` require `drawing` (as `c3d_status` lists it); they refuse to run if another drawing is active. A timeout that says "cancelled" means nothing ran; "still running" means it may still change the drawing, so re-read before retrying.
 - **Test code changes live** by running the plugin's own commands through `c3d_run_command` after the user has reloaded the rebuilt DLL.
 - `c3d_execute_csharp` snippets must follow the auditor rules below: one `Transaction` in `using`, `doc.LockDocument()` is already taken by the bridge, no UI calls.
 

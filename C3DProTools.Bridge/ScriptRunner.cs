@@ -38,8 +38,23 @@ namespace C3DProTools.Bridge
             "#line 1\n";
         private const string Suffix = "\n#line hidden\nreturn null;\n}\n}\n";
 
+        // The reference list is rebuilt after Civil 3D loads a new assembly from disk (e.g. the user NETLOADs the
+        // main plugin), so snippets can use its types without a restart. References are cached per file, so a
+        // rebuild only reads the new files.
         private static List<MetadataReference> _references;
+        private static readonly Dictionary<string, MetadataReference> ByPath = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object Gate = new();
+        private static int _subscribed;
+
+        private static void OnAssemblyLoad(object sender, AssemblyLoadEventArgs e)
+        {
+            var asm = e.LoadedAssembly;
+            if (asm.IsDynamic) return;
+            string loc;
+            try { loc = asm.Location; } catch { return; }
+            if (string.IsNullOrEmpty(loc)) return; // snippets load from memory: no location, no rebuild
+            lock (Gate) _references = null;
+        }
 
         public sealed class Compiled
         {
@@ -102,6 +117,9 @@ namespace C3DProTools.Bridge
 
         private static List<MetadataReference> References()
         {
+            if (Interlocked.Exchange(ref _subscribed, 1) == 0)
+                AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
+
             lock (Gate)
             {
                 if (_references != null) return _references;
@@ -128,8 +146,16 @@ namespace C3DProTools.Bridge
                 var refs = new List<MetadataReference>();
                 foreach (var path in byName.Values)
                 {
-                    if (!IsManagedAssembly(path)) continue;
-                    try { refs.Add(MetadataReference.CreateFromFile(path)); } catch { }
+                    if (!ByPath.TryGetValue(path, out var reference))
+                    {
+                        reference = null;
+                        if (IsManagedAssembly(path))
+                        {
+                            try { reference = MetadataReference.CreateFromFile(path); } catch { }
+                        }
+                        ByPath[path] = reference; // null = not a managed assembly, don't check it again
+                    }
+                    if (reference != null) refs.Add(reference);
                 }
                 _references = refs;
                 return refs;

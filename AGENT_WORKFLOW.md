@@ -120,6 +120,9 @@ permission prompt counts. Keep work drawings backed up anyway, and try new thing
 | `c3d_run_command` | can | Sends a command-line string, waits until Civil 3D is idle |
 | `c3d_execute_csharp` | can | Compiles and runs C# inside Civil 3D with `doc`, `db`, `ed`, `civil` |
 
+The two tools that can change the drawing must name it (`drawing`) and refuse to run in any other drawing. If Civil 3D is
+busy and a request times out before it starts, it is cancelled and never runs later.
+
 Safety: the bridge listens on `127.0.0.1` only and rejects requests from web pages (browser `Origin`) or other hosts.
 Anything on your PC can still reach it while it runs, so stop it with `C3DBRIDGE` → Stop when you're not using it, if
 you prefer.

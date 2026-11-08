@@ -90,31 +90,69 @@ namespace C3DProTools.Bridge
             _ = _invoker.Handle;
         }
 
+        private const int Queued = 0, Running = 1, Cancelled = 2;
+
+        /// <summary>
+        /// Queues work for the main thread and waits for it. If the wait times out before the work has started, the
+        /// work is cancelled and never runs (so a write the agent was told failed cannot happen later). If it has
+        /// already started, it cannot be stopped: the error says so, and the agent must re-read the drawing.
+        /// </summary>
         public T Run<T>(Func<T> work, TimeSpan timeout)
         {
+            int state = Queued;
             var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
             _invoker.BeginInvoke(new Action(() =>
             {
+                if (Interlocked.CompareExchange(ref state, Running, Queued) != Queued) return; // timed out: skip
                 try { tcs.SetResult(work()); }
                 catch (System.Exception ex) { tcs.SetException(ex); }
             }));
-            if (!tcs.Task.Wait(timeout))
-                throw new TimeoutException("Civil 3D did not respond in time. It may be busy in a command or a dialog is open.");
-            return tcs.Task.Result;
+            if (tcs.Task.Wait(timeout)) return tcs.Task.Result;
+
+            if (Interlocked.CompareExchange(ref state, Cancelled, Queued) == Queued)
+                throw new TimeoutException(
+                    "Civil 3D did not start the request in time (a command or dialog may be active). " +
+                    "It was cancelled and will not run: nothing was changed.");
+            throw new TimeoutException(
+                "The request started in Civil 3D but did not finish in time. It is still running and may still " +
+                "change the drawing: wait, then re-read the drawing before retrying.");
         }
 
-        /// <summary>Runs work on the main thread with the active document locked.</summary>
-        public T RunLocked<T>(Func<Document, T> work, TimeSpan timeout)
+        /// <summary>
+        /// Runs work on the main thread with the active document locked. When expectedDrawing is given, the work
+        /// runs only if the active drawing at execution time matches it (full path, or file name).
+        /// </summary>
+        public T RunLocked<T>(Func<Document, T> work, TimeSpan timeout, string expectedDrawing = null)
         {
             return Run(() =>
             {
-                Document doc = AcApp.DocumentManager.MdiActiveDocument
-                    ?? throw new InvalidOperationException("No drawing is open in Civil 3D.");
+                Document doc = ActiveDocument(expectedDrawing);
                 using (doc.LockDocument())
                 {
                     return work(doc);
                 }
             }, timeout);
+        }
+
+        /// <summary>The active document; when expectedDrawing is given, refuses if a different drawing is active.</summary>
+        public static Document ActiveDocument(string expectedDrawing)
+        {
+            Document doc = AcApp.DocumentManager.MdiActiveDocument
+                ?? throw new InvalidOperationException("No drawing is open in Civil 3D.");
+            if (!string.IsNullOrWhiteSpace(expectedDrawing) && !SameDrawing(doc.Name, expectedDrawing))
+                throw new InvalidOperationException(
+                    $"The active drawing is '{doc.Name}', not '{expectedDrawing}'. Nothing was run. " +
+                    "Ask the user to switch drawings, or pass the active drawing's name.");
+            return doc;
+        }
+
+        private static bool SameDrawing(string actual, string expected)
+        {
+            expected = expected.Trim().Trim('"');
+            if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) return true;
+            // A bare file name matches only when the caller gave no folder.
+            return expected.IndexOfAny(new[] { '\\', '/' }) < 0
+                   && string.Equals(Path.GetFileName(actual), expected, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

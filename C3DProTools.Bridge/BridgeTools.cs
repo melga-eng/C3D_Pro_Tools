@@ -62,9 +62,10 @@ namespace C3DProTools.Bridge
                 "reports which commands ended, were cancelled or failed. Use '\\u001b\\u001b' to cancel a stuck command. " +
                 "May modify the drawing: confirm with the user first when it does.",
                 Props(
+                    ("drawing", "string", DrawingArg),
                     ("command", "string", "Command string to send. End with a space or \\n so it executes."),
                     ("wait_seconds", "integer", "How long to wait for Civil 3D to become idle (default 20, max 300).")),
-                required: new[] { "command" }),
+                required: new[] { "drawing", "command" }),
             Tool("c3d_execute_csharp",
                 "Compile and run a C# snippet inside Civil 3D, on the main thread, with the active document already " +
                 "locked. In scope: doc (Document), db (Database), ed (Editor), civil (CivilDocument), output " +
@@ -75,10 +76,15 @@ namespace C3DProTools.Bridge
                 "Autodesk.Civil.DatabaseServices. Aliases: Entity = AutoCAD Entity, Surface = Civil Surface, " +
                 "Application = AutoCAD Application. No UI or modal dialogs. Modifying the drawing needs the user's go-ahead.",
                 Props(
+                    ("drawing", "string", DrawingArg),
                     ("code", "string", "C# method body."),
-                    ("timeout_seconds", "integer", "Max run time on the main thread (default 60, max 600).")),
-                required: new[] { "code" }),
+                    ("timeout_seconds", "integer", "Max time to wait for the snippet (default 60, max 600).")),
+                required: new[] { "drawing", "code" }),
         };
+
+        private const string DrawingArg =
+            "The drawing this is meant for, exactly as c3d_status lists it (full path, or the file name such as " +
+            "'Drawing1.dwg'). Nothing runs if a different drawing is active when Civil 3D gets to the request.";
 
         private static JsonObject Tool(string name, string description, JsonObject properties,
             string[] required = null, bool readOnly = false)
@@ -119,8 +125,8 @@ namespace C3DProTools.Bridge
                     "c3d_list_objects" => _main.RunLocked(doc => ListObjects(doc, args), Timeout),
                     "c3d_get_object" => _main.RunLocked(doc => GetObject(doc, Str(args, "handle")), Timeout),
                     "c3d_zoom_to" => _main.RunLocked(doc => ZoomTo(doc, args["handles"] as JsonArray), Timeout),
-                    "c3d_run_command" => RunCommand(Str(args, "command"), Int(args, "wait_seconds", 20, 1, 300)),
-                    "c3d_execute_csharp" => ExecuteCSharp(Str(args, "code"), Int(args, "timeout_seconds", 60, 1, 600)),
+                    "c3d_run_command" => RunCommand(Str(args, "drawing"), Str(args, "command"), Int(args, "wait_seconds", 20, 1, 300)),
+                    "c3d_execute_csharp" => ExecuteCSharp(Str(args, "drawing"), Str(args, "code"), Int(args, "timeout_seconds", 60, 1, 600)),
                     _ => throw new ArgumentException($"Unknown tool: {name}"),
                 };
                 return Content(text, false);
@@ -468,7 +474,7 @@ namespace C3DProTools.Bridge
 
         // ---------- c3d_run_command ----------
 
-        private string RunCommand(string command, int waitSeconds)
+        private string RunCommand(string drawing, string command, int waitSeconds)
         {
             var events = new ConcurrentQueue<string>();
             CommandEventHandler ended = (s, e) => events.Enqueue($"ended: {e.GlobalCommandName}");
@@ -478,7 +484,7 @@ namespace C3DProTools.Bridge
 
             _main.Run(() =>
             {
-                doc = AcApp.DocumentManager.MdiActiveDocument ?? throw new InvalidOperationException("No drawing is open.");
+                doc = MainThread.ActiveDocument(drawing);
                 doc.CommandEnded += ended;
                 doc.CommandCancelled += cancelled;
                 doc.CommandFailed += failed;
@@ -517,6 +523,7 @@ namespace C3DProTools.Bridge
             }
 
             var sb = new StringBuilder();
+            sb.AppendLine($"Drawing: {doc.Name}");
             sb.AppendLine($"Sent: {command.Replace("\n", "\\n").Replace("\u001b", "<Esc>")}");
             sb.AppendLine(events.IsEmpty ? "Command events: none" : "Command events: " + string.Join("; ", events));
             sb.AppendLine(idle
@@ -529,7 +536,7 @@ namespace C3DProTools.Bridge
 
         // ---------- c3d_execute_csharp ----------
 
-        private string ExecuteCSharp(string code, int timeoutSeconds)
+        private string ExecuteCSharp(string drawing, string code, int timeoutSeconds)
         {
             // Compile off the main thread (it can take a second or two), run on it.
             var compiled = ScriptRunner.Compile(code);
@@ -538,8 +545,8 @@ namespace C3DProTools.Bridge
                 var output = new StringBuilder();
                 object result = compiled.Run(doc, doc.Database, doc.Editor, CivilApplication.ActiveDocument, output);
                 if (result != null) output.AppendLine($"Return value: {result}");
-                return output.Length == 0 ? "Done (no output)." : output.ToString();
-            }, TimeSpan.FromSeconds(timeoutSeconds));
+                return $"Drawing: {doc.Name}\n" + (output.Length == 0 ? "Done (no output)." : output.ToString());
+            }, TimeSpan.FromSeconds(timeoutSeconds), drawing);
         }
     }
 }
