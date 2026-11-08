@@ -125,6 +125,23 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void AStraightPipeWithoutAFamily_IsLeftOut_AtPreview_ButACurvedOneIsNot()
+        {
+            PlannedPipe planned = Pipe("D1", 5);
+            PlannedPipe duct = new PlannedPipe(planned.Item with { Snapshot = planned.Item.Snapshot with { PartFamily = null } }, planned.Along);
+            PlannedPipe curvedDuct = new PlannedPipe(duct.Item with { Pipe = H("D2"), PipeName = "P-D2", Curved = true }, duct.Along);
+            (_, _, SplitPreview p) = Planned(duct, curvedDuct);
+            Assert.Equal(new[] { H("D2") }, p.Items.Select(i => i.Pipe));
+            OperationIssue issue = p.Issues.Single(i => i.Code == SplitIssueCodes.PipeWithoutFamily);
+            Assert.Equal(H("D1"), issue.Object);
+
+            // With every pipe left out, the summary points to the reasons instead of claiming they are too short.
+            (_, _, SplitPreview none) = Planned(duct);
+            Assert.Equal(OperationStatus.NoChange, none.Status);
+            Assert.Contains("say why", none.Issues.Single(i => i.Code == SplitIssueCodes.NothingToSplit).Message);
+        }
+
+        [Fact]
         public void NothingToSplit_IsNoChange()
         {
             (_, _, SplitPreview p) = Planned();

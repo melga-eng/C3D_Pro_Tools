@@ -1215,7 +1215,7 @@ namespace C3DProTools
                 Cells = new[] { p.PipeName, p.Curved ? "Curved" : "Straight", ToolUi.Format(Math.Round(p.Length, 2)), p.PieceCount.ToString(),
                     string.Join("; ", p.Points.Take(4).Select(pt => $"{pt.X:0.00}, {pt.Y:0.00}")) + (p.Points.Count > 4 ? " …" : "") }
             }).ToList();
-            int leftOut = preview.Issues.Count(i => i.Code == SplitIssueCodes.TooManyPieces || i.Code == SplitIssueCodes.ItemPointsInvalid || i.Code == SplitIssueCodes.PipeMissing);
+            int leftOut = preview.Issues.Count(i => i.Code == SplitIssueCodes.TooManyPieces || i.Code == SplitIssueCodes.ItemPointsInvalid || i.Code == SplitIssueCodes.PipeMissing || i.Code == SplitIssueCodes.PipeWithoutFamily);
             string intro = $"{preview.Items.Count} pipe(s) will be split{(preview.MissedPicks > 0 ? $"; {preview.MissedPicks} picked point(s) were not used and are ignored" : "")}" +
                            (leftOut > 0 ? $"; {leftOut} pipe(s) are left out (see the list after the split)" : "") + "." +
                            (request.Structure != null ? $" A {request.Structure.Label} joins the pieces at every split point." : " The pieces are left touching, without structures.");

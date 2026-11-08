@@ -36,6 +36,14 @@ namespace C3DProTools.Features.Networks.Application
                 (SplitItemPlan item, int dropped) = request.Mode == SplitMode.AtPoints ? DropClosePoints(planned) : (planned.Item, 0);
                 missed += dropped;
                 if (item.Points.Count == 0) continue;
+                // A straight pipe's new pieces are made from its part family; a pipe without one (e.g. a duct bank built by
+                // copying) cannot be split that way, so it is named here rather than failing at apply. Curved pipes are
+                // broken by Civil 3D itself and need no family.
+                if (!item.Curved && item.Snapshot?.PartFamily == null)
+                {
+                    issues.Add(OperationIssue.Warning(SplitIssueCodes.PipeWithoutFamily, $"{item.PipeName} has no part family, so its new pieces cannot be made; it is left out.", null, item.Pipe));
+                    continue;
+                }
                 Dictionary<Point3, double> along = AlongOf(planned);
                 OperationIssue problem = SplitValidation.CheckItem(item, p => along.TryGetValue(p, out double d) ? d : double.NaN);
                 if (problem == null) { items.Add(item); continue; }
@@ -47,8 +55,9 @@ namespace C3DProTools.Features.Networks.Application
             if (missed > 0)
                 issues.Add(OperationIssue.Info(SplitIssueCodes.PicksMissed, $"{missed} picked point(s) were not used: not on a pipe within the pick distance, too near a pipe end, or too near another point on the same pipe.", nameof(SplitRequest.Picks)));
             if (items.Count == 0)
-                issues.Add(OperationIssue.Info(SplitIssueCodes.NothingToSplit, request.Mode == SplitMode.AtPoints
-                    ? "None of the picked points lies on a pipe (within the pick distance, and not at an end)."
+                issues.Add(OperationIssue.Info(SplitIssueCodes.NothingToSplit,
+                    issues.Any(i => i.Object != null && i.Severity == IssueSeverity.Warning) ? "No pipe can be split that way; the notes above say why each was left out."
+                    : request.Mode == SplitMode.AtPoints ? "None of the picked points lies on a pipe (within the pick distance, and not at an end)."
                     : "No pipe is long enough to split that way."));
             return new SplitPreview
             {

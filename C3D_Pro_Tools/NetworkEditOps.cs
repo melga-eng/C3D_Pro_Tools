@@ -378,7 +378,10 @@ namespace C3DProTools
                         }
                         bool addStructures = !structureFamilyId.IsNull && !structureSizeId.IsNull;
                         Network net = (Network)t.GetObject(networkId, OpenMode.ForWrite);
-                        ObjectId surfaceId = net.ReferenceSurfaceId;
+                        // A network made without a reference surface throws "Retrieve attribute failed" here (seen live on a
+                        // network created through the API); it then has no surface, as when the surface is empty.
+                        ObjectId surfaceId = ObjectId.Null;
+                        try { surfaceId = net.ReferenceSurfaceId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                         Autodesk.Civil.DatabaseServices.Surface surface = surfaceId.IsNull ? null : t.GetObject(surfaceId, OpenMode.ForRead) as Autodesk.Civil.DatabaseServices.Surface;
                         if (plan.Curved) { SplitCurved(t, net, pipe, plan, addStructures, structureFamilyId, structureSizeId, surface, c); return; }
 

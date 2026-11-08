@@ -27,6 +27,8 @@ namespace C3DProTools.Features.Networks.Contracts
         public const string PicksMissed = "split.picks.missed";
         /// <summary>Preview: no pipe can be split as asked (too short, or no point on a pipe).</summary>
         public const string NothingToSplit = "split.plan.nothing";
+        /// <summary>Preview: a straight pipe without a part family (its new pieces cannot be made); it is left out.</summary>
+        public const string PipeWithoutFamily = "split.pipe.noFamily";
         /// <summary>Preview: a pipe would get more than <see cref="SplitLimits.MaxPiecesPerPipe"/> pieces; it is left out.</summary>
         public const string TooManyPieces = "split.plan.tooManyPieces";
         /// <summary>Preview: a plan item's points are not valid (not finite, unordered, or leaving a piece shorter than <see cref="SplitLimits.MinPieceLength"/>).</summary>
