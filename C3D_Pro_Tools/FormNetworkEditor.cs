@@ -24,8 +24,8 @@ namespace C3DProTools
     /// </summary>
     internal sealed partial class FormNetworkEditor : Form
     {
-        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8;
-        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…" };
+        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8, ARims = 9;
+        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…", "Run the checks…", "Set rims…" };
 
         private readonly NetworkEditorSettings _s = NetworkEditorSettings.Load();
         /// <summary>The chosen pipes and parts, and the reads made on them; the form shows and edits it.</summary>
@@ -91,6 +91,11 @@ namespace C3DProTools
         private readonly ComboBox _cbSwapSet = ToolUi.Combo(260);
         private List<SwapGroup> _swapGroups = new List<SwapGroup>();
         /// <summary>Structures, fittings and appurtenances chosen as they are (pipes are in <see cref="_session.Pipes"/>).</summary>
+        // Rims to surface
+        private readonly Dictionary<string, ObjectId> _surfaces = new Dictionary<string, ObjectId>(StringComparer.OrdinalIgnoreCase);
+        private readonly ComboBox _cbRimSurface = ToolUi.Combo(280);
+        private readonly TextBox _txtRimAbove = ToolUi.Number(0, 70);
+        private readonly CheckBox _chkRimFollow = ToolUi.Check("Keep them on the surface when it changes (Civil 3D's Automatic Surface Adjustment)");
         // Pressure to gravity
         private readonly PartChooser _gPart = new PartChooser(DomainType.Pipe);
         private readonly TextBox _txtGNet = new TextBox { Width = 240 };
@@ -118,6 +123,7 @@ namespace C3DProTools
             _nav.Add("Swap parts", "Pipes, structures, fittings: many at once");
             _nav.Add("Pressure to gravity", "Gravity copies of pressure pipes");
             _nav.Add("Chambers and spans", "Pipe entry walls, chamber alignment, long spans");
+            _nav.Add("Rims to surface", "Set manhole rims on a surface");
             _pages.Add(BuildSplit());
             _pages.Add(BuildParallel());
             _pages.Add(BuildConduits());
@@ -127,6 +133,7 @@ namespace C3DProTools
             _pages.Add(BuildSwap());
             _pages.Add(BuildGravity());
             _pages.Add(BuildChecks());
+            _pages.Add(BuildRims());
             foreach (Control p in _pages) { p.Visible = false; _content.Controls.Add(p); }
 
             Controls.Add(_content);
@@ -292,6 +299,80 @@ namespace C3DProTools
         {
             _txtFitBoxL.Enabled = _txtFitBoxW.Enabled = _cbFitFace.SelectedIndex == 3;
             _parBoxRow.Enabled = _chkParFit.Checked && _cbParFace.SelectedIndex == 3;
+        }
+
+        private Control BuildRims()
+        {
+            (Panel host, TableLayoutPanel stack) = ToolUi.Page();
+            TableLayoutPanel card = ToolUi.Card("Set structure rims on a surface",
+                "Takes the structures at the ends of the chosen gravity pipes, and any structures selected directly. Every rim moves to the surface level at the " +
+                "structure's centre. Sumps and pipes stay exactly where they are. You review every structure before anything changes.");
+            ToolUi.Field(card, "Surface", _cbRimSurface);
+            ToolUi.Field(card, "Rim above surface", ToolUi.WithUnit(_txtRimAbove, "m"), _tips, "0 puts the rim on the surface; a negative value puts it below.");
+            ToolUi.Wide(card, _chkRimFollow);
+            ToolUi.Wide(card, ToolUi.Note("Left off, the rims are set once and stay there, and any of them on Automatic Surface Adjustment is taken off it. " +
+                                          "Turned on, their sumps are also changed to elevation control, so the sumps do not move with the surface."));
+            ToolUi.Add(stack, card);
+            return host;
+        }
+
+        private void RunRims()
+        {
+            if (!(_cbRimSurface.SelectedItem is string surfaceName) || !_surfaces.TryGetValue(surfaceName, out ObjectId surfaceId))
+            {
+                MessageBox.Show(this, _surfaces.Count == 0 ? "This drawing has no surfaces." : "Choose the surface.", Text);
+                return;
+            }
+            if (!ToolUi.TryNumber(_txtRimAbove, out double above)) { MessageBox.Show(this, "Enter the rim's height above the surface as a number (0 for on the surface).", Text); return; }
+            bool follow = _chkRimFollow.Checked;
+            Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
+            List<RimToSurface.Row> plan;
+            using (Transaction tr = acDoc.Database.TransactionManager.StartTransaction())
+            {
+                Autodesk.Civil.DatabaseServices.Surface surface = (Autodesk.Civil.DatabaseServices.Surface)tr.GetObject(surfaceId, OpenMode.ForRead);
+                plan = RimToSurface.Plan(tr, GravityPipes(), _session.Parts.Where(id => !id.IsErased), surface, above);
+                tr.Commit();
+            }
+            if (plan.Count == 0) { MessageBox.Show(this, "Choose some gravity pipes with structures at their ends, or select structures (at the top).", Text); return; }
+
+            string Level(double v) => double.IsNaN(v) ? "-" : v.ToString("0.000");
+            List<PreviewRow> rows = plan.Select(r =>
+            {
+                bool usable = !r.Reference && r.Check != RimCheck.OffSurface && r.Check != RimCheck.BelowSump && (r.Check != RimCheck.AlreadyMatches || follow);
+                string note = r.Reference ? "Data shortcut: change it in its source drawing"
+                    : r.Check == RimCheck.OffSurface ? "Outside the surface"
+                    : r.Check == RimCheck.BelowSump ? $"Would be at or under its sump ({Level(r.Sump)})"
+                    : r.Check == RimCheck.BelowPipe ? $"A pipe top ({Level(r.PipeTop)}) would stand above the rim; tick to set it anyway"
+                    : r.Check == RimCheck.AlreadyMatches ? (follow ? "On the surface; will be linked to it" : "Already on the surface")
+                    : "";
+                return new PreviewRow
+                {
+                    Tag = r,
+                    Enabled = usable,
+                    Checked = usable && r.Check != RimCheck.BelowPipe,
+                    Cells = new[] { r.Name, r.Network, r.Part, Level(r.Rim), Level(r.Ground), Level(r.NewRim),
+                        double.IsNaN(r.NewRim) ? "-" : (r.NewRim - r.Rim).ToString("+0.000;-0.000;0.000"), Level(r.Sump), note }
+                };
+            }).ToList();
+            if (!rows.Any(r => r.Enabled))
+            {
+                MessageBox.Show(this, $"None of the {plan.Count} structure(s) needs or can take a change: " +
+                    $"{plan.Count(r => r.Check == RimCheck.AlreadyMatches)} already on the surface, {plan.Count(r => r.Check == RimCheck.OffSurface)} outside it, " +
+                    $"{plan.Count(r => r.Check == RimCheck.BelowSump)} would be under the sump, {plan.Count(r => r.Reference)} from data shortcuts.", Text);
+                return;
+            }
+            string intro = $"Rims on \"{surfaceName}\"" + (Math.Abs(above) > 1e-9 ? $", {ToolUi.Format(above)} m above it" : "") + (follow ? ", staying linked to it" : ", set once") +
+                           ". Sumps and pipes stay where they are; greyed rows are left alone.";
+            if (!Confirm("Rims to surface", intro, new[] { "Structure", "Network", "Part", "Rim now", "Surface", "New rim", "Change (m)", "Sump", "Note" }, rows, "Set rims")) return;
+
+            List<RimToSurface.Row> chosen = rows.Select(r => (RimToSurface.Row)r.Tag).ToList();
+            RimToSurface.Outcome outcome = null;
+            NetworkEditOps.Counts c = Change((tr, ed) => (outcome = RimToSurface.Apply(tr, chosen, surfaceId, above, follow, ed)).Counts);
+            List<string> notes = new List<string>();
+            if (outcome.SumpControlChanged > 0) notes.Add($"{outcome.SumpControlChanged} sump(s) changed from depth to elevation control, so they stay at their level.");
+            if (outcome.Unlinked > 0) notes.Add($"{outcome.Unlinked} structure(s) taken off Automatic Surface Adjustment.");
+            if (outcome.NotAtTarget > 0) notes.Add($"{outcome.NotAtTarget} rim(s) did not end up at the level asked; see the command line.");
+            Report($"Set the rim of {c.Done} structure(s) on {surfaceName}.", c, string.Join("\n", notes));
         }
 
         private Control BuildFlow()
@@ -600,7 +681,10 @@ namespace C3DProTools
                     if (tr.GetObject(id, OpenMode.ForRead) is Network n) _networks[n.Name] = id;
                 foreach (ObjectId id in doc.GetPressurePipeNetworkIds())
                     if (tr.GetObject(id, OpenMode.ForRead) is PressurePipeNetwork n) _networks[n.Name + " [Pressure]"] = id;
+                foreach (ObjectId id in doc.GetSurfaceIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Surface sf) _surfaces[sf.Name] = id;
             }
+            foreach (string n in _surfaces.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)) _cbRimSurface.Items.Add(n);
             foreach (string n in _networks.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)) _cbNetwork.Items.Add(n);
             if (_cbNetwork.Items.Count > 0) _cbNetwork.SelectedIndex = 0;
         }
@@ -664,6 +748,10 @@ namespace C3DProTools
             UpdateBoxFields();
             _rbFlowVerify.Checked = _s.FlowVerify;
             _rbFlowAll.Checked = !_s.FlowVerify;
+            int rimSurface = _s.RimSurface == null ? -1 : _cbRimSurface.Items.Cast<string>().ToList().FindIndex(n => n.Equals(_s.RimSurface, StringComparison.OrdinalIgnoreCase));
+            if (_cbRimSurface.Items.Count > 0) _cbRimSurface.SelectedIndex = Math.Max(0, rimSurface);
+            _txtRimAbove.Text = ToolUi.Format(_s.RimAboveSurface);
+            _chkRimFollow.Checked = _s.RimFollow;
             _txtGNet.Text = _s.GravityNetworkName;
             _gPart.SetContext(ObjectId.Null, _s.GravityPartsList, _s.GravityFamily, _s.GravitySize);
             _chkSwapStructures.Checked = _s.SwapStructures;
@@ -725,6 +813,9 @@ namespace C3DProTools
             _s.SwapStructures = _chkSwapStructures.Checked;
             _s.SwapFittings = _chkSwapFittings.Checked;
             _s.SwapHoldCentre = _rbSwapCentre.Checked;
+            if (_cbRimSurface.SelectedItem is string rimSurface) _s.RimSurface = rimSurface;
+            if (ToolUi.TryNumber(_txtRimAbove, out double rimAbove)) _s.RimAboveSurface = rimAbove;
+            _s.RimFollow = _chkRimFollow.Checked;
             _s.GravityNetworkName = _txtGNet.Text;
             _s.GravityPartsList = _gPart.ListName;
             _s.GravityFamily = _gPart.FamilyName;
@@ -829,7 +920,7 @@ namespace C3DProTools
             UpdatePartContexts();
             (int g, int p) = _session.CountPipes();
             _lblPipes.Text = (_session.Pipes.Count == 0 ? "No pipes chosen yet." : $"{g} gravity and {p} pressure pipe(s) chosen.") +
-                             (_session.Parts.Count > 0 ? $" Also {_session.Parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts)." : "");
+                             (_session.Parts.Count > 0 ? $" Also {_session.Parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts and Rims to surface)." : "");
             if (_nav.Selected == ASwap) RefreshSwap();
             RefreshConduitSection();
             int a = _nav.Selected;
@@ -837,6 +928,7 @@ namespace C3DProTools
                 : a == AParallel ? $"{g + p} pipe(s) will be copied."
                 : a == AConduits ? ConduitStatus(g)
                 : a == ASwap ? "Rows with a target are swapped; the others are left as they are."
+                : a == ARims ? "The structures at the chosen gravity pipes' ends, and those selected directly, are listed before anything changes."
                 : a == ASplit && _cbSplitMode.SelectedIndex == 0 ? (g > 0 ? $"Points split the nearest of the {g} chosen gravity pipe(s)." : "With no pipes chosen, points split the nearest gravity pipe in the drawing.")
                 : $"{g} gravity pipe(s) will be used.";
             _lblStatus.Text = usable;
@@ -848,7 +940,7 @@ namespace C3DProTools
             Hide();
             try
             {
-                PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect pipes (gravity or pressure); structures, fittings and appurtenances are taken for Swap parts: " });
+                PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect pipes (gravity or pressure); structures, fittings and appurtenances are taken too (Swap parts, Rims to surface): " });
                 if (psr.Status != PromptStatus.OK) return;
                 _session.Pipes.Clear();
                 _session.Parts.Clear();
@@ -1019,6 +1111,7 @@ namespace C3DProTools
                     case ASwap: RunSwap(); break;
                     case AGravity: RunGravity(); break;
                     case AChecks: RunChecks(); break;
+                    case ARims: RunRims(); break;
                 }
             }
             catch (System.Exception ex)
@@ -1047,7 +1140,7 @@ namespace C3DProTools
                 c = work(tr, acDoc.Editor);
                 tr.Commit();
             }
-            acDoc.Editor.Regen();
+            ViewHelper.Regen(acDoc);
             return c;
         }
 
@@ -1230,7 +1323,7 @@ namespace C3DProTools
                 drawn = NetworkEditOps.DrawFitOutlines(tr, acDoc.Database, structures, face, boxL, boxW, FitOutlineLayer);
                 tr.Commit();
             }
-            acDoc.Editor.Regen();
+            ViewHelper.Regen(acDoc);
             _lblStatus.Text = $"Drew {drawn} outline(s) on layer {FitOutlineLayer}.";
             MessageBox.Show(this, $"Drew {drawn} outline(s) of {what} on layer {FitOutlineLayer} (not plotted).\n\nCheck them against the structures, " +
                                   "then erase them (e.g. LAYDEL on that layer) when done. UNDO also removes them.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1355,7 +1448,8 @@ namespace C3DProTools
                 "Merge pipes: joins straight pipes that continue each other into one.\n" +
                 "Swap parts: lists the chosen pipes, structures, fittings and appurtenances by their current part, across networks; give each row a " +
                 "target (a size, or the nearest inside size in a family) and swap them all at once. Targets can be saved as sets.\n" +
-                "Pressure to gravity: gravity copies of pressure pipes in a new network.\n\n" +
+                "Pressure to gravity: gravity copies of pressure pipes in a new network.\n" +
+                "Rims to surface: sets structure rims on a surface, once or linked to it; sumps and pipes stay where they are.\n\n" +
                 "Levels, cover and profiles are in the Profile & Cover Designer.",
                 "Network Editor - How it works", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }

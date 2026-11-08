@@ -18,6 +18,10 @@ namespace C3DProTools
         [CommandMethod("NetworkEditor")]
         public void RunNetworkEditor() => Open(() => new FormNetworkEditor(), "Network Editor");
 
+        /// <summary>Network Organizer: merge gravity networks split by imports, and remove the copies they share.</summary>
+        [CommandMethod("NetworkOrganizer")]
+        public void RunNetworkOrganizer() => Open(() => new FormNetworkOrganizer(), "Network Organizer");
+
         [CommandMethod("AdvancedNetworkTools")]
         public void RunAdvancedNetworkTools() => RunNetworkEditor();
 

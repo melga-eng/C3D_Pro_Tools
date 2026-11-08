@@ -23,3 +23,6 @@ plot.log
 
 # Generated knowledge graph (rebuilt locally with `graphify update .`)
 graphify-out/
+
+# Google Drive folder icons
+desktop.ini

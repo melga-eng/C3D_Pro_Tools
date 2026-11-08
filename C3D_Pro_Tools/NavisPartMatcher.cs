@@ -109,7 +109,7 @@ namespace C3DProTools
             _catalogs = catalogs ?? new NavisCatalogContext();
             foreach (ObjectId id in doc.Styles.PartsListSet)
             {
-                if (tr.GetObject(id, OpenMode.ForRead) is PartsList pl && pl.Name.Equals(partsListName, StringComparison.OrdinalIgnoreCase)) { PartsListId = id; break; }
+                if (!id.IsNull && tr.GetObject(id, OpenMode.ForRead) is PartsList pl && pl.Name.Equals(partsListName, StringComparison.OrdinalIgnoreCase)) { PartsListId = id; break; }
             }
             if (PartsListId.IsNull)
             {
@@ -118,7 +118,7 @@ namespace C3DProTools
             }
             _list = (PartsList)tr.GetObject(PartsListId, OpenMode.ForWrite);
             foreach (DomainType domain in new[] { DomainType.Pipe, DomainType.Structure })
-                foreach (ObjectId famId in _list.GetPartFamilyIdsByDomain(domain))
+                foreach (ObjectId famId in FamilyIds(_list, domain))
                     if (tr.GetObject(famId, OpenMode.ForRead) is PartFamily f) _familyByGuid[f.GUID] = famId;
             _pipeFamilies = SafeFamilies(DomainType.Pipe);
             _structFamilies = SafeFamilies(DomainType.Structure);
@@ -692,9 +692,9 @@ namespace C3DProTools
         private PartChoice BestExisting(PartFamily fam, Func<PartDataRecord, (double, double, double)> read, Func<(double, double, double), double> score, ImportCandidate c, double maxScore)
         {
             PartChoice best = null;
-            for (int i = 0; i < fam.PartSizeCount; i++)
+            foreach (ObjectId id in SizeIds(fam))
             {
-                if (!(_tr.GetObject(fam[i], OpenMode.ForRead) is PartSize size)) continue;
+                if (!(_tr.GetObject(id, OpenMode.ForRead) is PartSize size)) continue;
                 (double, double, double) dims;
                 try { dims = read(size.SizeDataRecord); } catch (Exception) { continue; }
                 double s = score(dims);
@@ -779,12 +779,21 @@ namespace C3DProTools
             return p;
         }
 
+        /// <summary>The sizes of a family, without empty entries: opening a null id throws, and one bad entry must not stop the matching.</summary>
         internal static HashSet<ObjectId> SizeIds(PartFamily fam)
         {
             HashSet<ObjectId> ids = new HashSet<ObjectId>();
-            for (int i = 0; i < fam.PartSizeCount; i++) ids.Add(fam[i]);
+            for (int i = 0; i < fam.PartSizeCount; i++)
+            {
+                ObjectId id = fam[i];
+                if (!id.IsNull) ids.Add(id);
+            }
             return ids;
         }
+
+        /// <summary>The families of a parts list, without empty entries (parts lists from another catalog can hold them).</summary>
+        internal static List<ObjectId> FamilyIds(PartsList list, DomainType domain) =>
+            list.GetPartFamilyIdsByDomain(domain).Cast<ObjectId>().Where(id => !id.IsNull).ToList();
 
         private void TryRemoveSize(PartFamily fam, ObjectId id)
         {
@@ -797,7 +806,7 @@ namespace C3DProTools
             if (!_familyByGuid.TryGetValue(data.GUID, out ObjectId famId))
             {
                 try { _list.AddPartFamilyByGuid(domain, data.GUID); } catch (Exception) { return null; }
-                foreach (ObjectId id in _list.GetPartFamilyIdsByDomain(domain))
+                foreach (ObjectId id in FamilyIds(_list, domain))
                     if (_tr.GetObject(id, OpenMode.ForRead) is PartFamily f && f.GUID.Equals(data.GUID, StringComparison.OrdinalIgnoreCase)) { famId = id; break; }
                 if (famId.IsNull) return null;
                 _familyByGuid[data.GUID] = famId;

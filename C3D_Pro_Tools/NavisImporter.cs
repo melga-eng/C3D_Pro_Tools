@@ -124,6 +124,7 @@ namespace C3DProTools
                         if (c.Action == ImportKind.Solid) { outcome.Family = "3D solid"; outcome.Size = $"{c.Source.Triangles.Length / 9} triangles"; outcome.Status = "Solid"; continue; }
                         PartChoice p;
                         if (o.Overrides.TryGetValue(c, out (ObjectId family, ObjectId size) chosen)
+                            && !chosen.family.IsNull && !chosen.size.IsNull
                             && tr.GetObject(chosen.family, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartFamily fam
                             && tr.GetObject(chosen.size, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartSize size)
                         {
@@ -187,6 +188,7 @@ namespace C3DProTools
                 catch (Exception ex)
                 {
                     report.Error = ex.Message;
+                    C3DProLogger.Error(commit ? "Navisworks import failed" : "Navisworks part matching failed", ex);
                     tr.Abort();
                     if (!catalogChanges.IsEmpty)
                     {
@@ -259,13 +261,13 @@ namespace C3DProTools
             var sizes = new List<(Autodesk.Civil.DatabaseServices.Styles.PartFamily, Autodesk.Civil.DatabaseServices.Styles.PartSize, string)>();
             foreach (ObjectId listId in cdoc.Styles.PartsListSet)
             {
-                if (listId == importListId || !(tr.GetObject(listId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartsList pl)) continue;
+                if (listId.IsNull || listId == importListId || !(tr.GetObject(listId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartsList pl)) continue;
                 foreach (DomainType domain in new[] { DomainType.Pipe, DomainType.Structure })
-                    foreach (ObjectId famId in pl.GetPartFamilyIdsByDomain(domain))
+                    foreach (ObjectId famId in NavisPartMatcher.FamilyIds(pl, domain))
                     {
                         if (!(tr.GetObject(famId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartFamily fam)) continue;
-                        for (int i = 0; i < fam.PartSizeCount; i++)
-                            if (tr.GetObject(fam[i], OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartSize size) sizes.Add((fam, size, pl.Name));
+                        foreach (ObjectId sizeId in NavisPartMatcher.SizeIds(fam))
+                            if (tr.GetObject(sizeId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartSize size) sizes.Add((fam, size, pl.Name));
                     }
             }
             return sizes;

@@ -27,10 +27,22 @@ namespace C3DProTools
         public bool Plan { get; set; } = true;
         public bool Profile { get; set; } = true;
         public bool ArrangeEveryLabel { get; set; } = true;
-        public bool SlideOnPipe { get; set; }
+        /// <summary>A Normal label that clashes first slides along its pipe before it is dragged.</summary>
+        public bool SlideNormalLabels { get; set; } = true;
         public int ArrangeTarget { get; set; } = 1;
         public bool AvoidModelText { get; set; } = true;
-        public bool AvoidXrefs { get; set; } = true;
+        /// <summary>Label styles ("Kind:Style") placed dragged; KnownStyles are those the user has seen in the table (the rest default from label sets).</summary>
+        public List<string> DraggedStyles { get; set; } = new List<string>();
+        public List<string> KnownStyles { get; set; } = new List<string>();
+        /// <summary>Networks no label may cover, besides each label's own.</summary>
+        public List<string> KeepClearNetworks { get; set; } = new List<string>();
+        /// <summary>Label styles ("Kind:Style") whose labels may slide along their pipe; KnownSlideStyles are those seen in the table.</summary>
+        public List<string> SlideStyles { get; set; } = new List<string>();
+        public List<string> KnownSlideStyles { get; set; } = new List<string>();
+        /// <summary>Networks of cables laid side by side: one label per parallel run.</summary>
+        public List<string> OneLabelPerRunNetworks { get; set; } = new List<string>();
+        /// <summary>Cables at most this far apart (m, centre to centre) run together.</summary>
+        public double RunGap { get; set; } = 1.5;
         public bool MaskArranged { get; set; }
 
         // Names

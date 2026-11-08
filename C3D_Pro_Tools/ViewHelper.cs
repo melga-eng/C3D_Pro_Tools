@@ -7,9 +7,23 @@ using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace C3DProTools
 {
-    /// <summary>Zooms the active viewport from code, including while one of the tools' dialogs is open.</summary>
+    /// <summary>Zooms and redraws from code, including while one of the tools' dialogs is open.</summary>
     internal static class ViewHelper
     {
+        /// <summary>
+        /// Regenerates the drawing under its own document lock (the tools' windows are modeless). Call it once the transaction has
+        /// ended. It only refreshes the screen, after the work is already committed: a failure is logged and never reported as the
+        /// work having failed.
+        /// </summary>
+        public static void Regen(Document doc)
+        {
+            try
+            {
+                using (doc.LockDocument()) doc.Editor.Regen();
+            }
+            catch (Exception ex) { C3DProLogger.Warn("The drawing could not be regenerated after a change; REGEN refreshes it", ex); }
+        }
+
         /// <summary>Zooms so that a square of <paramref name="size"/> drawing units around the WCS point fills the view height.</summary>
         public static void ZoomTo(Point3d center, double size)
         {

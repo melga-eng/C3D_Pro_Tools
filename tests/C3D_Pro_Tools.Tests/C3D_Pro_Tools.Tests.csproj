@@ -24,6 +24,10 @@
 		<Compile Include="..\..\C3D_Pro_Tools\NavisTransform.cs" Link="Engine\NavisTransform.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\PlanGeometry.cs" Link="Engine\PlanGeometry.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\ProfileViewMath.cs" Link="Engine\ProfileViewMath.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\LabelLayout.cs" Link="Engine\LabelLayout.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NetworkMerge.cs" Link="Engine\NetworkMerge.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\RimRules.cs" Link="Engine\RimRules.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\ArrangeCase.cs" Link="Engine\ArrangeCase.cs" />
 		<Compile Include="..\..\Shared\NavisLinkProtocol.cs" Link="Engine\NavisLinkProtocol.cs" />
 		<Compile Include="..\..\Shared\C3DProLogger.cs" Link="Engine\C3DProLogger.cs" />
 	</ItemGroup>
@@ -32,6 +36,11 @@
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
 		<PackageReference Include="xunit" Version="2.9.3" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Arrangement cases exported from real sheets (Annotation Studio, "Export arrangement case"), replayed by ArrangeCaseTests. -->
+		<None Include="Cases\**\*.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -705,7 +705,7 @@ namespace C3DProTools
                     }
                     tr.Commit();
                 }
-                doc.Editor.Regen();
+                ViewHelper.Regen(doc);
             }
             catch (Exception ex) { MessageBox.Show(this, "Matching stopped with an error and nothing was changed.\n\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             ReadDrawing();
@@ -917,7 +917,7 @@ namespace C3DProTools
                     try { i.Fix(tr); } catch (Exception ex) { log.Add($"{i.View}: {ex.Message}"); }
                 tr.Commit();
             }
-            doc.Editor.Regen();
+            ViewHelper.Regen(doc);
             RunCheck();
             Report($"Fixed {fix.Count - log.Count} problem(s).", log);
         }
@@ -1021,7 +1021,7 @@ namespace C3DProTools
             try
             {
                 using (doc.LockDocument()) ProfileViewSplit.Apply(doc.Database, CivilApplication.ActiveDocument, v.Id, _plan, o, log);
-                doc.Editor.Regen();
+                ViewHelper.Regen(doc);
             }
             catch (Exception ex) { log.Add("Stopped: " + ex.Message); }
             ReadDrawing();

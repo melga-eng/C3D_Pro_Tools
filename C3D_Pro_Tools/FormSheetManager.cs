@@ -196,7 +196,7 @@ namespace C3DProTools
                     done = work(tr);
                     tr.Commit();
                 }
-                try { _doc.Editor.Regen(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                ViewHelper.Regen(_doc);
             }
             catch (Exception ex)
             {

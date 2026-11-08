@@ -130,7 +130,7 @@ namespace C3DProTools
                 repaired = Repair(tr, orphans, log);
                 tr.Commit();
             }
-            doc.Editor.Regen();
+            ViewHelper.Regen(doc);
             foreach (string l in log) doc.Editor.WriteMessage("\n" + l);
             System.Windows.Forms.MessageBox.Show(owner, $"Repaired {repaired} of {orphans.Count} pipe(s)." + (log.Count > 0 ? "\n\n" + string.Join("\n", log.Take(15)) : ""), title,
                 System.Windows.Forms.MessageBoxButtons.OK, log.Count > 0 ? System.Windows.Forms.MessageBoxIcon.Warning : System.Windows.Forms.MessageBoxIcon.Information);

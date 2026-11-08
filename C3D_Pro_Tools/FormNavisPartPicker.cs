@@ -132,7 +132,7 @@ namespace C3DProTools
             {
                 foreach (ObjectId id in CivilDocument.GetCivilDocument(_doc.Database).Styles.PartsListSet)
                 {
-                    if (!(tr.GetObject(id, OpenMode.ForRead) is PartsList pl)) continue;
+                    if (id.IsNull || !(tr.GetObject(id, OpenMode.ForRead) is PartsList pl)) continue;
                     _cbList.Items.Add(new Item(pl.Name, id));
                     // Open on the list holding the current pick, else the preferred (Navis Import) list.
                     if (!_preferredFamily.IsNull && pl.GetPartFamilyIdsByDomain(_domain).Cast<ObjectId>().Contains(_preferredFamily)) _cbList.SelectedIndex = _cbList.Items.Count - 1;
@@ -166,7 +166,7 @@ namespace C3DProTools
             using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
             {
                 PartsList pl = (PartsList)tr.GetObject(list.Id, OpenMode.ForRead);
-                List<PartFamily> families = pl.GetPartFamilyIdsByDomain(_domain).Cast<ObjectId>().Select(id => tr.GetObject(id, OpenMode.ForRead) as PartFamily).Where(f => f != null).ToList();
+                List<PartFamily> families = NavisPartMatcher.FamilyIds(pl, _domain).Select(id => tr.GetObject(id, OpenMode.ForRead) as PartFamily).Where(f => f != null).ToList();
                 foreach (PartFamily f in families.OrderBy(f => ShapeFits(f) ? 0 : 1).ThenBy(f => f.Name))
                 {
                     bool fits = ShapeFits(f);
@@ -195,9 +195,9 @@ namespace C3DProTools
                 {
                     PartFamily fam = (PartFamily)tr.GetObject(famItem.Id, OpenMode.ForRead);
                     List<(ListViewItem item, double error)> rows = new List<(ListViewItem, double)>();
-                    for (int i = 0; i < fam.PartSizeCount; i++)
+                    foreach (ObjectId sizeId in NavisPartMatcher.SizeIds(fam))
                     {
-                        if (!(tr.GetObject(fam[i], OpenMode.ForRead) is PartSize size)) continue;
+                        if (!(tr.GetObject(sizeId, OpenMode.ForRead) is PartSize size)) continue;
                         double error;
                         (double a, double b, double wall) dims;
                         try

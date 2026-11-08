@@ -192,6 +192,42 @@ namespace C3DProTools.Tests
             Assert.Equal(0.4, PlanGeometry.GradeDeviation(new List<(double S, double Z)> { (0, 10), (5, 10.3), (10, 9.8) }), 9);
         }
 
+        // ---------------- Parallel runs ----------------
+
+        private static ((double X, double Y) a, (double X, double Y) b) Pipe(double x0, double y, double x1) => ((x0, y), (x1, y));
+
+        [Fact]
+        public void ParallelRun_OfThree_LabelsOnlyTheMiddle()
+        {
+            var pipes = new[] { Pipe(0, 0, 100), Pipe(0, 0.5, 100), Pipe(0, 1.0, 100) };
+            Assert.Equal(new[] { 0, 1, 2 }, PlanGeometry.RunAt(1, pipes, 1.0));
+            Assert.Equal(new[] { false, true, false }, Enumerable.Range(0, 3).Select(i => PlanGeometry.CarriesRunLabels(i, pipes, 1.0)));
+        }
+
+        [Fact]
+        public void ParallelRun_OfTwoOrFour_LabelsTheOneRightOfTheMiddle()
+        {
+            // Running east: right is south (lower y).
+            var two = new[] { Pipe(0, 0.5, 100), Pipe(0, 0, 100) };
+            Assert.Equal(new[] { false, true }, Enumerable.Range(0, 2).Select(i => PlanGeometry.CarriesRunLabels(i, two, 1.0)));
+            var four = new[] { Pipe(0, 0, 100), Pipe(0, 0.5, 100), Pipe(0, 1.0, 100), Pipe(0, 1.5, 100) };
+            Assert.Equal(new[] { false, true, false, false }, Enumerable.Range(0, 4).Select(i => PlanGeometry.CarriesRunLabels(i, four, 1.0)));
+            // Running west, right is north: the other middle pipe.
+            var westward = four.Select(p => (p.b, p.a)).ToArray();
+            Assert.Equal(new[] { false, false, true, false }, Enumerable.Range(0, 4).Select(i => PlanGeometry.CarriesRunLabels(i, westward, 1.0)));
+        }
+
+        [Fact]
+        public void ParallelRun_AloneOrFarApart_KeepsItsLabels_AndSplitsDoNotMatter()
+        {
+            var apart = new[] { Pipe(0, 0, 100), Pipe(0, 5, 100) };
+            Assert.True(PlanGeometry.CarriesRunLabels(0, apart, 1.0));
+            Assert.True(PlanGeometry.CarriesRunLabels(1, apart, 1.0));
+            // Three cables, the outer two split at x = 40 and the middle one at x = 60: the middle cable is labelled all along.
+            var split = new[] { Pipe(0, 0, 40), Pipe(40, 0, 100), Pipe(0, 0.5, 60), Pipe(60, 0.5, 100), Pipe(0, 1, 40), Pipe(40, 1, 100) };
+            Assert.Equal(new[] { false, false, true, true, false, false }, Enumerable.Range(0, 6).Select(i => PlanGeometry.CarriesRunLabels(i, split, 1.0)));
+        }
+
         [Fact]
         public void PaperToModel_UsesTheViewportScale()
         {

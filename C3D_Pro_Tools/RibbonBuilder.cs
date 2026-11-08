@@ -101,6 +101,19 @@ namespace C3DProTools
             panelSource.Items.Add(new RibbonSeparator());
             panelSource.Items.Add(networkEditorButton);
 
+            // --- 3a. Network Organizer Button ---
+            RibbonButton organizerButton = new RibbonButton
+            {
+                Text = "Network\nOrganizer",
+                ShowText = true,
+                Size = RibbonItemSize.Large,
+                Orientation = System.Windows.Controls.Orientation.Vertical,
+                CommandParameter = "NetworkOrganizer ",
+                CommandHandler = new RibbonCommandHandler()
+            };
+            panelSource.Items.Add(new RibbonSeparator());
+            panelSource.Items.Add(organizerButton);
+
             // --- 3b. Networks from Feature Lines Button ---
             RibbonButton fromLinesButton = new RibbonButton
             {
