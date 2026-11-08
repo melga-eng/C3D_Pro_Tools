@@ -4,6 +4,8 @@ Civil 3D 2026 (.NET 10) plugin. C# source is in `C3D_Pro_Tools/`, the WiX instal
 
 This file holds the rules for every agent on the project: Claude Code, OpenAI Codex and Google Antigravity. `CLAUDE.md` and `GEMINI.md` import it and only add each agent's role, so put shared rules here, once.
 
+Follow [ARCHITECTURE.md](ARCHITECTURE.md) for feature boundaries, ownership, contracts, transaction/result rules, UI conventions and coordinated implementation. It applies to new and refactored features; migrate existing code one operation at a time.
+
 ## Team workflow (the user orchestrates every step)
 
 Three agents work on this repo. Each has one job. None starts another agent's work or merges anything; the user moves the work from one agent to the next.
