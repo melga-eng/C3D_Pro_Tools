@@ -61,7 +61,8 @@ namespace C3DProTools
     /// <summary>Runs the style clean-up on drawings that are not open, reading and saving each one in the background.</summary>
     internal static class StyleBatch
     {
-        public static BatchFileResult Process(string path, BatchOptions o, StyleTemplate template, List<StyleMapEntry> mapping, Action<string> status)
+        /// <param name="target">Where the copy is saved (from <see cref="BatchTargets.Plan"/>); ignored when <see cref="BatchOptions.Overwrite"/> is set.</param>
+        public static BatchFileResult Process(string path, string target, BatchOptions o, StyleTemplate template, List<StyleMapEntry> mapping, Action<string> status)
         {
             BatchFileResult r = new BatchFileResult { File = path };
             Database previous = HostApplicationServices.WorkingDatabase;
@@ -143,12 +144,17 @@ namespace C3DProTools
                         r.Deleted += p.Changed;
                     }
 
-                    string target = path;
-                    if (o.Overwrite) File.Copy(path, Path.ChangeExtension(path, ".bak"), true);
+                    if (o.Overwrite)
+                    {
+                        target = path;
+                        File.Copy(path, Path.ChangeExtension(path, ".bak"), true);
+                    }
                     else
                     {
-                        Directory.CreateDirectory(o.OutputFolder);
-                        target = Path.Combine(o.OutputFolder, Path.GetFileName(path));
+                        // SaveAs replaces an existing file without asking: never let a copy land on its own source.
+                        if (string.IsNullOrEmpty(target) || string.Equals(Path.GetFullPath(target), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("The copy would replace the drawing itself; choose another output folder.");
+                        Directory.CreateDirectory(Path.GetDirectoryName(target));
                     }
                     status("Saving...");
                     db.SaveAs(target, DwgVersion.Current);

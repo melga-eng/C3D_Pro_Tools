@@ -1,0 +1,715 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+// Label placement on a sheet, worked out in paper millimetres in the viewport's own frame: what a label must keep clear of
+// (exact outlines, turned with their text), the places a dragged label can go (square to the viewport first, any angle when
+// nothing else fits), and the plan for a whole viewport (crowded labels first, then crossings untangled). No AutoCAD /
+// Civil 3D types, so the rules are tested without Civil 3D; AnnotArranger feeds it from the drawing and moves the labels.
+namespace C3DProTools
+{
+    /// <summary>An axis-aligned box on paper (mm).</summary>
+    internal readonly struct LRect
+    {
+        public readonly double MinX, MinY, MaxX, MaxY;
+        public LRect(double minX, double minY, double maxX, double maxY) { MinX = minX; MinY = minY; MaxX = maxX; MaxY = maxY; }
+        public double Width => MaxX - MinX;
+        public double Height => MaxY - MinY;
+        public (double X, double Y) Center => ((MinX + MaxX) / 2, (MinY + MaxY) / 2);
+        public static LRect Around(IEnumerable<(double X, double Y)> pts)
+        {
+            double a = double.MaxValue, b = double.MaxValue, c = double.MinValue, d = double.MinValue;
+            foreach (var p in pts) { a = Math.Min(a, p.X); b = Math.Min(b, p.Y); c = Math.Max(c, p.X); d = Math.Max(d, p.Y); }
+            return new LRect(a, b, c, d);
+        }
+        public LRect Offset(double dx, double dy) => new LRect(MinX + dx, MinY + dy, MaxX + dx, MaxY + dy);
+        public LRect Grow(double g) => new LRect(MinX - g, MinY - g, MaxX + g, MaxY + g);
+        public bool Overlaps(LRect o) => MinX < o.MaxX && o.MinX < MaxX && MinY < o.MaxY && o.MinY < MaxY;
+        public bool Contains((double X, double Y) p) => p.X >= MinX && p.X <= MaxX && p.Y >= MinY && p.Y <= MaxY;
+        public bool Inside(LRect o) => MinX >= o.MinX && MaxX <= o.MaxX && MinY >= o.MinY && MaxY <= o.MaxY;
+        public List<(double X, double Y)> Corners() => new List<(double X, double Y)> { (MinX, MinY), (MaxX, MinY), (MaxX, MaxY), (MinX, MaxY) };
+
+        /// <summary>True when the segment crosses the box or lies in it.</summary>
+        public bool Hits((double X, double Y) a, (double X, double Y) b) => !LabelLayout.Separated(Corners(), new[] { a, b }, 0);
+    }
+
+    /// <summary>The kinds of things a label is checked against.</summary>
+    internal enum ObstacleGroup
+    {
+        /// <summary>Text and labels: never covered by a label's text, and never crossed by a leader.</summary>
+        Text,
+        /// <summary>Leader lines and labelled points: never covered by a label's text; leaders crossing each other only costs.</summary>
+        Leader,
+        /// <summary>Parts of a network (pipes, structures): covered only when the network is one the label must keep clear of.</summary>
+        Network
+    }
+
+    /// <summary>Everything on a sheet a label is checked against, as exact convex outlines, with a spatial grid so each check only looks nearby.</summary>
+    internal sealed class LabelObstacles
+    {
+        private sealed class Item
+        {
+            public ObstacleGroup Group;
+            /// <summary>The network (for <see cref="ObstacleGroup.Network"/>) and the owner (a label, or the part a normal label sits on).</summary>
+            public string Network, Part, Kind;
+            public LRect Bounds;
+            /// <summary>The outline: a convex polygon, or two points for a line.</summary>
+            public List<(double X, double Y)> Shape;
+            public bool IsSegment => Shape.Count == 2;
+        }
+
+        private const double Cell = 15.0;
+        private readonly List<Item> _items = new List<Item>();
+        private readonly Dictionary<long, List<int>> _cells = new Dictionary<long, List<int>>();
+        /// <summary>Dragged labels placed so far (their text boxes), for lining neighbours up with them.</summary>
+        private readonly List<(LRect box, string owner)> _placed = new List<(LRect, string)>();
+
+        public int Count => _items.Count;
+
+        private static long Key(int x, int y) => ((long)x << 32) ^ (uint)y;
+
+        private void Index(int i)
+        {
+            LRect b = _items[i].Bounds;
+            if (b.Width > 5000 || b.Height > 5000) b = new LRect(b.MinX, b.MinY, Math.Min(b.MaxX, b.MinX + 5000), Math.Min(b.MaxY, b.MinY + 5000));
+            for (int x = (int)Math.Floor(b.MinX / Cell); x <= (int)Math.Floor(b.MaxX / Cell); x++)
+                for (int y = (int)Math.Floor(b.MinY / Cell); y <= (int)Math.Floor(b.MaxY / Cell); y++)
+                {
+                    if (!_cells.TryGetValue(Key(x, y), out List<int> l)) _cells[Key(x, y)] = l = new List<int>();
+                    l.Add(i);
+                }
+        }
+
+        private IEnumerable<Item> Near(LRect b)
+        {
+            HashSet<int> seen = new HashSet<int>();
+            for (int x = (int)Math.Floor(b.MinX / Cell); x <= (int)Math.Floor(b.MaxX / Cell); x++)
+                for (int y = (int)Math.Floor(b.MinY / Cell); y <= (int)Math.Floor(b.MaxY / Cell); y++)
+                    if (_cells.TryGetValue(Key(x, y), out List<int> l))
+                        foreach (int i in l) if (seen.Add(i)) yield return _items[i];
+        }
+
+        private void Add(Item it) { _items.Add(it); Index(_items.Count - 1); }
+
+        public void AddRect(LRect r, ObstacleGroup group, string kind, string network = null, string part = null) =>
+            Add(new Item { Group = group, Kind = kind, Network = network, Part = part, Shape = r.Corners(), Bounds = r });
+
+        public void AddSegment((double X, double Y) a, (double X, double Y) b, ObstacleGroup group, string kind, string network = null, string part = null) =>
+            Add(new Item { Group = group, Kind = kind, Network = network, Part = part, Shape = new List<(double X, double Y)> { a, b }, Bounds = LRect.Around(new[] { a, b }) });
+
+        /// <summary>A polygon outline (made convex: its hull).</summary>
+        public void AddPolygon(IReadOnlyList<(double X, double Y)> polygon, ObstacleGroup group, string kind, string network = null, string part = null)
+        {
+            List<(double X, double Y)> hull = LabelLayout.Hull(polygon);
+            if (hull.Count < 2) return;
+            Add(new Item { Group = group, Kind = kind, Network = network, Part = part, Shape = hull, Bounds = LRect.Around(hull) });
+        }
+
+        /// <summary>A copy to try placements on without touching this one.</summary>
+        public LabelObstacles Clone()
+        {
+            LabelObstacles c = new LabelObstacles();
+            foreach (Item it in _items) c.Add(it);
+            c._placed.AddRange(_placed);
+            return c;
+        }
+
+        /// <summary>A copy without the text and leaders of <paramref name="owners"/> (labels to be placed again); their labelled points stay reserved.</summary>
+        public LabelObstacles Without(ICollection<string> owners)
+        {
+            LabelObstacles c = new LabelObstacles();
+            foreach (Item it in _items) if (it.Part == null || !owners.Contains(it.Part) || it.Kind == LabelLayout.AnchorKind) c.Add(it);
+            c._placed.AddRange(_placed.Where(p => !owners.Contains(p.owner)));
+            return c;
+        }
+
+        internal void Placed(LRect box, string owner) => _placed.Add((box, owner));
+
+        /// <summary>Every item, for writing an arrangement case.</summary>
+        internal IEnumerable<(ObstacleGroup group, string kind, string network, string part, List<(double X, double Y)> shape)> Items() =>
+            _items.Select(it => (it.Group, it.Kind, it.Network, it.Part, it.Shape));
+
+        /// <summary>
+        /// What an outline (kept <paramref name="gap"/> clear) covers, or null when it is clear: text, leaders, and the parts of
+        /// the networks in <paramref name="networks"/>. Items of <paramref name="ownPart"/> (the label itself) and
+        /// <paramref name="alsoOwn"/> (the part a normal label sits on) are exempt.
+        /// </summary>
+        public string Blocker(IReadOnlyList<(double X, double Y)> shape, double gap, ISet<string> networks, string ownPart = null, string alsoOwn = null)
+        {
+            LRect g = LRect.Around(shape).Grow(gap);
+            foreach (Item it in Near(g))
+            {
+                if (it.Group == ObstacleGroup.Network && (it.Network == null || networks == null || !networks.Contains(it.Network))) continue;
+                if (it.Part != null && (it.Part == ownPart || it.Part == alsoOwn)) continue;
+                if (!it.Bounds.Overlaps(g)) continue;
+                if (!LabelLayout.Separated(shape, it.Shape, gap)) return it.Kind;
+            }
+            return null;
+        }
+
+        public string Blocker(LRect box, double gap, ISet<string> networks, string ownPart = null, string alsoOwn = null) =>
+            Blocker(box.Corners(), gap, networks, ownPart, alsoOwn);
+
+        /// <summary>True when a leader from <paramref name="a"/> to <paramref name="b"/> crosses text (other than <paramref name="own"/>'s own label).</summary>
+        public bool LeaderCrossesText((double X, double Y) a, (double X, double Y) b, string own = null)
+        {
+            var seg = new[] { a, b };
+            foreach (Item it in Near(LRect.Around(seg)))
+                if (it.Group == ObstacleGroup.Text && !it.IsSegment && (own == null || it.Part != own) && !LabelLayout.Separated(seg, it.Shape, 0)) return true;
+            return false;
+        }
+
+        /// <summary>How many leaders the segment crosses (leaders of <paramref name="own"/> left out).</summary>
+        public int LeaderCrossings((double X, double Y) a, (double X, double Y) b, string own = null)
+        {
+            int n = 0;
+            foreach (Item it in Near(LRect.Around(new[] { a, b })))
+                if (it.Group == ObstacleGroup.Leader && it.IsSegment && (own == null || it.Part != own) && LabelLayout.Cross(a, b, it.Shape[0], it.Shape[1])) n++;
+            return n;
+        }
+
+        /// <summary>True when the box lines up with a dragged label placed nearby: the same top, bottom, left or right edge.</summary>
+        public bool LinesUp(LRect box, double reach)
+        {
+            foreach ((LRect p, string _) in _placed)
+            {
+                if (Math.Abs(p.Center.X - box.Center.X) > reach || Math.Abs(p.Center.Y - box.Center.Y) > reach) continue;
+                if (Math.Abs(p.MinY - box.MinY) < 0.3 || Math.Abs(p.MaxY - box.MaxY) < 0.3 || Math.Abs(p.MinX - box.MinX) < 0.3 || Math.Abs(p.MaxX - box.MaxX) < 0.3)
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A dragged label's shape: its text box relative to the leader end, with the text to the right of the end and to the left
+    /// (Civil 3D puts dragged text on the side of the anchor the label point is on), and where it was measured, above and below
+    /// the anchor too (the leader may join the text elsewhere then). Dragged text reads upright on the sheet.
+    /// </summary>
+    internal sealed class DraggedShape
+    {
+        public LRect Right, Left;
+        public LRect? UpRight, UpLeft, DownRight, DownLeft;
+
+        /// <summary>The box for a leader ending (dx, dy) from the anchor, the text to the right or left of its end.</summary>
+        public LRect BoxFor(double dx, double dy, bool right)
+        {
+            if (dy >= 0) return right ? (UpRight ?? Right) : (UpLeft ?? Left);
+            return right ? (DownRight ?? Right) : (DownLeft ?? Left);
+        }
+    }
+
+    /// <summary>One place a dragged label could go.</summary>
+    internal struct LabelSpot
+    {
+        public LRect Box;
+        public (double X, double Y) End;
+        public double Cost;
+        /// <summary>0 = leader straight up on the sheet, 1 = straight down, 2 = sideways, 3 = slanting.</summary>
+        public int Direction;
+        /// <summary>Where the leader starts, and the ratio along its pipe, when the label slides there (null: its own anchor).</summary>
+        public (double X, double Y) Anchor;
+        public double? Ratio;
+        public override string ToString() => $"dir {Direction} end ({End.X:0.0}, {End.Y:0.0}) cost {Cost:0.00}" + (Ratio.HasValue ? $" at ratio {Ratio:0.00}" : "");
+    }
+
+    internal sealed class LayoutRules
+    {
+        /// <summary>Longest leader on paper (mm).</summary>
+        public double MaxDistance = 60;
+        /// <summary>Clear space kept around a label (mm).</summary>
+        public double Gap = 1.5;
+        /// <summary>Shortest leader (mm), and the spacing of the grid of leader ends tried (along the viewport's axes).</summary>
+        public double MinLeader = 3, Step = 2;
+        /// <summary>Leaders go up the sheet rather than down (labels of a viewport all one way where they can).</summary>
+        public bool PreferUp = true;
+        /// <summary>Extra cost of a leader going the other way.</summary>
+        public double OtherWayCost = 0.3;
+        /// <summary>Extra cost of a leader at 45° to the viewport's axes (less for smaller angles): square leaders come first.</summary>
+        public double SlantCost = 0.6;
+        /// <summary>Extra cost per leader crossed: more than any other place costs, so a leader crosses only where nothing else fits.</summary>
+        public double CrossingCost = 10;
+        /// <summary>Cost taken off a box lined up with a placed neighbour (rows and columns square to the viewport).</summary>
+        public double AlignBonus = 0.15;
+        /// <summary>Cost of a box right against a labelled point still waiting for its place (less the further off it is).</summary>
+        public double OcclusionCost = 0.8;
+        /// <summary>Cost of sliding a label's anchor along its pipe, per whole length of the pipe slid.</summary>
+        public double SlideCost = 0.4;
+    }
+
+    internal static class LabelLayout
+    {
+        internal static bool Cross((double X, double Y) a, (double X, double Y) b, (double X, double Y) c, (double X, double Y) d)
+        {
+            double d1 = Side(c, d, a), d2 = Side(c, d, b), d3 = Side(a, b, c), d4 = Side(a, b, d);
+            return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+        }
+
+        private static double Side((double X, double Y) a, (double X, double Y) b, (double X, double Y) p) => (b.X - a.X) * (p.Y - a.Y) - (b.Y - a.Y) * (p.X - a.X);
+
+        /// <summary>
+        /// True when two convex outlines (polygons, or two-point lines) are at least <paramref name="gap"/> apart along some edge
+        /// direction of either (separating axes). With a gap of 0, touching counts as apart.
+        /// </summary>
+        internal static bool Separated(IReadOnlyList<(double X, double Y)> a, IReadOnlyList<(double X, double Y)> b, double gap)
+        {
+            foreach (IReadOnlyList<(double X, double Y)> poly in new[] { a, b })
+            {
+                int edges = poly.Count == 2 ? 1 : poly.Count;
+                for (int i = 0; i < edges; i++)
+                {
+                    var p = poly[i];
+                    var q = poly[(i + 1) % poly.Count];
+                    double nx = -(q.Y - p.Y), ny = q.X - p.X, len = Math.Sqrt(nx * nx + ny * ny);
+                    if (len < 1e-12) continue;
+                    nx /= len; ny /= len;
+                    double minA = double.MaxValue, maxA = double.MinValue, minB = double.MaxValue, maxB = double.MinValue;
+                    foreach (var v in a) { double t = v.X * nx + v.Y * ny; minA = Math.Min(minA, t); maxA = Math.Max(maxA, t); }
+                    foreach (var v in b) { double t = v.X * nx + v.Y * ny; minB = Math.Min(minB, t); maxB = Math.Max(maxB, t); }
+                    if (minB - maxA >= gap - 1e-9 || minA - maxB >= gap - 1e-9) return true;
+                }
+            }
+            return false;
+        }
+
+        internal static bool InPolygon(IReadOnlyList<(double X, double Y)> poly, (double X, double Y) p)
+        {
+            bool inside = false;
+            for (int i = 0, j = poly.Count - 1; i < poly.Count; j = i++)
+                if ((poly[i].Y > p.Y) != (poly[j].Y > p.Y) && p.X < (poly[j].X - poly[i].X) * (p.Y - poly[i].Y) / (poly[j].Y - poly[i].Y + 1e-12) + poly[i].X)
+                    inside = !inside;
+            return inside;
+        }
+
+        /// <summary>The convex hull of the points, counter-clockwise (a label's text and frame as one outline, turned with its text).</summary>
+        public static List<(double X, double Y)> Hull(IEnumerable<(double X, double Y)> points)
+        {
+            List<(double X, double Y)> p = points.Distinct().OrderBy(q => q.X).ThenBy(q => q.Y).ToList();
+            if (p.Count < 3) return p;
+            List<(double X, double Y)> h = new List<(double X, double Y)>();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                int start = h.Count;
+                foreach (var q in pass == 0 ? p : Enumerable.Reverse(p))
+                {
+                    while (h.Count >= start + 2 && Side(h[h.Count - 2], h[h.Count - 1], q) <= 1e-12) h.RemoveAt(h.Count - 1);
+                    h.Add(q);
+                }
+                h.RemoveAt(h.Count - 1);
+            }
+            return h;
+        }
+
+        /// <summary>
+        /// The smallest rectangle round the points, turned to fit them (one of its sides lies along a side of their hull): a
+        /// structure's drawn lines as a clean outline square to the structure, whatever its part data says.
+        /// </summary>
+        public static List<(double X, double Y)> MinAreaRect(IEnumerable<(double X, double Y)> points)
+        {
+            List<(double X, double Y)> hull = Hull(points);
+            if (hull.Count < 3) return hull;
+            double bestArea = double.MaxValue;
+            List<(double X, double Y)> best = null;
+            for (int i = 0; i < hull.Count; i++)
+            {
+                var a = hull[i];
+                var b = hull[(i + 1) % hull.Count];
+                double len = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+                if (len < 1e-12) continue;
+                double ux = (b.X - a.X) / len, uy = (b.Y - a.Y) / len;
+                double minU = double.MaxValue, maxU = double.MinValue, minV = double.MaxValue, maxV = double.MinValue;
+                foreach (var p in hull)
+                {
+                    double u = p.X * ux + p.Y * uy, v = -p.X * uy + p.Y * ux;
+                    minU = Math.Min(minU, u); maxU = Math.Max(maxU, u); minV = Math.Min(minV, v); maxV = Math.Max(maxV, v);
+                }
+                double area = (maxU - minU) * (maxV - minV);
+                if (area >= bestArea - 1e-12) continue;
+                bestArea = area;
+                (double X, double Y) At(double u, double v) => (u * ux - v * uy, u * uy + v * ux);
+                best = new List<(double X, double Y)> { At(minU, minV), At(maxU, minV), At(maxU, maxV), At(minU, maxV) };
+            }
+            return best ?? hull;
+        }
+
+        /// <summary>The points turned by <paramref name="angle"/> (radians, counter-clockwise) about <paramref name="about"/>.</summary>
+        public static List<(double X, double Y)> Turn(IEnumerable<(double X, double Y)> points, (double X, double Y) about, double angle)
+        {
+            double c = Math.Cos(angle), s = Math.Sin(angle);
+            return points.Select(q => (about.X + (q.X - about.X) * c - (q.Y - about.Y) * s, about.Y + (q.X - about.X) * s + (q.Y - about.Y) * c)).ToList();
+        }
+
+        /// <summary>
+        /// How far (radians) a text direction on the sheet is from reading horizontally, between −90° and +90° (text upside down
+        /// counts as horizontal: plan readability flips it).
+        /// </summary>
+        public static double OffUpright(double paperAngle)
+        {
+            double a = Math.IEEERemainder(paperAngle, Math.PI);
+            return Math.Abs(a - Math.PI / 2) < 1e-12 ? -Math.PI / 2 : a;
+        }
+
+        /// <summary>How far (degrees, 0 to 45) a leader is from the viewport's nearest axis.</summary>
+        public static double OffAxis(double dx, double dy)
+        {
+            double a = Math.Abs(Math.Atan2(dy, dx) * 180 / Math.PI) % 90;
+            return Math.Min(a, 90 - a);
+        }
+
+        /// <summary>
+        /// The places a dragged label anchored at <paramref name="a"/> can go, cheapest first: leader ends on a grid square to the
+        /// viewport, any angle, up to the longest leader. Short leaders square to the viewport (up or down, as preferred) cost
+        /// least; slanting ones cost more the further they are off square. The text sits beside the leader end, away from the
+        /// anchor, and never covers the anchor.
+        /// </summary>
+        /// <param name="outward">
+        /// For a label in a group of labelled points: the way out of the group (from its middle to this anchor). Leaders and text
+        /// pointing back into the group cost more, so a crowded manhole's labels fan out all round it; (0, 0) when alone.
+        /// </param>
+        public static List<LabelSpot> Spots((double X, double Y) a, DraggedShape shape, LayoutRules rules, (double X, double Y) outward = default)
+        {
+            List<LabelSpot> spots = new List<LabelSpot>();
+            double max = Math.Max(rules.MinLeader, rules.MaxDistance), step = Math.Max(0.5, rules.Step);
+            double ol = Math.Sqrt(outward.X * outward.X + outward.Y * outward.Y);
+            (double X, double Y) o = ol > 1e-9 ? (outward.X / ol, outward.Y / ol) : (0, 0);
+            int n = (int)Math.Ceiling(max / step);
+            for (int ix = -n; ix <= n; ix++)
+                for (int iy = -n; iy <= n; iy++)
+                {
+                    double dx = ix * step, dy = iy * step, length = Math.Sqrt(dx * dx + dy * dy);
+                    if (length < rules.MinLeader - 1e-9 || length > max + 1e-9) continue;
+                    double off = OffAxis(dx, dy);
+                    int direction = off > 1e-9 ? 3 : ix == 0 ? (dy > 0 ? 0 : 1) : 2;
+                    bool otherWay = rules.PreferUp ? dy < -1e-9 : dy > 1e-9;
+                    double inward = ol > 1e-9 ? Math.Max(0, -(dx * o.X + dy * o.Y) / length) : 0;
+                    double cost = length / max + rules.SlantCost * off / 45 + (otherWay ? rules.OtherWayCost : 0) + 0.4 * inward;
+                    (double X, double Y) end = (a.X + dx, a.Y + dy);
+                    foreach (bool right in ix > 0 ? new[] { true } : ix < 0 ? new[] { false } : new[] { true, false })
+                    {
+                        LRect box = shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
+                        if (box.Contains(a)) continue;
+                        double sideCost = Math.Abs(o.X) > 0.3 ? (right == (o.X > 0) ? 0 : 0.1) : (right ? 0 : 0.05);
+                        spots.Add(new LabelSpot { Box = box, End = end, Anchor = a, Direction = direction, Cost = cost + sideCost });
+                    }
+                }
+            return spots.OrderBy(sp => sp.Cost).ToList();
+        }
+
+        /// <summary>Distance (mm) from a point to a box (0 inside it).</summary>
+        public static double Distance(LRect box, (double X, double Y) p)
+        {
+            double dx = Math.Max(0, Math.Max(box.MinX - p.X, p.X - box.MaxX)), dy = Math.Max(0, Math.Max(box.MinY - p.Y, p.Y - box.MaxY));
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        /// <summary>
+        /// The best clear place for a dragged label, or null: its text covers nothing it must keep clear of, stays inside
+        /// <paramref name="inArea"/>, and its leader crosses no text; leaders crossed add to the cost, lining up with a placed
+        /// neighbour takes a little off, and a box right against a labelled point still waiting for its place (one of
+        /// <paramref name="unplaced"/>) costs more, so the first label of a crowd does not wall the others in.
+        /// </summary>
+        public static LabelSpot? Choose(LabelObstacles obstacles, (double X, double Y) a, DraggedShape shape, LayoutRules rules, ISet<string> networks,
+            string own, Func<LRect, bool> inArea, ICollection<LabelSpot> skip = null, (double X, double Y) outward = default,
+            IReadOnlyList<(double X, double Y)> unplaced = null)
+        {
+            LabelSpot? best = null;
+            double reach = rules.MaxDistance;
+            foreach (LabelSpot s in Spots(a, shape, rules, outward))
+            {
+                if (best.HasValue && s.Cost - rules.AlignBonus >= best.Value.Cost) break;
+                if (skip != null && skip.Any(k => Math.Abs(k.End.X - s.End.X) < 1e-6 && Math.Abs(k.End.Y - s.End.Y) < 1e-6 && Math.Abs(k.Box.MinX - s.Box.MinX) < 1e-6)) continue;
+                if (inArea != null && !inArea(s.Box)) continue;
+                if (obstacles.Blocker(s.Box, rules.Gap, networks, own) != null) continue;
+                if (obstacles.LeaderCrossesText(a, s.End, own)) continue;
+                double cost = s.Cost + rules.CrossingCost * obstacles.LeaderCrossings(a, s.End, own) - (obstacles.LinesUp(s.Box, reach) ? rules.AlignBonus : 0);
+                if (unplaced != null)
+                {
+                    // Scaled to the label: within one box height of a waiting point costs, the more the closer.
+                    double scale = s.Box.Height + rules.Gap;
+                    foreach ((double X, double Y) u in unplaced)
+                    {
+                        double d = Distance(s.Box, u);
+                        if (d < scale) cost += rules.OcclusionCost * (1 - d / scale);
+                    }
+                }
+                if (!best.HasValue || cost < best.Value.Cost) best = new LabelSpot { Box = s.Box, End = s.End, Anchor = a, Direction = s.Direction, Cost = cost };
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Reserves the point a label points to, so no other label's text covers it (its leader would start under that text).
+        /// The label itself (<paramref name="label"/>) is exempt.
+        /// </summary>
+        public static void ReserveAnchor(LabelObstacles obstacles, (double X, double Y) anchor, string label) =>
+            obstacles.AddRect(new LRect(anchor.X - 0.5, anchor.Y - 0.5, anchor.X + 0.5, anchor.Y + 0.5), ObstacleGroup.Leader, AnchorKind, part: label);
+
+        /// <summary>The kind of a reserved labelled point.</summary>
+        public const string AnchorKind = "labelled point";
+
+        /// <summary>Records a placed dragged label: its text and its leader become obstacles for the labels after it.</summary>
+        public static void Claim(LabelObstacles obstacles, LRect box, (double X, double Y) anchor, (double X, double Y) end, string label)
+        {
+            obstacles.AddRect(box, ObstacleGroup.Text, "label", part: label);
+            obstacles.AddSegment(anchor, end, ObstacleGroup.Leader, "leader", part: label);
+            obstacles.Placed(box, label);
+        }
+    }
+
+    /// <summary>A dragged label to be planned: where it points, its shape, what it keeps clear of, and (once planned) its place.</summary>
+    internal sealed class PlanLabel
+    {
+        public string Key;
+        public (double X, double Y) Anchor;
+        public DraggedShape Shape;
+        public ISet<string> Networks;
+        public Func<LRect, bool> InArea;
+        /// <summary>Its place (null when none is clear).</summary>
+        public LabelSpot? Spot;
+        /// <summary>The way out of its group of labelled points (set by the planner; (0, 0) alone).</summary>
+        public (double X, double Y) OutwardVec;
+        /// <summary>Leaders go up rather than down (set by the planner, per group).</summary>
+        public bool PreferUp = true;
+        /// <summary>Other points along its pipe it may slide its anchor to (a pipe label whose style allows it), and its own ratio.</summary>
+        public List<(double X, double Y, double Ratio)> AltAnchors = new List<(double X, double Y, double Ratio)>();
+        public double? Ratio;
+
+        /// <summary>Where its leader starts: its own anchor, or the point it slid to.</summary>
+        public (double X, double Y) Start => Spot.HasValue && Spot.Value.Ratio.HasValue ? Spot.Value.Anchor : Anchor;
+    }
+
+    /// <summary>
+    /// Plans the dragged labels of one viewport together. Labelled points are grouped (a manhole with several labels, a run of
+    /// pipe ends); each group is planned in a few orders (most crowded first, edge points first, middle points first) and both
+    /// ways (leaders up, leaders down), and the best is kept: most labels placed, then least cost. Then labels with a crossed
+    /// leader are placed again, crossing pairs swapped or placed again together, and a label left without a place moves a
+    /// placed neighbour out of its way and places itself first.
+    /// </summary>
+    internal static class LabelPlanner
+    {
+        private static LabelObstacles With(LabelObstacles baseObs, IEnumerable<PlanLabel> placed)
+        {
+            LabelObstacles o = baseObs.Clone();
+            foreach (PlanLabel p in placed) Claim(o, p);
+            return o;
+        }
+
+        private static void Claim(LabelObstacles o, PlanLabel p)
+        {
+            if (!p.Spot.HasValue) return;
+            if (p.Spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(o, p.Spot.Value.Anchor, p.Key);
+            LabelLayout.Claim(o, p.Spot.Value.Box, p.Start, p.Spot.Value.End, p.Key);
+        }
+
+        private static int Crossings(List<PlanLabel> labels)
+        {
+            int n = 0;
+            for (int i = 0; i < labels.Count; i++)
+                for (int j = i + 1; j < labels.Count; j++)
+                    if (labels[i].Spot.HasValue && labels[j].Spot.HasValue && LabelLayout.Cross(labels[i].Start, labels[i].Spot.Value.End, labels[j].Start, labels[j].Spot.Value.End)) n++;
+            return n;
+        }
+
+        private static LayoutRules Copy(LayoutRules r, bool up) => new LayoutRules
+        {
+            MaxDistance = r.MaxDistance, Gap = r.Gap, MinLeader = r.MinLeader, Step = r.Step, PreferUp = up, OtherWayCost = r.OtherWayCost,
+            SlantCost = r.SlantCost, CrossingCost = r.CrossingCost, AlignBonus = r.AlignBonus, OcclusionCost = r.OcclusionCost, SlideCost = r.SlideCost
+        };
+
+        /// <summary>
+        /// The best place for one label: from its own anchor, or (a pipe label allowed to slide) from a point further along its
+        /// pipe, the slide costing a little.
+        /// </summary>
+        public static LabelSpot? ChooseFor(LabelObstacles o, PlanLabel l, LayoutRules rules, IReadOnlyList<(double X, double Y)> unplaced = null, ICollection<LabelSpot> skip = null)
+        {
+            LayoutRules r = Copy(rules, l.PreferUp);
+            LabelSpot? best = LabelLayout.Choose(o, l.Anchor, l.Shape, r, l.Networks, l.Key, l.InArea, skip, l.OutwardVec, unplaced);
+            foreach ((double X, double Y, double Ratio) alt in l.AltAnchors)
+            {
+                LabelSpot? s = LabelLayout.Choose(o, (alt.X, alt.Y), l.Shape, r, l.Networks, l.Key, l.InArea, skip, l.OutwardVec, unplaced);
+                if (!s.HasValue) continue;
+                LabelSpot slid = s.Value;
+                slid.Cost += rules.SlideCost * Math.Abs(alt.Ratio - (l.Ratio ?? 0.5));
+                slid.Ratio = alt.Ratio;
+                if (!best.HasValue || slid.Cost < best.Value.Cost) best = slid;
+            }
+            return best;
+        }
+
+        /// <summary>Groups of labelled points: chains of points no further apart than <paramref name="reach"/>.</summary>
+        private static List<List<PlanLabel>> Groups(List<PlanLabel> labels, double reach)
+        {
+            int[] g = Enumerable.Range(0, labels.Count).ToArray();
+            int Find(int i) { while (g[i] != i) i = g[i] = g[g[i]]; return i; }
+            for (int i = 0; i < labels.Count; i++)
+                for (int j = i + 1; j < labels.Count; j++)
+                    if (Math.Abs(labels[i].Anchor.X - labels[j].Anchor.X) <= reach && Math.Abs(labels[i].Anchor.Y - labels[j].Anchor.Y) <= reach) g[Find(j)] = Find(i);
+            return Enumerable.Range(0, labels.Count).GroupBy(Find).Select(x => x.Select(i => labels[i]).ToList()).OrderByDescending(x => x.Count).ToList();
+        }
+
+        /// <summary>Plans every label's place (each one's <see cref="PlanLabel.Spot"/>); returns whether most leaders go up.</summary>
+        public static bool Plan(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
+        {
+            if (labels.Count == 0) return rules.PreferUp;
+            double groupReach = Math.Max(5, rules.MaxDistance / 4);
+            List<List<PlanLabel>> groups = Groups(labels, groupReach);
+            foreach (List<PlanLabel> group in groups)
+            {
+                double mx = group.Average(l => l.Anchor.X), my = group.Average(l => l.Anchor.Y);
+                foreach (PlanLabel l in group)
+                {
+                    double dx = l.Anchor.X - mx, dy = l.Anchor.Y - my, len = Math.Sqrt(dx * dx + dy * dy);
+                    l.OutwardVec = group.Count < 2 || len < 0.1 ? (0, 0) : (dx / len, dy / len);
+                }
+            }
+
+            // Each group in turn (largest first), against everything placed before it: a few orders, both ways; the best kept.
+            HashSet<PlanLabel> done = new HashSet<PlanLabel>();
+            foreach (List<PlanLabel> group in groups)
+            {
+                LabelObstacles placed = With(baseObs, done);
+                double mx = group.Average(l => l.Anchor.X), my = group.Average(l => l.Anchor.Y);
+                double Spread(PlanLabel l) => Math.Abs(l.Anchor.X - mx) + Math.Abs(l.Anchor.Y - my);
+                List<List<PlanLabel>> orders = new List<List<PlanLabel>>
+                {
+                    group.OrderByDescending(l => group.Count(o => Math.Abs(o.Anchor.X - l.Anchor.X) < groupReach / 2 && Math.Abs(o.Anchor.Y - l.Anchor.Y) < groupReach / 2)).ThenBy(l => l.Anchor.X).ToList()
+                };
+                if (group.Count >= 3)
+                {
+                    orders.Add(group.OrderByDescending(Spread).ToList());
+                    orders.Add(group.OrderBy(Spread).ToList());
+                    orders.Add(group.OrderBy(l => l.Anchor.X).ThenBy(l => l.Anchor.Y).ToList());
+                }
+                (int placed, double cost, Dictionary<PlanLabel, LabelSpot?> spots, bool up)? best = null;
+                foreach (bool up in new[] { rules.PreferUp, !rules.PreferUp })
+                    foreach (List<PlanLabel> order in orders)
+                    {
+                        LabelObstacles o = placed.Clone();
+                        Dictionary<PlanLabel, LabelSpot?> spots = new Dictionary<PlanLabel, LabelSpot?>();
+                        int ok = 0;
+                        double total = 0;
+                        foreach (PlanLabel l in order)
+                        {
+                            l.PreferUp = up;
+                            // Every point still waiting (here or in groups still to come) is kept clear of.
+                            List<(double X, double Y)> waiting = labels.Where(x => x != l && !done.Contains(x) && !spots.ContainsKey(x)).Select(x => x.Anchor).ToList();
+                            l.Spot = ChooseFor(o, l, rules, waiting);
+                            spots[l] = l.Spot;
+                            if (!l.Spot.HasValue) continue;
+                            ok++;
+                            total += l.Spot.Value.Cost;
+                            Claim(o, l);
+                        }
+                        if (!best.HasValue || ok > best.Value.placed || (ok == best.Value.placed && total < best.Value.cost - 1e-9)) best = (ok, total, spots, up);
+                    }
+                foreach (PlanLabel l in group) { l.Spot = best.Value.spots[l]; l.PreferUp = best.Value.up; done.Add(l); }
+            }
+
+            for (int pass = 0; pass < 2; pass++)
+            {
+                // Labels without a place, or with a leader crossing another, are placed again around all the others.
+                foreach (PlanLabel l in labels)
+                {
+                    LabelObstacles others = With(baseObs, labels.Where(x => x != l));
+                    bool crossing = l.Spot.HasValue && others.LeaderCrossings(l.Start, l.Spot.Value.End, l.Key) > 0;
+                    if (l.Spot.HasValue && !crossing) continue;
+                    LabelSpot? again = ChooseFor(others, l, rules);
+                    if (again.HasValue && (!l.Spot.HasValue || again.Value.Cost < l.Spot.Value.Cost - 1e-9)) l.Spot = again;
+                }
+                Untangle(baseObs, labels, rules);
+                MakeRoom(baseObs, labels, rules);
+            }
+            return labels.Count(l => l.PreferUp) * 2 >= labels.Count;
+        }
+
+        /// <summary>
+        /// Two labels whose leaders cross trade leader ends (each keeps its own shape, its text on the side of its new end) when
+        /// both are clear there, or are placed again one after the other: a crossing nearly always goes that way.
+        /// </summary>
+        public static int Untangle(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
+        {
+            int swaps = 0;
+            for (int i = 0; i < labels.Count; i++)
+                for (int j = i + 1; j < labels.Count; j++)
+                {
+                    PlanLabel a = labels[i], b = labels[j];
+                    if (!a.Spot.HasValue || !b.Spot.HasValue || !LabelLayout.Cross(a.Start, a.Spot.Value.End, b.Start, b.Spot.Value.End)) continue;
+                    LabelObstacles others = With(baseObs, labels.Where(x => x != a && x != b));
+                    int before = Crossings(labels);
+                    LabelSpot? oldA = a.Spot, oldB = b.Spot;
+                    List<(LabelSpot? na, LabelSpot? nb)> tries = new List<(LabelSpot?, LabelSpot?)>();
+                    foreach (LabelSpot sa in At(others, a, oldA.Value, oldB.Value.End, rules))
+                    {
+                        LabelObstacles o = others.Clone();
+                        LabelLayout.Claim(o, sa.Box, sa.Ratio.HasValue ? sa.Anchor : a.Anchor, sa.End, a.Key);
+                        foreach (LabelSpot sb in At(o, b, oldB.Value, oldA.Value.End, rules)) tries.Add((sa, sb));
+                    }
+                    foreach ((PlanLabel first, PlanLabel second) in new[] { (a, b), (b, a) })
+                    {
+                        LabelObstacles o = others.Clone();
+                        first.Spot = ChooseFor(o, first, rules);
+                        if (!first.Spot.HasValue) continue;
+                        LabelSpot f1 = first.Spot.Value;
+                        Claim(o, first);
+                        LabelSpot? f2 = ChooseFor(o, second, rules);
+                        if (f2.HasValue) tries.Add(first == a ? (f1, f2) : (f2, f1));
+                    }
+                    bool better = false;
+                    foreach ((LabelSpot? na, LabelSpot? nb) in tries)
+                    {
+                        a.Spot = na; b.Spot = nb;
+                        if (Crossings(labels) < before) { better = true; break; }
+                    }
+                    if (better) swaps++;
+                    else { a.Spot = oldA; b.Spot = oldB; }
+                }
+            return swaps;
+        }
+
+        /// <summary>
+        /// A label left without a place moves each of its nearest placed neighbours (up to three) out of the way in turn: it is
+        /// placed first, then the neighbour again (along its pipe too, if it may slide). Kept when both find a place and no
+        /// crossing is added.
+        /// </summary>
+        public static int MakeRoom(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
+        {
+            int made = 0;
+            foreach (PlanLabel a in labels.Where(x => !x.Spot.HasValue).ToList())
+            {
+                foreach (PlanLabel b in labels.Where(x => x != a && x.Spot.HasValue).OrderBy(x => LabelLayout.Distance(x.Spot.Value.Box, a.Anchor)).Take(3).ToList())
+                {
+                    int before = Crossings(labels);
+                    LabelSpot? oldB = b.Spot;
+                    LabelObstacles o = With(baseObs, labels.Where(x => x != a && x != b));
+                    a.Spot = ChooseFor(o, a, rules, new[] { b.Anchor });
+                    if (!a.Spot.HasValue) { b.Spot = oldB; continue; }
+                    Claim(o, a);
+                    b.Spot = ChooseFor(o, b, rules);
+                    if (b.Spot.HasValue && Crossings(labels) <= before) { made++; break; }
+                    a.Spot = null;
+                    b.Spot = oldB;
+                }
+            }
+            return made;
+        }
+
+        /// <summary>The label with its leader ending at <paramref name="end"/>, for each side its text may take there that is clear.</summary>
+        private static IEnumerable<LabelSpot> At(LabelObstacles o, PlanLabel l, LabelSpot from, (double X, double Y) end, LayoutRules rules)
+        {
+            (double X, double Y) start = from.Ratio.HasValue ? from.Anchor : l.Anchor;
+            double dx = end.X - start.X, dy = end.Y - start.Y, length = Math.Sqrt(dx * dx + dy * dy);
+            if (length > rules.MaxDistance + 1e-9 || length < 1e-9 || o.LeaderCrossesText(start, end, l.Key)) yield break;
+            foreach (bool right in dx > 1e-9 ? new[] { true } : dx < -1e-9 ? new[] { false } : new[] { true, false })
+            {
+                LRect box = l.Shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
+                if (box.Contains(start) || (l.InArea != null && !l.InArea(box))) continue;
+                if (o.Blocker(box, rules.Gap, l.Networks, l.Key) != null) continue;
+                yield return new LabelSpot
+                {
+                    Box = box, End = end, Anchor = start, Ratio = from.Ratio, Direction = 3,
+                    Cost = length / rules.MaxDistance + rules.SlantCost * LabelLayout.OffAxis(dx, dy) / 45
+                };
+            }
+        }
+    }
+}

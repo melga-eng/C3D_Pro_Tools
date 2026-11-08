@@ -325,7 +325,7 @@ namespace C3DProTools
             }
             finally { Cursor = Cursors.Default; }
 
-            if (!chkSaveCopy.Checked) ed.Regen();
+            if (!chkSaveCopy.Checked) ViewHelper.Regen(doc);
             // The full list of objects that could not be deleted, by handle, for checking in the drawing.
             foreach (string line in report.Failures) ed.WriteMessage($"\n[C3D Drawing Cleaner] Not deleted: {line}");
             foreach (string note in report.Notes) ed.WriteMessage($"\n[C3D Drawing Cleaner] {note}");

@@ -264,6 +264,65 @@ namespace C3DProTools
             return pts.Max(p => Math.Abs(p.Z - (a.Z + (b.Z - a.Z) * (p.S - a.S) / span)));
         }
 
+        // =====================================================================================
+        // Parallel runs (cables laid side by side)
+        // =====================================================================================
+
+        /// <summary>
+        /// The pipes running side by side with pipe <paramref name="p"/> at its middle, ordered from right to left of the run's
+        /// direction (the way most of them point): every pipe within <paramref name="maxAngleDeg"/> of parallel whose length
+        /// reaches across p's middle, chained across at most <paramref name="maxGap"/> apart. Works by cross-section, so a run
+        /// whose pipes are split at different stations still forms one run at every point. Pipes are (start, end) in plan.
+        /// </summary>
+        public static List<int> RunAt(int p, IReadOnlyList<((double X, double Y) a, (double X, double Y) b)> pipes, double maxGap, double maxAngleDeg = 5)
+        {
+            var (pa, pb) = pipes[p];
+            double ux = pb.X - pa.X, uy = pb.Y - pa.Y, len = Math.Sqrt(ux * ux + uy * uy);
+            if (len < 1e-9) return new List<int> { p };
+            ux /= len; uy /= len;
+            (double X, double Y) mid = ((pa.X + pb.X) / 2, (pa.Y + pb.Y) / 2);
+            double cosMax = Math.Cos(maxAngleDeg * Math.PI / 180);
+            // Every parallel pipe crossing p's cross-section, with its offset across (+ = left of p's direction) and its way.
+            List<(int i, double across, int way)> section = new List<(int, double, int)>();
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var (a, b) = pipes[i];
+                double vx = b.X - a.X, vy = b.Y - a.Y, l = Math.Sqrt(vx * vx + vy * vy);
+                if (l < 1e-9) continue;
+                double dot = (vx * ux + vy * uy) / l;
+                if (Math.Abs(dot) < cosMax) continue;
+                double t0 = (a.X - mid.X) * ux + (a.Y - mid.Y) * uy, t1 = (b.X - mid.X) * ux + (b.Y - mid.Y) * uy;
+                if (Math.Min(t0, t1) > 1e-9 || Math.Max(t0, t1) < -1e-9) continue;
+                // Its offset across, where it meets the cross-section.
+                double f = Math.Abs(t1 - t0) < 1e-12 ? 0 : -t0 / (t1 - t0);
+                double x = a.X + (b.X - a.X) * f, y = a.Y + (b.Y - a.Y) * f;
+                section.Add((i, -(x - mid.X) * uy + (y - mid.Y) * ux, dot > 0 ? 1 : -1));
+            }
+            section.Sort((m, n) => m.across.CompareTo(n.across));
+            // The chain of neighbours no more than maxGap apart that holds p.
+            int at = section.FindIndex(s => s.i == p);
+            int lo = at, hi = at;
+            while (lo > 0 && section[lo].across - section[lo - 1].across <= maxGap + 1e-9) lo--;
+            while (hi < section.Count - 1 && section[hi + 1].across - section[hi].across <= maxGap + 1e-9) hi++;
+            List<(int i, double across, int way)> run = section.GetRange(lo, hi - lo + 1);
+            // Right to left of the way most of the run points (p's way when they split evenly).
+            int majority = Math.Sign(run.Sum(s => s.way));
+            if (majority == 0) majority = 1;
+            IEnumerable<(int i, double across, int way)> ordered = majority > 0 ? run.OrderBy(s => s.across) : run.OrderByDescending(s => s.across);
+            return ordered.Select(s => s.i).ToList();
+        }
+
+        /// <summary>
+        /// The pipe of a run that carries the labels: the middle one of an odd number, and of an even number the one right of the
+        /// line between the two middle ones. The run is ordered right to left (as <see cref="RunAt"/> gives it).
+        /// </summary>
+        public static int LabelledOfRun(IReadOnlyList<int> rightToLeft) =>
+            rightToLeft.Count % 2 == 1 ? rightToLeft[rightToLeft.Count / 2] : rightToLeft[rightToLeft.Count / 2 - 1];
+
+        /// <summary>Whether pipe <paramref name="p"/> is the one of its parallel run that carries the labels (a pipe alone always is).</summary>
+        public static bool CarriesRunLabels(int p, IReadOnlyList<((double X, double Y) a, (double X, double Y) b)> pipes, double maxGap, double maxAngleDeg = 5) =>
+            LabelledOfRun(RunAt(p, pipes, maxGap, maxAngleDeg)) == p;
+
         /// <summary>A distance on paper (mm) in drawing units through a viewport of this scale (paper units per drawing unit).</summary>
         public static double PaperToModel(double paperMm, double viewportScale) => viewportScale > 0 ? paperMm / viewportScale : paperMm;
     }

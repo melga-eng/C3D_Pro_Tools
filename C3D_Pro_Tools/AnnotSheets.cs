@@ -22,6 +22,40 @@ namespace C3DProTools
         /// <summary>Paper units per model unit.</summary>
         public double Scale;
         public double Twist;
+        /// <summary>The viewport's own UCS X axis direction in the model (radians), or NaN when it has none of its own.</summary>
+        public double UcsAngle = double.NaN;
+
+        /// <summary>
+        /// The direction (radians, in the model) that runs along the viewport's X axis on the sheet: what "horizontal on the sheet"
+        /// is in the model. A rectangle drawn round the viewport and moved to model space (CHSPACE) is square to this.
+        /// </summary>
+        public double XAxisInModel
+        {
+            get
+            {
+                Vector3d x = new Vector3d(1, 0, 0).TransformBy(PaperToModel);
+                return Math.Atan2(x.Y, x.X);
+            }
+        }
+
+        /// <summary>
+        /// A point of a label as it shows on this sheet: through the viewport from its anchor (turned with the view), at the label's
+        /// plotted size (<paramref name="factor"/> paper units per drawing unit of the label's own geometry).
+        /// </summary>
+        public Point2d LabelToPaper(Point3d anchor, Point3d p, double factor)
+        {
+            Vector3d d = new Vector3d(p.X - anchor.X, p.Y - anchor.Y, 0).TransformBy(ModelToPaper) * (factor / Scale);
+            Point2d a = ToPaper(anchor);
+            return new Point2d(a.X + d.X, a.Y + d.Y);
+        }
+
+        /// <summary>The model point a label point must be at to show at <paramref name="paper"/> (the inverse of <see cref="LabelToPaper"/>).</summary>
+        public Point3d LabelToModel(Point3d anchor, Point2d paper, double factor, double z)
+        {
+            Point2d a = ToPaper(anchor);
+            Vector3d d = ToModel(new Vector2d(paper.X - a.X, paper.Y - a.Y)) * (Scale / factor);
+            return new Point3d(anchor.X + d.X, anchor.Y + d.Y, z);
+        }
         /// <summary>The viewport outline on paper (its clip boundary when it has one).</summary>
         public List<Point2d> Outline = new List<Point2d>();
         public Extents2d PaperBox;
@@ -207,6 +241,15 @@ namespace C3DProTools
                 Id = vp.ObjectId, Layout = sheet.Layout, TabOrder = sheet.TabOrder, ModelToPaper = modelToPaper, PaperToModel = modelToPaper.Inverse(),
                 Scale = vp.CustomScale, Twist = vp.TwistAngle
             };
+            try
+            {
+                if (vp.UcsPerViewport)
+                {
+                    Vector3d ux = vp.Ucs.Xaxis;
+                    v.UcsAngle = Math.Atan2(ux.Y, ux.X);
+                }
+            }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
             if (vp.NonRectClipOn && !vp.NonRectClipEntityId.IsNull && tr.GetObject(vp.NonRectClipEntityId, OpenMode.ForRead) is Curve clip)
             {

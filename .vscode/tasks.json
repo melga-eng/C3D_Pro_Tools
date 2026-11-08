@@ -43,6 +43,22 @@
             "args": ["/i", "${workspaceFolder}\\C3DProInstaller\\bin\\Release\\C3DProInstaller.msi"],
             "dependsOn": "Build Plugin + Installer (Release)",
             "problemMatcher": []
+        },
+        {
+            // Close Civil 3D first: it locks the DLL. After this, the bridge loads every time Civil 3D starts.
+            "label": "Install C3D Bridge (agents <-> live Civil 3D)",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/C3DProTools.Bridge/Install-Bridge.ps1"],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Check C3D Bridge is reachable",
+            "type": "process",
+            "command": "curl.exe",
+            "args": ["-s", "-X", "POST", "http://127.0.0.1:47321/mcp", "-H", "Content-Type: application/json",
+                     "-d", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"],
+            "problemMatcher": []
         }
     ]
 }

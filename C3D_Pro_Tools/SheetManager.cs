@@ -323,8 +323,7 @@ namespace C3DProTools
                 Dictionary<string, string> changes = new Dictionary<string, string>();
                 foreach (string tag in matchTags.Where(t => !string.IsNullOrEmpty(t)))
                 {
-                    string v = s.Attr(tag), nv = v;
-                    foreach (KeyValuePair<string, string> m in map) nv = Regex.Replace(nv, Regex.Escape(m.Key) + @"(?![\w-])", m.Value, RegexOptions.IgnoreCase);
+                    string v = s.Attr(tag), nv = SheetRefs.Replace(v, map);
                     if (nv != v) changes[tag] = nv;
                 }
                 if (changes.Count > 0) SetAttributes(tr, s, changes);

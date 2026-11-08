@@ -94,12 +94,16 @@ namespace C3DProTools
         // Arrange
         private readonly Target _arrangeTarget = new Target();
         private readonly CheckedListBox _clbSheets = NewList();
-        private readonly TextBox _txtMaxDist = ToolUi.Number(60), _txtGap = ToolUi.Number(1.5), _txtMargin = ToolUi.Number(3);
+        private readonly TextBox _txtMaxDist = ToolUi.Number(60), _txtGap = ToolUi.Number(1.5), _txtMargin = ToolUi.Number(3), _txtRunGap = ToolUi.Number(1.5);
         private readonly CheckBox _chkPlan = ToolUi.Check("Plan labels"), _chkProfile = ToolUi.Check("Profile labels");
         private readonly CheckBox _chkEveryLabel = ToolUi.Check("Arrange every label (off: only labels with a problem)");
-        private readonly CheckBox _chkSlide = ToolUi.Check("Labels sitting on their pipe slide along it instead of being dragged out");
-        private readonly CheckBox _chkAvoidText = ToolUi.Check("Keep clear of other text in the drawing");
-        private readonly CheckBox _chkAvoidXrefs = ToolUi.Check("Keep clear of the linework and text of loaded xrefs");
+        private readonly CheckBox _chkSlide = ToolUi.Check("A Normal label that clashes first slides along its pipe; only then is it dragged");
+        private readonly CheckBox _chkAvoidText = ToolUi.Check("Keep clear of text and multileaders in model space (labels and leaders always are)");
+        /// <summary>Each label style's placement: Normal (dragged only when it clashes) or Dragged (always placed with a leader).</summary>
+        private readonly DataGridView _gridStyles = ToolUi.Grid();
+        /// <summary>The networks the scanned sheets show: whose labels to arrange, and which no label may cover.</summary>
+        private readonly DataGridView _gridNets = ToolUi.Grid();
+        private static readonly string[] Placements = { "Normal", "Dragged" };
         private readonly CheckBox _chkMask = ToolUi.Check("Mask the text of arranged labels (background mask on their label styles)");
         private readonly DataGridView _gridIssues = ToolUi.Grid();
         private readonly List<(ArrangeIssue issue, Box2? box)> _issues = new List<(ArrangeIssue, Box2?)>();
@@ -216,6 +220,7 @@ namespace C3DProTools
                         if (tr.GetObject(id, OpenMode.ForRead) is Network n) _networks[n.Name] = id;
                     _pipeStyles = AnnotLabels.StyleNames(tr, cdoc, LabelKind.PlanPipe);
                     _structureStyles = AnnotLabels.StyleNames(tr, cdoc, LabelKind.PlanStructure);
+
                 }
             }
             catch (Exception ex) { SetStatus("Could not read the drawing: " + ex.Message); }
@@ -223,6 +228,59 @@ namespace C3DProTools
             FillLists();
             RefreshLabelRows();
             SetStatus($"{_sheets.Count} sheet(s) with {_sheets.Sum(s => s.Viewports.Count)} viewport(s), {_networks.Count} gravity network(s).");
+        }
+
+        /// <summary>The key a style's placement is kept under: its kind and name (two kinds may share a style name).</summary>
+        internal static string StyleKey(LabelKind kind, string style) => kind + ":" + style;
+
+        /// <summary>The element a label kind labels, as the style list shows it.</summary>
+        private static string ElementOf(LabelKind k) =>
+            k == LabelKind.PlanPipe ? "Pipe" : k == LabelKind.PlanStructure ? "Structure" : k == LabelKind.ProfilePipe ? "Profile pipe" : "Profile structure";
+
+        /// <summary>
+        /// Scans the ticked sheets: the label styles used there (by the element each labels, with how many labels and how many are
+        /// dragged now) and the networks their viewports show. Each style's placement is as chosen before, else Dragged when a
+        /// label set places that style dragged (or most of its labels are dragged now), else Normal.
+        /// </summary>
+        private void ScanSheets()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            SheetScan scan;
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
+                    scan = SheetScan.Of(tr, CivilDocument.GetCivilDocument(_doc.Database), AnnotLabels.Scan(tr, _doc.Database), sheets, _chkPlan.Checked, _chkProfile.Checked);
+            }
+            catch (Exception ex) { MessageBox.Show(this, "The sheets could not be scanned: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            finally { Cursor = Cursors.Default; }
+
+            HashSet<string> dragged = new HashSet<string>(_s.DraggedStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            HashSet<string> known = new HashSet<string>(_s.KnownStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            HashSet<string> fromSets = new HashSet<string>((_s.LabelSets ?? new List<LabelSet>()).SelectMany(s => s.Items).Concat(_s.LabelRows ?? new List<LabelSetItem>())
+                .Where(i => i.Dragged).Select(i => StyleKey(i.Kind, i.Style)), StringComparer.OrdinalIgnoreCase);
+            _gridStyles.Rows.Clear();
+            HashSet<string> slides = new HashSet<string>(_s.SlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            HashSet<string> knownSlides = new HashSet<string>(_s.KnownSlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach ((LabelKind kind, string style, int labels, int draggedNow, int alongPipe) in scan.Styles)
+            {
+                string key = StyleKey(kind, style);
+                bool isDragged = known.Contains(key) ? dragged.Contains(key) : fromSets.Contains(key) || draggedNow * 2 > labels;
+                bool pipe = kind == LabelKind.PlanPipe || kind == LabelKind.ProfilePipe;
+                // Off for end labels (most of the style's labels at a pipe end), on for labels along the pipe, unless chosen before.
+                bool slide = pipe && (knownSlides.Contains(key) ? slides.Contains(key) : alongPipe * 2 > labels);
+                int i = _gridStyles.Rows.Add(ElementOf(kind), style, labels, draggedNow, isDragged ? "Dragged" : "Normal", slide);
+                _gridStyles.Rows[i].Tag = key;
+                if (!pipe) _gridStyles.Rows[i].Cells["Slides"].ReadOnly = true;
+            }
+            HashSet<string> keepClear = new HashSet<string>(_s.KeepClearNetworks ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            _gridNets.Rows.Clear();
+            HashSet<string> onePerRun = new HashSet<string>(_s.OneLabelPerRunNetworks ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach ((string network, int parts, int labels) in scan.Networks)
+                _gridNets.Rows.Add(network, parts, labels, labels > 0, keepClear.Contains(network), onePerRun.Contains(network));
+            SetStatus($"{sheets.Count} sheet(s): {scan.Styles.Sum(x => x.labels)} label(s) in {scan.Styles.Count} style(s), {scan.Networks.Count} network(s) shown. " +
+                      "Review the placements and networks, then Preview.");
         }
 
         private static void Refill(CheckedListBox box, IEnumerable<string> items)
@@ -244,6 +302,9 @@ namespace C3DProTools
                 Refill(t.SheetList, layouts);
             }
             Refill(_clbSheets, layouts);
+            // The scan belonged to the previous drawing.
+            _gridStyles.Rows.Clear();
+            _gridNets.Rows.Clear();
             FillSheetGrid();
         }
 
@@ -436,33 +497,79 @@ namespace C3DProTools
         {
             (Panel host, TableLayoutPanel stack) = ToolUi.Page();
 
-            TableLayoutPanel target = ToolUi.Card("Labels to arrange",
-                "The labels of these networks (or of the selected parts, or the selected labels) are arranged; all other labels stay where they are " +
-                "and are kept clear of.");
-            AddTarget(target, _arrangeTarget, "Selected in the drawing (labels, or the pipes and structures they label)", "\nSelect labels, pipes or structures: ", false);
-            ToolUi.Add(stack, target);
-
-            TableLayoutPanel sheets = ToolUi.Card("Sheets",
-                "Labels are placed by how they appear on each sheet: inside the viewport (and their profile view), clear of pipes, structures, " +
-                "text and each other, in rows beside the route where possible, otherwise at the nearest free spot. Moved labels are dragged, with a leader to their part.");
+            TableLayoutPanel sheets = ToolUi.Card("1. Sheets",
+                "Tick the sheets to arrange, then scan them: the tool finds what each viewport shows (within its outline) and lists the label " +
+                "styles and networks found there. Everything is worked out in the viewport's own frame, as the sheet shows it.");
             ToolUi.Wide(sheets, ListWithButtons(_clbSheets, StyleUi.Secondary("Current sheet", (s, e) =>
             {
                 string cur = CurrentLayout();
                 for (int i = 0; i < _clbSheets.Items.Count; i++) _clbSheets.SetItemChecked(i, _clbSheets.Items[i].ToString() == cur);
-            })));
+            }), StyleUi.Primary("Scan these sheets", (s, e) => ScanSheets())));
             ToolUi.Add(stack, sheets);
 
-            TableLayoutPanel place = ToolUi.Card("Placement (paper distances)");
-            ToolUi.Field(place, "Furthest from its part", ToolUi.WithUnit(_txtMaxDist, "mm"), _tips, "A label is never moved further than this from the point it labels.");
+            TableLayoutPanel frame = ToolUi.Card("Check the viewport frame",
+                "Shows what the arranger works with on the ticked sheets, drawn on layer " + AnnotFrame.CheckLayer + " (not plotted): each viewport's outline, " +
+                "its X and Y axes, rotation and UCS (red), the network parts (yellow), text, labels and leaders (grey) labels keep clear of, and every pipe and " +
+                "structure label's outline as the sheet shows it (cyan normal, magenta dragged, with its leader). The outlines should sit exactly on the labels.");
+            ToolUi.Wide(frame, Buttons(
+                StyleUi.Secondary("Show what the tool sees", (s, e) => ShowFrameCheck()),
+                StyleUi.Secondary("Clear it", (s, e) => ClearFrameCheck()),
+                StyleUi.Secondary("Viewport frames to model space", (s, e) => FramesToModel()),
+                StyleUi.Secondary("Reset labels on these sheets…", (s, e) => ResetLabelsOnSheets())));
+            ToolUi.Add(stack, frame);
+
+            TableLayoutPanel styles = ToolUi.Card("2. Labels on these sheets",
+                "Normal: the label stays a plain label on its part; only when it clashes does it slide along its pipe, then get dragged. " +
+                "Dragged: always placed with a leader, square to the viewport first (any angle when nothing else fits), lined up with its neighbours. " +
+                "May slide along its pipe: where it is crowded, the label's arrow may move along its pipe to a clear stretch (off for labels at a pipe end, " +
+                "such as N / E / IL, whose arrow must stay at the point they describe).");
+            _gridStyles.Dock = DockStyle.None;
+            _gridStyles.Height = 170;
+            _gridStyles.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+            _gridStyles.Columns.Add(new DataGridViewTextBoxColumn { Name = "Kind", HeaderText = "Labels", ReadOnly = true, FillWeight = 50 });
+            _gridStyles.Columns.Add(new DataGridViewTextBoxColumn { Name = "Style", HeaderText = "Label style", ReadOnly = true, FillWeight = 140 });
+            _gridStyles.Columns.Add(new DataGridViewTextBoxColumn { Name = "Count", HeaderText = "On the sheets", ReadOnly = true, FillWeight = 35 });
+            _gridStyles.Columns.Add(new DataGridViewTextBoxColumn { Name = "DraggedNow", HeaderText = "Dragged now", ReadOnly = true, FillWeight = 35 });
+            DataGridViewComboBoxColumn placement = new DataGridViewComboBoxColumn { Name = "Placement", HeaderText = "Placement", FillWeight = 50, FlatStyle = FlatStyle.Flat };
+            placement.Items.AddRange(Placements);
+            _gridStyles.Columns.Add(placement);
+            _gridStyles.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Slides", HeaderText = "May slide along its pipe", FillWeight = 45 });
+            _gridStyles.ReadOnly = false;
+            _gridStyles.CurrentCellDirtyStateChanged += (s, e) => { if (_gridStyles.IsCurrentCellDirty) _gridStyles.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            ToolUi.Wide(styles, _gridStyles);
+            ToolUi.Add(stack, styles);
+
+            TableLayoutPanel clear = ToolUi.Card("3. Networks on these sheets",
+                "Arrange: the labels of the ticked networks are placed; all other labels stay where they are and are kept clear of. " +
+                "Do not cover: a label never covers its own network (pipes and structures), text, other labels or leaders; other networks, " +
+                "blocks, xrefs and any other linework may be covered, except the networks ticked here. One label per parallel run: of cables laid " +
+                "side by side only one keeps its labels (the middle of three; of two or four the one right of the middle); the others' labels are removed.");
+            _gridNets.Dock = DockStyle.None;
+            _gridNets.Height = 150;
+            _gridNets.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+            _gridNets.Columns.Add(new DataGridViewTextBoxColumn { Name = "Network", HeaderText = "Network", ReadOnly = true, FillWeight = 140 });
+            _gridNets.Columns.Add(new DataGridViewTextBoxColumn { Name = "Parts", HeaderText = "Parts shown", ReadOnly = true, FillWeight = 35 });
+            _gridNets.Columns.Add(new DataGridViewTextBoxColumn { Name = "Labels", HeaderText = "Labels", ReadOnly = true, FillWeight = 30 });
+            _gridNets.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Arrange", HeaderText = "Arrange its labels", FillWeight = 40 });
+            _gridNets.Columns.Add(new DataGridViewCheckBoxColumn { Name = "KeepClear", HeaderText = "Do not cover", FillWeight = 40 });
+            _gridNets.Columns.Add(new DataGridViewCheckBoxColumn { Name = "OnePerRun", HeaderText = "One label per parallel run", FillWeight = 50 });
+            _gridNets.ReadOnly = false;
+            _gridNets.CurrentCellDirtyStateChanged += (s, e) => { if (_gridNets.IsCurrentCellDirty) _gridNets.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            ToolUi.Wide(clear, _gridNets);
+            ToolUi.Add(stack, clear);
+
+            TableLayoutPanel place = ToolUi.Card("4. Placement (paper distances)");
+            ToolUi.Field(place, "Longest leader", ToolUi.WithUnit(_txtMaxDist, "mm"), _tips, "A dragged label's leader is never longer than this. " +
+                "A label with no clear place within it is put back as it was and listed below.");
             ToolUi.Field(place, "Space around labels", ToolUi.WithUnit(_txtGap, "mm"));
             ToolUi.Field(place, "Keep from viewport edge", ToolUi.WithUnit(_txtMargin, "mm"));
+            ToolUi.Field(place, "Parallel cables", ToolUi.WithUnit(_txtRunGap, "m apart at most (centre to centre, in the model)"), _tips,
+                "For networks ticked \"One label per parallel run\": pipes within 5° of parallel and no further apart than this run together.");
             ToolUi.Wide(place, ToolUi.Inline(_chkPlan, _chkProfile));
             ToolUi.Wide(place, _chkEveryLabel);
             ToolUi.Wide(place, _chkSlide);
             ToolUi.Wide(place, _chkAvoidText);
-            ToolUi.Wide(place, _chkAvoidXrefs);
-            ToolUi.Wide(place, _chkMask, _tips, "Civil 3D masks label text through the label style: every label of those styles is masked, here and elsewhere. " +
-                                                "Data shortcut parts are networks in this drawing and are always avoided.");
+            ToolUi.Wide(place, _chkMask, _tips, "Civil 3D masks label text through the label style: every label of those styles is masked, here and elsewhere.");
             ToolUi.Wide(place, ToolUi.Note("Labels you placed by hand can be locked: they are never moved. Select them in the drawing, then Lock."));
             ToolUi.Wide(place, Buttons(
                 StyleUi.Secondary("Lock selected labels…", (s, e) => LockSelected(true)),
@@ -470,10 +577,19 @@ namespace C3DProTools
             ToolUi.Wide(place, Buttons(
                 StyleUi.Secondary("Mask selected labels' text…", (s, e) => MaskSelected(true)),
                 StyleUi.Secondary("Unmask…", (s, e) => MaskSelected(false))));
-            ToolUi.Wide(place, Buttons(
-                StyleUi.Secondary("Check", (s, e) => RunArrange(Checked(_clbSheets), true)),
-                StyleUi.Primary("Arrange labels", (s, e) => RunArrange(Checked(_clbSheets), false))));
             ToolUi.Add(stack, place);
+
+            TableLayoutPanel run = ToolUi.Card("5. Check, preview, arrange",
+                "Check: draws every label as it is now (red: with a problem). Preview: works out the arrangement and draws it, cyan normal, green " +
+                "dragged, red with no clear place, on layer " + AnnotFrame.CheckLayer + " (not plotted), then puts every label back. " +
+                "Arrange: does it for real (one UNDO reverses it); every move is measured again, and a label with no clear place is put back and listed.");
+            ToolUi.Wide(run, Buttons(
+                StyleUi.Secondary("Check", (s, e) => RunArrange(Checked(_clbSheets), true)),
+                StyleUi.Secondary("Preview", (s, e) => RunArrange(Checked(_clbSheets), false, preview: true)),
+                StyleUi.Secondary("Clear the drawing", (s, e) => ClearFrameCheck()),
+                StyleUi.Secondary("Export arrangement case…", (s, e) => ExportCase()),
+                StyleUi.Primary("Arrange labels", (s, e) => RunArrange(Checked(_clbSheets), false))));
+            ToolUi.Add(stack, run);
 
             TableLayoutPanel results = ToolUi.Card("Results", "Every label that has a problem or could not be handled. Double-click a row to go to it on its sheet.");
             _gridIssues.Dock = DockStyle.None;
@@ -625,12 +741,12 @@ namespace C3DProTools
             _txtMaxDist.Text = ToolUi.Format(_s.MaxDistance);
             _txtGap.Text = ToolUi.Format(_s.Gap);
             _txtMargin.Text = ToolUi.Format(_s.Margin);
+            _txtRunGap.Text = ToolUi.Format(_s.RunGap);
             _chkPlan.Checked = _s.Plan;
             _chkProfile.Checked = _s.Profile;
             _chkEveryLabel.Checked = _s.ArrangeEveryLabel;
-            _chkSlide.Checked = _s.SlideOnPipe;
+            _chkSlide.Checked = _s.SlideNormalLabels;
             _chkAvoidText.Checked = _s.AvoidModelText;
-            _chkAvoidXrefs.Checked = _s.AvoidXrefs;
             _chkMask.Checked = _s.MaskArranged;
 
             NamingOptions n = _s.Naming;
@@ -674,13 +790,45 @@ namespace C3DProTools
                 return false;
             }
             _s.MaxDistance = max; _s.Gap = gap; _s.Margin = margin;
+            if (ToolUi.TryNumber(_txtRunGap, out double runGap) && runGap > 0) _s.RunGap = runGap;
             _s.Plan = _chkPlan.Checked; _s.Profile = _chkProfile.Checked;
-            _s.ArrangeEveryLabel = _chkEveryLabel.Checked; _s.SlideOnPipe = _chkSlide.Checked; _s.AvoidModelText = _chkAvoidText.Checked;
-            _s.AvoidXrefs = _chkAvoidXrefs.Checked; _s.MaskArranged = _chkMask.Checked;
+            _s.ArrangeEveryLabel = _chkEveryLabel.Checked; _s.SlideNormalLabels = _chkSlide.Checked; _s.AvoidModelText = _chkAvoidText.Checked;
+            _s.MaskArranged = _chkMask.Checked;
+            _gridStyles.EndEdit();
+            List<string> draggedStyles = new List<string>(), knownStyles = new List<string>();
+            foreach (DataGridViewRow r in _gridStyles.Rows)
+            {
+                if (!(r.Tag is string key)) continue;
+                knownStyles.Add(key);
+                if (r.Cells["Placement"].Value as string == "Dragged") draggedStyles.Add(key);
+            }
+            // Styles not in this drawing keep their earlier choice.
+            HashSet<string> seen = new HashSet<string>(knownStyles, StringComparer.OrdinalIgnoreCase);
+            draggedStyles.AddRange((_s.DraggedStyles ?? new List<string>()).Where(k => !seen.Contains(k)));
+            knownStyles.AddRange((_s.KnownStyles ?? new List<string>()).Where(k => !seen.Contains(k)));
+            _s.DraggedStyles = draggedStyles;
+            _s.KnownStyles = knownStyles;
+            List<string> slideStyles = new List<string>();
+            foreach (DataGridViewRow r in _gridStyles.Rows)
+                if (r.Tag is string key && r.Cells["Slides"].Value is true) slideStyles.Add(key);
+            _s.SlideStyles = (_s.SlideStyles ?? new List<string>()).Where(k => !seen.Contains(k)).Concat(slideStyles).ToList();
+            _s.KnownSlideStyles = (_s.KnownSlideStyles ?? new List<string>()).Where(k => !seen.Contains(k)).Concat(knownStyles.Where(seen.Contains)).Distinct().ToList();
+            _gridNets.EndEdit();
+            if (_gridNets.Rows.Count > 0)
+            {
+                HashSet<string> shown = new HashSet<string>(_gridNets.Rows.Cast<DataGridViewRow>().Select(r => r.Cells["Network"].Value as string), StringComparer.OrdinalIgnoreCase);
+                _s.KeepClearNetworks = (_s.KeepClearNetworks ?? new List<string>()).Where(n => !shown.Contains(n))
+                    .Concat(_gridNets.Rows.Cast<DataGridViewRow>().Where(r => r.Cells["KeepClear"].Value is true).Select(r => r.Cells["Network"].Value as string)).ToList();
+                _s.OneLabelPerRunNetworks = (_s.OneLabelPerRunNetworks ?? new List<string>()).Where(n => !shown.Contains(n))
+                    .Concat(_gridNets.Rows.Cast<DataGridViewRow>().Where(r => r.Cells["OnePerRun"].Value is true).Select(r => r.Cells["Network"].Value as string)).ToList();
+            }
             o = new ArrangeOptions
             {
                 MaxDistance = max, Gap = gap, Margin = margin, Plan = _s.Plan, Profile = _s.Profile,
-                RearrangeAll = _s.ArrangeEveryLabel, SlideOnPipe = _s.SlideOnPipe, AvoidModelText = _s.AvoidModelText, AvoidXrefs = _s.AvoidXrefs
+                RearrangeAll = _s.ArrangeEveryLabel, SlideOnPipe = _s.SlideNormalLabels, AvoidModelText = _s.AvoidModelText,
+                DraggedStyles = new HashSet<string>(draggedStyles, StringComparer.OrdinalIgnoreCase),
+                SlideStyles = new HashSet<string>(_s.SlideStyles, StringComparer.OrdinalIgnoreCase),
+                KeepClearNetworks = new HashSet<string>(_s.KeepClearNetworks, StringComparer.OrdinalIgnoreCase)
             };
             return true;
         }
@@ -942,31 +1090,27 @@ namespace C3DProTools
         // Arrange
         // =====================================================================================
 
-        /// <summary>The labels the Arrange page's target picks: of the selected parts / labels, or of the ticked networks.</summary>
-        private HashSet<ObjectId> ArrangeChoice(Transaction tr, List<LabelInfo> labels)
+        /// <summary>
+        /// The labels to arrange: those of the networks ticked "Arrange its labels" in the scanned list (every label when the
+        /// sheets have not been scanned).
+        /// </summary>
+        private HashSet<ObjectId> NetworkChoice(Transaction tr, List<LabelInfo> labels)
         {
-            Target t = _arrangeTarget;
-            if (t.Mode == TParts)
-            {
-                // Labels picked themselves; parts picked themselves (not through one of their labels) bring all their labels.
-                HashSet<ObjectId> chosen = new HashSet<ObjectId>(t.LabelIds);
-                HashSet<ObjectId> parts = new HashSet<ObjectId>(t.PartIds);
-                HashSet<ObjectId> viaLabel = new HashSet<ObjectId>(labels.Where(l => chosen.Contains(l.Id)).Select(l => l.PartId));
-                foreach (LabelInfo l in labels) if (parts.Contains(l.PartId) && !viaLabel.Contains(l.PartId)) chosen.Add(l.Id);
-                return chosen;
-            }
-            HashSet<ObjectId> nets = new HashSet<ObjectId>(CheckedNetworks(t.NetworkList));
-            Dictionary<ObjectId, ObjectId> networkOf = new Dictionary<ObjectId, ObjectId>();
+            if (_gridNets.Rows.Count == 0) return null;
+            HashSet<string> nets = new HashSet<string>(_gridNets.Rows.Cast<DataGridViewRow>().Where(r => r.Cells["Arrange"].Value is true)
+                .Select(r => r.Cells["Network"].Value as string), StringComparer.OrdinalIgnoreCase);
+            Dictionary<ObjectId, string> nameOf = new Dictionary<ObjectId, string>();
             HashSet<ObjectId> result = new HashSet<ObjectId>();
             foreach (LabelInfo l in labels)
             {
                 if (l.PartId.IsNull) continue;
-                if (!networkOf.TryGetValue(l.PartId, out ObjectId net))
+                if (!nameOf.TryGetValue(l.PartId, out string name))
                 {
-                    try { net = tr.GetObject(l.PartId, OpenMode.ForRead) is Part p ? p.NetworkId : ObjectId.Null; } catch (Exception) { net = ObjectId.Null; }
-                    networkOf[l.PartId] = net;
+                    try { name = tr.GetObject(l.PartId, OpenMode.ForRead) is Part p && tr.GetObject(p.NetworkId, OpenMode.ForRead) is Network n ? n.Name : ""; }
+                    catch (Exception) { name = ""; }
+                    nameOf[l.PartId] = name;
                 }
-                if (nets.Contains(net)) result.Add(l.Id);
+                if (nets.Contains(name)) result.Add(l.Id);
             }
             return result;
         }
@@ -975,22 +1119,24 @@ namespace C3DProTools
         /// Checks or arranges the labels on the sheets. Only the labels <paramref name="choose"/> returns (by default the Arrange
         /// page's choice) move; every other label stays and counts as an obstacle.
         /// </summary>
-        private void RunArrange(List<SheetInfo> sheets, bool checkOnly, Func<Transaction, List<LabelInfo>, HashSet<ObjectId>> choose = null)
+        /// <param name="preview">Works the arrangement out and draws it, then puts every label back (nothing in the drawing changes).</param>
+        /// <param name="exportFolder">With a preview: each viewport's arrangement is also written there as a case file.</param>
+        private void RunArrange(List<SheetInfo> sheets, bool checkOnly, Func<Transaction, List<LabelInfo>, HashSet<ObjectId>> choose = null, bool preview = false, string exportFolder = null)
         {
             if (!Ready()) return;
-            if (sheets.Count == 0) { MessageBox.Show(this, "Tick the sheets to " + (checkOnly ? "check." : "arrange."), Text); return; }
+            if (sheets.Count == 0) { MessageBox.Show(this, "Tick the sheets to " + (checkOnly ? "check." : preview ? "preview." : "arrange."), Text); return; }
             if (!ReadArrangeOptions(out ArrangeOptions o)) return;
+            o.ExportFolder = exportFolder;
             if (choose == null)
             {
-                if (_arrangeTarget.Mode == TParts && _arrangeTarget.PartIds.Count == 0 && _arrangeTarget.LabelIds.Count == 0)
-                { MessageBox.Show(this, "Select the labels or parts to arrange first, or tick networks (Labels to arrange).", Text); return; }
-                if (_arrangeTarget.Mode == TNetworks && _arrangeTarget.NetworkList.CheckedItems.Count == 0)
-                { MessageBox.Show(this, "Tick the networks whose labels to arrange (Labels to arrange).", Text); return; }
-                choose = ArrangeChoice;
+                if (_gridNets.Rows.Count > 0 && !_gridNets.Rows.Cast<DataGridViewRow>().Any(r => r.Cells["Arrange"].Value is true))
+                { MessageBox.Show(this, "Tick the networks whose labels to arrange (3. Networks on these sheets).", Text); return; }
+                choose = NetworkChoice;
             }
             else o.RearrangeAll = true;
             ArrangeReport report = new ArrangeReport();
-            int masked = -1;
+            int masked = -1, removed = 0;
+            string drawingProblem = null;
             Cursor = Cursors.WaitCursor;
             try
             {
@@ -1001,8 +1147,9 @@ namespace C3DProTools
                     CivilDocument cdoc = CivilDocument.GetCivilDocument(db);
                     List<LabelInfo> labels = AnnotLabels.Scan(tr, db);
                     o.Only = choose(tr, labels);
-                    AnnotScene scene = AnnotScene.Read(tr, db, cdoc, o.AvoidModelText, o.Profile, o.AvoidXrefs);
                     double ppu = AnnotLabels.PaperPerUnit(db);
+                    if (!checkOnly) removed = RemoveRunLabels(tr, cdoc, sheets, labels, o, ppu, report);
+                    AnnotScene scene = AnnotScene.Read(tr, db, cdoc, o.AvoidModelText, o.Profile);
                     HashSet<ObjectId> handled = new HashSet<ObjectId>();
                     int done = 0;
                     foreach (SheetInfo s in sheets)
@@ -1011,10 +1158,31 @@ namespace C3DProTools
                         _lblStatus.Refresh();
                         report.Add(AnnotArranger.Arrange(tr, s, labels, scene, o, handled, checkOnly, ppu));
                     }
-                    if (!checkOnly && _s.MaskArranged)
+                    if (!checkOnly && !preview && _s.MaskArranged)
                         masked = AnnotLabels.SetMask(tr, report.Boxes.Keys.Where(id => o.Only == null || o.Only.Contains(id)).ToList(), true).styles;
-                    tr.Commit();
+                    // A preview (and a check) changes nothing: the transaction is not committed, so every label is as it was.
+                    if (!checkOnly && !preview) tr.Commit();
                 }
+                // The result drawn on the sheets (a check or preview), or the earlier drawing cleared once arranged for real.
+                // The arrangement is settled by now, so a failure here is reported as what it is, with the results still shown.
+                try
+                {
+                    using (_doc.LockDocument())
+                    using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+                    {
+                        if (checkOnly || preview) AnnotFrame.DrawResult(tr, _doc.Database, sheets, report.Shapes);
+                        else AnnotFrame.ClearCheck(tr, _doc.Database, sheets);
+                        tr.Commit();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    C3DProLogger.Warn("Arrange labels: the result could not be drawn on the sheets, or the earlier drawing cleared", ex);
+                    drawingProblem = (checkOnly || preview
+                        ? "The result could not be drawn on the sheets. No labels were changed; the counts and the problem list are still right.\n\n"
+                        : "The labels were arranged and saved, but the earlier check drawing could not be cleared. Use \"Clear the drawing\" to remove it.\n\n") + ex.Message;
+                }
+                ViewHelper.Regen(_doc);
             }
             catch (Exception ex) { MessageBox.Show(this, "Arranging failed: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             finally { Cursor = Cursors.Default; }
@@ -1027,10 +1195,163 @@ namespace C3DProTools
             string unmeasured = report.Unmeasured > 0 ? $" {report.Unmeasured} could not be measured (listed)." : "";
             SetStatus(checkOnly
                 ? $"Checked {report.Checked} label(s) on {sheets.Count} sheet(s): {report.Problems} with a problem.{unmeasured}"
-                : $"Arranged {report.Checked} label(s) on {sheets.Count} sheet(s): moved {report.Moved}, {report.Unresolved} without a clear place (listed).{unmeasured}" +
+                : preview
+                ? $"Preview of {report.Checked} label(s) on {sheets.Count} sheet(s), drawn on layer {AnnotFrame.CheckLayer}: {report.Moved} would move, {report.Unresolved} without a clear place (red, listed)" +
+                  (removed > 0 ? $", {removed} would be removed as not the labelled pipe of their parallel run (magenta)" : "") + $". Nothing was changed.{unmeasured}"
+                : $"Arranged {report.Checked} label(s) on {sheets.Count} sheet(s): moved {report.Moved}, {report.Unresolved} without a clear place (listed)" +
+                  (removed > 0 ? $"; {removed} label(s) removed from pipes that are not their parallel run's labelled one" : "") + $".{unmeasured}" +
                   (masked > 0 ? $" Text masking turned on in {masked} label style(s)." : ""));
             if (report.Checked == 0) SetStatus("No chosen labels are shown on those sheets.");
             if (_issues.Count > 0 && _nav.Selected != PArrange) _nav.Selected = PArrange;
+            if (drawingProblem != null) MessageBox.Show(this, drawingProblem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        /// <summary>
+        /// A preview of the ticked sheets that also writes each viewport's arrangement as a case file (paper millimetres, geometry
+        /// only: outlines of the labels and what they keep clear of), to replay that sheet in the tests.
+        /// </summary>
+        private void ExportCase()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0) return;
+            using (FolderBrowserDialog d = new FolderBrowserDialog { Description = "Folder for the arrangement case files", ShowNewFolderButton = true })
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                RunArrange(sheets, false, preview: true, exportFolder: d.SelectedPath);
+                SetStatus($"Arrangement case(s) written to {d.SelectedPath} (one per viewport, named after the sheet). Nothing in the drawing was changed.");
+            }
+        }
+
+        private List<SheetInfo> CheckedSheetsOrSay()
+        {
+            List<SheetInfo> sheets = Checked(_clbSheets);
+            if (sheets.Count == 0) MessageBox.Show(this, "Tick the sheets to check (Sheets).", Text);
+            return sheets;
+        }
+
+        private void ShowFrameCheck()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            List<string> viewports = new List<string>();
+            List<AnnotFrame.StyleSeen> styles;
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                using (_doc.LockDocument())
+                using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+                {
+                    Database db = _doc.Database;
+                    List<LabelInfo> labels = AnnotLabels.Scan(tr, db);
+                    AnnotScene scene = AnnotScene.Read(tr, db, CivilDocument.GetCivilDocument(db), true, false);
+                    styles = AnnotFrame.DrawCheck(tr, db, sheets, scene, labels, AnnotLabels.PaperPerUnit(db), viewports);
+                    tr.Commit();
+                }
+                ViewHelper.Regen(_doc);
+            }
+            catch (Exception ex) { MessageBox.Show(this, "The check could not be drawn: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            finally { Cursor = Cursors.Default; }
+            string table = styles.Count == 0 ? "(no pipe or structure labels in these viewports)" : string.Join("\n", styles.Select(s =>
+                $"• {LabelSetItem.KindText(s.Kind)}: {s.Style} — {s.Count} label(s), {s.Dragged} dragged, orientation {(s.Orientation?.ToString() ?? "unknown")}" +
+                (s.Corrected > 0 ? $", {s.Corrected} turned upright (View orientation)" : "")));
+            SetStatus($"Drew the frame check on {sheets.Count} sheet(s); open a sheet to see it (layer {AnnotFrame.CheckLayer}, not plotted).");
+            MessageBox.Show(this, $"Drawn on layer {AnnotFrame.CheckLayer} (not plotted) on each ticked sheet. Open a sheet and compare: the cyan and magenta " +
+                                  "outlines should sit exactly on their labels, and the red axes should run along the sheet.\n\nViewports:\n" +
+                                  string.Join("\n", viewports.Select(x => "• " + x)) + "\n\nLabel styles on these sheets:\n" + table +
+                                  "\n\nRemove it with \"Clear it\".", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// Civil 3D's Reset Label for every pipe and structure label on the ticked sheets (plan and / or profile, as ticked under
+        /// Placement): each goes back where its style places it. Locked labels are left alone unless asked. One UNDO reverses it.
+        /// </summary>
+        private void ResetLabelsOnSheets()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            List<LabelInfo> onSheets;
+            using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
+                onSheets = AnnotLabels.OnSheets(AnnotLabels.Scan(tr, _doc.Database), sheets, _chkPlan.Checked, _chkProfile.Checked);
+            if (onSheets.Count == 0) { MessageBox.Show(this, "No pipe or structure labels are shown on those sheets (with the plan / profile choice under Placement).", Text); return; }
+            int lockedCount = onSheets.Count(l => l.Locked), dragged = onSheets.Count(l => l.Dragged);
+            bool includeLocked = false;
+            if (lockedCount > 0)
+            {
+                DialogResult answer = MessageBox.Show(this, $"{lockedCount} of these labels are locked (placed by hand). Reset those too?\n\nYes: reset them as well.  No: leave them.",
+                    Text, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (answer == DialogResult.Cancel) return;
+                includeLocked = answer == DialogResult.Yes;
+            }
+            if (MessageBox.Show(this, $"Reset {onSheets.Count - (includeLocked ? 0 : lockedCount)} label(s) on {sheets.Count} sheet(s) to where their styles place them? " +
+                                      $"{dragged} of them are dragged now and lose their leader and position. UNDO reverses it.", Text,
+                                      MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            (int reset, int locked, int failed) n;
+            using (_doc.LockDocument())
+            using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+            {
+                n = AnnotLabels.ResetLocations(tr, onSheets, includeLocked);
+                tr.Commit();
+            }
+            ViewHelper.Regen(_doc);
+            SetStatus($"Reset {n.reset} label(s) on {sheets.Count} sheet(s)" + (n.locked > 0 ? $"; {n.locked} locked label(s) left alone" : "") +
+                      (n.failed > 0 ? $"; {n.failed} could not be reset (see {C3DProLogger.LogPath})" : "") + ".");
+        }
+
+        private void ClearFrameCheck()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            int n;
+            using (_doc.LockDocument())
+            using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+            {
+                n = AnnotFrame.ClearCheck(tr, _doc.Database, sheets);
+                tr.Commit();
+            }
+            ViewHelper.Regen(_doc);
+            SetStatus($"Cleared the frame check from {sheets.Count} sheet(s) ({n} object(s)).");
+        }
+
+        private void FramesToModel()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            int n;
+            using (_doc.LockDocument())
+            using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+            {
+                n = AnnotFrame.FramesToModel(tr, _doc.Database, sheets);
+                tr.Commit();
+            }
+            ViewHelper.Regen(_doc);
+            SetStatus($"Drew {n} viewport frame(s) in model space on layer {AnnotFrame.FramesLayer} (not plotted), each named with its sheet; drawing a sheet again replaces its frame.");
+        }
+
+        /// <summary>
+        /// For the networks ticked "One label per parallel run": erases the plan pipe labels on the sheets of the pipes that do not
+        /// carry their run's labels, drawing each in the report (removed) first; they leave <paramref name="labels"/>.
+        /// </summary>
+        private int RemoveRunLabels(Transaction tr, CivilDocument cdoc, List<SheetInfo> sheets, List<LabelInfo> labels, ArrangeOptions o, double ppu, ArrangeReport report)
+        {
+            HashSet<string> nets = new HashSet<string>(_gridNets.Rows.Cast<DataGridViewRow>().Where(r => r.Cells["OnePerRun"].Value is true)
+                .Select(r => r.Cells["Network"].Value as string), StringComparer.OrdinalIgnoreCase);
+            if (nets.Count == 0) return 0;
+            List<LabelInfo> onSheets = AnnotLabels.OnSheets(labels, sheets, true, false).Where(l => !l.Locked && (o.Only == null || o.Only.Contains(l.Id))).ToList();
+            List<LabelInfo> drop = RunLabels.ToRemove(tr, cdoc, onSheets, nets, _s.RunGap);
+            foreach (LabelInfo l in drop)
+            {
+                if (!(tr.GetObject(l.Id, OpenMode.ForWrite) is Autodesk.Civil.DatabaseServices.Label label)) continue;
+                foreach (SheetInfo s in sheets)
+                    foreach (SheetViewport v in s.Viewports.Where(v => v.Sees(l.Anchor) || v.Sees(l.Location)))
+                    {
+                        LabelOutline lo = AnnotFrame.Outline(tr, label, v, ppu, null);
+                        if (lo != null) report.Shapes.Add(new ArrangeShape { SheetBlock = s.BlockId, Outline = lo.Hull, Anchor = lo.Anchor, End = lo.Dragged ? lo.Location : ((double, double)?)null, State = 3 });
+                    }
+                label.Erase();
+            }
+            HashSet<ObjectId> gone = new HashSet<ObjectId>(drop.Select(l => l.Id));
+            labels.RemoveAll(l => gone.Contains(l.Id));
+            return drop.Count;
         }
 
         private async void MaskSelected(bool mask)
@@ -1044,7 +1365,7 @@ namespace C3DProTools
                 n = AnnotLabels.SetMask(tr, ids, mask);
                 tr.Commit();
             }
-            _doc.Editor.Regen();
+            ViewHelper.Regen(_doc);
             if (n.styles + n.leaders == 0) SetStatus(mask ? "Nothing changed: the selection's labels are masked already (or it has no labels)." : "Nothing changed.");
             else SetStatus($"{(mask ? "Masked" : "Unmasked")} the text of {n.styles} label style(s) and {n.leaders} multileader(s).");
         }

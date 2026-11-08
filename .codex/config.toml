@@ -1,0 +1,10 @@
+[mcp_servers.graphify]
+command = "C:/Users/melga/.local/bin/graphify-mcp.exe"
+args = ["graphify-out/graph.json"]
+
+# Live Civil 3D session (C3DProTools.Bridge, loaded in Civil 3D). Codex is the reviewer/auditor:
+# use it to check findings against the real drawing, read-only unless the user says otherwise.
+[mcp_servers.c3d-bridge]
+url = "http://127.0.0.1:47321/mcp"
+startup_timeout_sec = 5
+tool_timeout_sec = 120

@@ -3,10 +3,14 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.DatabaseServices;
+using C3DProTools.Features.Networks.Application;
+using C3DProTools.Features.Networks.Civil3D;
+using C3DProTools.Features.Networks.Contracts;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 using ColumnStyle = System.Windows.Forms.ColumnStyle;
@@ -24,8 +28,8 @@ namespace C3DProTools
     /// </summary>
     internal sealed partial class FormNetworkEditor : Form
     {
-        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8;
-        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…" };
+        private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8, ARims = 9;
+        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…", "Run the checks…", "Set rims…" };
 
         private readonly NetworkEditorSettings _s = NetworkEditorSettings.Load();
         /// <summary>The chosen pipes and parts, and the reads made on them; the form shows and edits it.</summary>
@@ -48,6 +52,23 @@ namespace C3DProTools
         private readonly TextBox _txtEvery = ToolUi.Number(20), _txtPickTol = ToolUi.Number(1);
         private readonly CheckBox _chkSplitStructure = ToolUi.Check("Add a structure at every split point, connected to both pieces");
         private readonly PartChooser _splitPart = new PartChooser(DomainType.Structure);
+        /// <summary>The split operation: the form collects input and renders results; the workflow owns the drawing changes.</summary>
+        private readonly ISplitOperation _split = new SplitWorkflow(new SplitCivil3DAccess());
+        private bool _isSplitRunning;
+        private readonly Label _lblErrParts = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 3, 0, 2) };
+        private readonly Label _lblErrEvery = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 3, 0, 2) };
+        private readonly Label _lblErrPickTol = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 3, 0, 2) };
+        private readonly Label _lblErrPicks = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 3, 0, 2) };
+        private readonly Label _lblErrStructure = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 4, 0, 2) };
+        private readonly Label _lblErrGeneral = new Label { AutoSize = true, ForeColor = StyleUi.Danger, Font = StyleUi.Small, Visible = false, Margin = new Padding(0, 4, 0, 2) };
+        private readonly Panel _pnlSplitResult = new Panel { AutoSize = true, Dock = DockStyle.Top, Visible = false, Margin = new Padding(0, 0, 0, 10), Padding = new Padding(12, 10, 12, 10), BackColor = StyleUi.Panel };
+        private readonly Label _lblSplitResultTitle = new Label { AutoSize = true, Font = StyleUi.Bold, Margin = new Padding(0, 0, 0, 4) };
+        private readonly Label _lblSplitResultDetails = new Label { AutoSize = true, Font = StyleUi.Base, Margin = new Padding(0), Tag = "note" };
+        private Panel _hostSplit;
+        private TableLayoutPanel _cardSplit;
+        private TableLayoutPanel _cardSplitStructure;
+        private string _splitStatusText;
+        private Color? _splitStatusColor;
         // Parallel copies
         private readonly ComboBox _cbPreset = ToolUi.Combo();
         private readonly TextBox _txtH = new TextBox(), _txtV = new TextBox();
@@ -91,6 +112,11 @@ namespace C3DProTools
         private readonly ComboBox _cbSwapSet = ToolUi.Combo(260);
         private List<SwapGroup> _swapGroups = new List<SwapGroup>();
         /// <summary>Structures, fittings and appurtenances chosen as they are (pipes are in <see cref="_session.Pipes"/>).</summary>
+        // Rims to surface
+        private readonly Dictionary<string, ObjectId> _surfaces = new Dictionary<string, ObjectId>(StringComparer.OrdinalIgnoreCase);
+        private readonly ComboBox _cbRimSurface = ToolUi.Combo(280);
+        private readonly TextBox _txtRimAbove = ToolUi.Number(0, 70);
+        private readonly CheckBox _chkRimFollow = ToolUi.Check("Keep them on the surface when it changes (Civil 3D's Automatic Surface Adjustment)");
         // Pressure to gravity
         private readonly PartChooser _gPart = new PartChooser(DomainType.Pipe);
         private readonly TextBox _txtGNet = new TextBox { Width = 240 };
@@ -118,6 +144,7 @@ namespace C3DProTools
             _nav.Add("Swap parts", "Pipes, structures, fittings: many at once");
             _nav.Add("Pressure to gravity", "Gravity copies of pressure pipes");
             _nav.Add("Chambers and spans", "Pipe entry walls, chamber alignment, long spans");
+            _nav.Add("Rims to surface", "Set manhole rims on a surface");
             _pages.Add(BuildSplit());
             _pages.Add(BuildParallel());
             _pages.Add(BuildConduits());
@@ -127,6 +154,7 @@ namespace C3DProTools
             _pages.Add(BuildSwap());
             _pages.Add(BuildGravity());
             _pages.Add(BuildChecks());
+            _pages.Add(BuildRims());
             foreach (Control p in _pages) { p.Visible = false; _content.Controls.Add(p); }
 
             Controls.Add(_content);
@@ -142,6 +170,7 @@ namespace C3DProTools
             _nav.Selected = Math.Max(0, Math.Min(_pages.Count - 1, _s.Action));
             ShowAction();
             UpdatePipeSummary();
+            Shown += (s, e) => UpdateSplitWrapping();
             FormClosing += (s, e) => { SaveSettings(); _s.Width = ClientSize.Width; _s.Height = ClientSize.Height; _s.Save(); };
         }
 
@@ -169,7 +198,7 @@ namespace C3DProTools
             bar.Controls.Add(_cbNetwork);
             bar.Controls.Add(StyleUi.Secondary("Add", (s, e) => AddNetwork()));
             bar.Controls.Add(StyleUi.Secondary("Show", (s, e) => ShowPipes()));
-            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _session.Pipes.Clear(); _session.Parts.Clear(); UpdatePipeSummary(); }));
+            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _session.Pipes.Clear(); _session.Parts.Clear(); ClearSplitValidation(); UpdatePipeSummary(); }));
             bar.Controls.Add(_lblPipes);
             return bar;
         }
@@ -190,23 +219,92 @@ namespace C3DProTools
         private Control BuildSplit()
         {
             (Panel host, TableLayoutPanel stack) = ToolUi.Page();
+            _hostSplit = host;
             TableLayoutPanel card = ToolUi.Card("Where to split",
                 "Straight pipes keep their first piece; the others are copies with the same family, size, style and layer on the same 3D line, " +
                 "and the original end connection moves to the last piece. Curved pipes are broken by Civil 3D's own break.");
+            _cardSplit = card;
             _cbSplitMode.Items.AddRange(new object[] { "At points I pick on the pipes", "Into equal parts", "Every fixed length (from the start)" });
             ToolUi.Field(card, "Split", _cbSplitMode);
-            ToolUi.Field(card, "Parts", _numParts);
-            ToolUi.Field(card, "Every", ToolUi.WithUnit(_txtEvery, "m"));
-            ToolUi.Field(card, "Pick within", ToolUi.WithUnit(_txtPickTol, "m of a pipe"), _tips, "A picked point splits the nearest pipe when it lies within this distance of it.");
+
+            FlowLayoutPanel colParts = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+            colParts.Controls.Add(_numParts);
+            colParts.Controls.Add(_lblErrParts);
+            ToolUi.Field(card, "Parts", colParts);
+
+            FlowLayoutPanel colEvery = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+            colEvery.Controls.Add(ToolUi.WithUnit(_txtEvery, "m"));
+            colEvery.Controls.Add(_lblErrEvery);
+            ToolUi.Field(card, "Every", colEvery);
+
+            FlowLayoutPanel colPick = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+            colPick.Controls.Add(ToolUi.WithUnit(_txtPickTol, "m of a pipe"));
+            colPick.Controls.Add(_lblErrPickTol);
+            colPick.Controls.Add(_lblErrPicks);
+            ToolUi.Field(card, "Pick within", colPick, _tips, "A picked point splits the nearest pipe when it lies within this distance of it.");
+
+            ToolUi.Wide(card, _lblErrGeneral);
             ToolUi.Add(stack, card);
 
             TableLayoutPanel st = ToolUi.Card("Structures at the split points", "Leave this off for cable ducts that simply continue; turn it on to place manholes or pits there.");
+            _cardSplitStructure = st;
             ToolUi.Wide(st, _chkSplitStructure);
             ToolUi.Wide(st, _splitPart);
+            ToolUi.Wide(st, _lblErrStructure);
             ToolUi.Add(stack, st);
 
-            _cbSplitMode.SelectedIndexChanged += (s, e) => { _numParts.Enabled = _cbSplitMode.SelectedIndex == 1; _txtEvery.Enabled = _cbSplitMode.SelectedIndex == 2; _txtPickTol.Enabled = _cbSplitMode.SelectedIndex == 0; UpdatePipeSummary(); };
-            _chkSplitStructure.CheckedChanged += (s, e) => _splitPart.Enabled = _chkSplitStructure.Checked;
+            _pnlSplitResult.Paint += (s, e) => { using (Pen p = new Pen(StyleUi.Border)) e.Graphics.DrawRectangle(p, 0, 0, _pnlSplitResult.Width - 1, _pnlSplitResult.Height - 1); };
+            _lblSplitResultTitle.Dock = DockStyle.Top;
+            _lblSplitResultDetails.Dock = DockStyle.Top;
+            _pnlSplitResult.Controls.Add(_lblSplitResultDetails);
+            _pnlSplitResult.Controls.Add(_lblSplitResultTitle);
+            ToolUi.Add(stack, _pnlSplitResult);
+
+            void UpdateWrapping() => UpdateSplitWrapping();
+            host.Resize += (s, e) => UpdateWrapping();
+            card.Resize += (s, e) => UpdateWrapping();
+            st.Resize += (s, e) => UpdateWrapping();
+            _pnlSplitResult.Resize += (s, e) => UpdateWrapping();
+            UpdateSplitWrapping();
+
+            _cbSplitMode.SelectedIndexChanged += (s, e) =>
+            {
+                ClearSplitValidation();
+                _numParts.Enabled = _cbSplitMode.SelectedIndex == 1;
+                _txtEvery.Enabled = _cbSplitMode.SelectedIndex == 2;
+                _txtPickTol.Enabled = _cbSplitMode.SelectedIndex == 0;
+                UpdatePipeSummary();
+            };
+            _numParts.ValueChanged += (s, e) => { _lblErrParts.Visible = false; };
+            _txtEvery.TextChanged += (s, e) => { _lblErrEvery.Visible = false; };
+            _txtPickTol.TextChanged += (s, e) => { _lblErrPickTol.Visible = false; _lblErrPicks.Visible = false; };
+            _chkSplitStructure.CheckedChanged += (s, e) =>
+            {
+                _splitPart.Enabled = _chkSplitStructure.Checked;
+                _lblErrStructure.Visible = false;
+            };
+            _splitPart.Changed += (s, e) => { _lblErrStructure.Visible = false; };
             return host;
         }
 
@@ -292,6 +390,80 @@ namespace C3DProTools
         {
             _txtFitBoxL.Enabled = _txtFitBoxW.Enabled = _cbFitFace.SelectedIndex == 3;
             _parBoxRow.Enabled = _chkParFit.Checked && _cbParFace.SelectedIndex == 3;
+        }
+
+        private Control BuildRims()
+        {
+            (Panel host, TableLayoutPanel stack) = ToolUi.Page();
+            TableLayoutPanel card = ToolUi.Card("Set structure rims on a surface",
+                "Takes the structures at the ends of the chosen gravity pipes, and any structures selected directly. Every rim moves to the surface level at the " +
+                "structure's centre. Sumps and pipes stay exactly where they are. You review every structure before anything changes.");
+            ToolUi.Field(card, "Surface", _cbRimSurface);
+            ToolUi.Field(card, "Rim above surface", ToolUi.WithUnit(_txtRimAbove, "m"), _tips, "0 puts the rim on the surface; a negative value puts it below.");
+            ToolUi.Wide(card, _chkRimFollow);
+            ToolUi.Wide(card, ToolUi.Note("Left off, the rims are set once and stay there, and any of them on Automatic Surface Adjustment is taken off it. " +
+                                          "Turned on, their sumps are also changed to elevation control, so the sumps do not move with the surface."));
+            ToolUi.Add(stack, card);
+            return host;
+        }
+
+        private void RunRims()
+        {
+            if (!(_cbRimSurface.SelectedItem is string surfaceName) || !_surfaces.TryGetValue(surfaceName, out ObjectId surfaceId))
+            {
+                MessageBox.Show(this, _surfaces.Count == 0 ? "This drawing has no surfaces." : "Choose the surface.", Text);
+                return;
+            }
+            if (!ToolUi.TryNumber(_txtRimAbove, out double above)) { MessageBox.Show(this, "Enter the rim's height above the surface as a number (0 for on the surface).", Text); return; }
+            bool follow = _chkRimFollow.Checked;
+            Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
+            List<RimToSurface.Row> plan;
+            using (Transaction tr = acDoc.Database.TransactionManager.StartTransaction())
+            {
+                Autodesk.Civil.DatabaseServices.Surface surface = (Autodesk.Civil.DatabaseServices.Surface)tr.GetObject(surfaceId, OpenMode.ForRead);
+                plan = RimToSurface.Plan(tr, GravityPipes(), _session.Parts.Where(id => !id.IsErased), surface, above);
+                tr.Commit();
+            }
+            if (plan.Count == 0) { MessageBox.Show(this, "Choose some gravity pipes with structures at their ends, or select structures (at the top).", Text); return; }
+
+            string Level(double v) => double.IsNaN(v) ? "-" : v.ToString("0.000");
+            List<PreviewRow> rows = plan.Select(r =>
+            {
+                bool usable = !r.Reference && r.Check != RimCheck.OffSurface && r.Check != RimCheck.BelowSump && (r.Check != RimCheck.AlreadyMatches || follow);
+                string note = r.Reference ? "Data shortcut: change it in its source drawing"
+                    : r.Check == RimCheck.OffSurface ? "Outside the surface"
+                    : r.Check == RimCheck.BelowSump ? $"Would be at or under its sump ({Level(r.Sump)})"
+                    : r.Check == RimCheck.BelowPipe ? $"A pipe top ({Level(r.PipeTop)}) would stand above the rim; tick to set it anyway"
+                    : r.Check == RimCheck.AlreadyMatches ? (follow ? "On the surface; will be linked to it" : "Already on the surface")
+                    : "";
+                return new PreviewRow
+                {
+                    Tag = r,
+                    Enabled = usable,
+                    Checked = usable && r.Check != RimCheck.BelowPipe,
+                    Cells = new[] { r.Name, r.Network, r.Part, Level(r.Rim), Level(r.Ground), Level(r.NewRim),
+                        double.IsNaN(r.NewRim) ? "-" : (r.NewRim - r.Rim).ToString("+0.000;-0.000;0.000"), Level(r.Sump), note }
+                };
+            }).ToList();
+            if (!rows.Any(r => r.Enabled))
+            {
+                MessageBox.Show(this, $"None of the {plan.Count} structure(s) needs or can take a change: " +
+                    $"{plan.Count(r => r.Check == RimCheck.AlreadyMatches)} already on the surface, {plan.Count(r => r.Check == RimCheck.OffSurface)} outside it, " +
+                    $"{plan.Count(r => r.Check == RimCheck.BelowSump)} would be under the sump, {plan.Count(r => r.Reference)} from data shortcuts.", Text);
+                return;
+            }
+            string intro = $"Rims on \"{surfaceName}\"" + (Math.Abs(above) > 1e-9 ? $", {ToolUi.Format(above)} m above it" : "") + (follow ? ", staying linked to it" : ", set once") +
+                           ". Sumps and pipes stay where they are; greyed rows are left alone.";
+            if (!Confirm("Rims to surface", intro, new[] { "Structure", "Network", "Part", "Rim now", "Surface", "New rim", "Change (m)", "Sump", "Note" }, rows, "Set rims")) return;
+
+            List<RimToSurface.Row> chosen = rows.Select(r => (RimToSurface.Row)r.Tag).ToList();
+            RimToSurface.Outcome outcome = null;
+            NetworkEditOps.Counts c = Change((tr, ed) => (outcome = RimToSurface.Apply(tr, chosen, surfaceId, above, follow, ed)).Counts);
+            List<string> notes = new List<string>();
+            if (outcome.SumpControlChanged > 0) notes.Add($"{outcome.SumpControlChanged} sump(s) changed from depth to elevation control, so they stay at their level.");
+            if (outcome.Unlinked > 0) notes.Add($"{outcome.Unlinked} structure(s) taken off Automatic Surface Adjustment.");
+            if (outcome.NotAtTarget > 0) notes.Add($"{outcome.NotAtTarget} rim(s) did not end up at the level asked; see the command line.");
+            Report($"Set the rim of {c.Done} structure(s) on {surfaceName}.", c, string.Join("\n", notes));
         }
 
         private Control BuildFlow()
@@ -600,7 +772,10 @@ namespace C3DProTools
                     if (tr.GetObject(id, OpenMode.ForRead) is Network n) _networks[n.Name] = id;
                 foreach (ObjectId id in doc.GetPressurePipeNetworkIds())
                     if (tr.GetObject(id, OpenMode.ForRead) is PressurePipeNetwork n) _networks[n.Name + " [Pressure]"] = id;
+                foreach (ObjectId id in doc.GetSurfaceIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Surface sf) _surfaces[sf.Name] = id;
             }
+            foreach (string n in _surfaces.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)) _cbRimSurface.Items.Add(n);
             foreach (string n in _networks.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)) _cbNetwork.Items.Add(n);
             if (_cbNetwork.Items.Count > 0) _cbNetwork.SelectedIndex = 0;
         }
@@ -664,6 +839,10 @@ namespace C3DProTools
             UpdateBoxFields();
             _rbFlowVerify.Checked = _s.FlowVerify;
             _rbFlowAll.Checked = !_s.FlowVerify;
+            int rimSurface = _s.RimSurface == null ? -1 : _cbRimSurface.Items.Cast<string>().ToList().FindIndex(n => n.Equals(_s.RimSurface, StringComparison.OrdinalIgnoreCase));
+            if (_cbRimSurface.Items.Count > 0) _cbRimSurface.SelectedIndex = Math.Max(0, rimSurface);
+            _txtRimAbove.Text = ToolUi.Format(_s.RimAboveSurface);
+            _chkRimFollow.Checked = _s.RimFollow;
             _txtGNet.Text = _s.GravityNetworkName;
             _gPart.SetContext(ObjectId.Null, _s.GravityPartsList, _s.GravityFamily, _s.GravitySize);
             _chkSwapStructures.Checked = _s.SwapStructures;
@@ -725,6 +904,9 @@ namespace C3DProTools
             _s.SwapStructures = _chkSwapStructures.Checked;
             _s.SwapFittings = _chkSwapFittings.Checked;
             _s.SwapHoldCentre = _rbSwapCentre.Checked;
+            if (_cbRimSurface.SelectedItem is string rimSurface) _s.RimSurface = rimSurface;
+            if (ToolUi.TryNumber(_txtRimAbove, out double rimAbove)) _s.RimAboveSurface = rimAbove;
+            _s.RimFollow = _chkRimFollow.Checked;
             _s.GravityNetworkName = _txtGNet.Text;
             _s.GravityPartsList = _gPart.ListName;
             _s.GravityFamily = _gPart.FamilyName;
@@ -829,14 +1011,23 @@ namespace C3DProTools
             UpdatePartContexts();
             (int g, int p) = _session.CountPipes();
             _lblPipes.Text = (_session.Pipes.Count == 0 ? "No pipes chosen yet." : $"{g} gravity and {p} pressure pipe(s) chosen.") +
-                             (_session.Parts.Count > 0 ? $" Also {_session.Parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts)." : "");
+                             (_session.Parts.Count > 0 ? $" Also {_session.Parts.Count} structure(s), fitting(s) or appurtenance(s) (used by Swap parts and Rims to surface)." : "");
             if (_nav.Selected == ASwap) RefreshSwap();
             RefreshConduitSection();
             int a = _nav.Selected;
+            if (a == ASplit && _splitStatusText != null)
+            {
+                _lblStatus.Text = _splitStatusText;
+                _lblStatus.ForeColor = _splitStatusColor ?? StyleUi.Muted;
+                return;
+            }
+
+            _lblStatus.ForeColor = StyleUi.Muted;
             string usable = a == AGravity ? $"{p} pressure pipe(s) will be converted."
                 : a == AParallel ? $"{g + p} pipe(s) will be copied."
                 : a == AConduits ? ConduitStatus(g)
                 : a == ASwap ? "Rows with a target are swapped; the others are left as they are."
+                : a == ARims ? "The structures at the chosen gravity pipes' ends, and those selected directly, are listed before anything changes."
                 : a == ASplit && _cbSplitMode.SelectedIndex == 0 ? (g > 0 ? $"Points split the nearest of the {g} chosen gravity pipe(s)." : "With no pipes chosen, points split the nearest gravity pipe in the drawing.")
                 : $"{g} gravity pipe(s) will be used.";
             _lblStatus.Text = usable;
@@ -848,7 +1039,7 @@ namespace C3DProTools
             Hide();
             try
             {
-                PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect pipes (gravity or pressure); structures, fittings and appurtenances are taken for Swap parts: " });
+                PromptSelectionResult psr = acDoc.Editor.GetSelection(new PromptSelectionOptions { MessageForAdding = "\nSelect pipes (gravity or pressure); structures, fittings and appurtenances are taken too (Swap parts, Rims to surface): " });
                 if (psr.Status != PromptStatus.OK) return;
                 _session.Pipes.Clear();
                 _session.Parts.Clear();
@@ -860,7 +1051,7 @@ namespace C3DProTools
                         else if (obj is Structure || obj is PressureFitting || obj is PressureAppurtenance) _session.Parts.Add(id);
                     }
             }
-            finally { Show(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
         }
 
         private void SelectNetworks()
@@ -888,7 +1079,7 @@ namespace C3DProTools
                 }
                 acDoc.Editor.WriteMessage($"\n{count} network(s), {_session.Pipes.Count} pipe(s) chosen.");
             }
-            finally { Show(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
         }
 
         /// <summary>Start and end pipe pairs: each adds the connected route between them (the straightest one, as for cover).</summary>
@@ -928,7 +1119,7 @@ namespace C3DProTools
                 _session.Parts.Clear();
                 _session.Pipes.AddRange(chosen);
             }
-            finally { Show(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
         }
 
         private void AddNetwork()
@@ -1019,6 +1210,7 @@ namespace C3DProTools
                     case ASwap: RunSwap(); break;
                     case AGravity: RunGravity(); break;
                     case AChecks: RunChecks(); break;
+                    case ARims: RunRims(); break;
                 }
             }
             catch (System.Exception ex)
@@ -1047,7 +1239,7 @@ namespace C3DProTools
                 c = work(tr, acDoc.Editor);
                 tr.Commit();
             }
-            acDoc.Editor.Regen();
+            ViewHelper.Regen(acDoc);
             return c;
         }
 
@@ -1070,68 +1262,461 @@ namespace C3DProTools
             }
         }
 
+        private void ClearSplitValidation()
+        {
+            _lblErrParts.Text = ""; _lblErrParts.Visible = false;
+            _lblErrEvery.Text = ""; _lblErrEvery.Visible = false;
+            _lblErrPickTol.Text = ""; _lblErrPickTol.Visible = false;
+            _lblErrPicks.Text = ""; _lblErrPicks.Visible = false;
+            _lblErrStructure.Text = ""; _lblErrStructure.Visible = false;
+            _lblErrGeneral.Text = ""; _lblErrGeneral.Visible = false;
+            _pnlSplitResult.Visible = false;
+            _splitStatusText = null;
+            _splitStatusColor = null;
+        }
+
+        private void SetSplitStatus(string text, Color color)
+        {
+            _splitStatusText = text;
+            _splitStatusColor = color;
+            _lblStatus.Text = text;
+            _lblStatus.ForeColor = color;
+        }
+
+        private void UpdateSplitWrapping()
+        {
+            if (_hostSplit == null) return;
+            int hostWidth = _hostSplit.ClientSize.Width - _hostSplit.Padding.Horizontal;
+            if (hostWidth <= 0) return;
+
+            int cardWidth = _cardSplit != null && _cardSplit.ClientSize.Width > 0
+                ? _cardSplit.ClientSize.Width - _cardSplit.Padding.Horizontal
+                : hostWidth - 24;
+            cardWidth = Math.Max(120, cardWidth);
+
+            int stWidth = _cardSplitStructure != null && _cardSplitStructure.ClientSize.Width > 0
+                ? _cardSplitStructure.ClientSize.Width - _cardSplitStructure.Padding.Horizontal
+                : hostWidth - 24;
+            stWidth = Math.Max(120, stWidth);
+
+            int pnlWidth = _pnlSplitResult != null && _pnlSplitResult.ClientSize.Width > 0
+                ? _pnlSplitResult.ClientSize.Width - _pnlSplitResult.Padding.Horizontal - 4
+                : hostWidth - _pnlSplitResult.Padding.Horizontal - 4;
+            pnlWidth = Math.Max(120, pnlWidth);
+
+            _lblErrGeneral.MaximumSize = new Size(cardWidth, 0);
+            _lblErrStructure.MaximumSize = new Size(stWidth, 0);
+            _lblSplitResultTitle.MaximumSize = new Size(pnlWidth, 0);
+            _lblSplitResultDetails.MaximumSize = new Size(pnlWidth, 0);
+
+            int[] widths = _cardSplit?.GetColumnWidths();
+            int fieldWidth = widths != null && widths.Length >= 2 && widths[1] > 50
+                ? widths[1] - 12
+                : Math.Max(120, cardWidth - 120);
+
+            _lblErrParts.MaximumSize = new Size(fieldWidth, 0);
+            _lblErrEvery.MaximumSize = new Size(fieldWidth, 0);
+            _lblErrPickTol.MaximumSize = new Size(fieldWidth, 0);
+            _lblErrPicks.MaximumSize = new Size(fieldWidth, 0);
+        }
+
+        private void ShowSplitFieldIssues(IEnumerable<OperationIssue> issues)
+        {
+            if (issues == null) return;
+            UpdateSplitWrapping();
+            foreach (OperationIssue issue in issues)
+            {
+                if (string.Equals(issue.Field, nameof(SplitRequest.Parts), StringComparison.OrdinalIgnoreCase))
+                {
+                    _lblErrParts.Text = issue.Message;
+                    _lblErrParts.Visible = true;
+                }
+                else if (string.Equals(issue.Field, nameof(SplitRequest.Every), StringComparison.OrdinalIgnoreCase))
+                {
+                    _lblErrEvery.Text = issue.Message;
+                    _lblErrEvery.Visible = true;
+                }
+                else if (string.Equals(issue.Field, nameof(SplitRequest.PickTolerance), StringComparison.OrdinalIgnoreCase))
+                {
+                    _lblErrPickTol.Text = issue.Message;
+                    _lblErrPickTol.Visible = true;
+                }
+                else if (string.Equals(issue.Field, nameof(SplitRequest.Picks), StringComparison.OrdinalIgnoreCase))
+                {
+                    _lblErrPicks.Text = issue.Message;
+                    _lblErrPicks.Visible = true;
+                }
+                else if (string.Equals(issue.Field, nameof(SplitRequest.Structure), StringComparison.OrdinalIgnoreCase))
+                {
+                    _lblErrStructure.Text = issue.Message;
+                    _lblErrStructure.Visible = true;
+                }
+                else if (issue.Object == null && (string.Equals(issue.Field, nameof(SplitRequest.Pipes), StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(issue.Field, nameof(SplitRequest.Drawing), StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(issue.Field, nameof(SplitRequest.Mode), StringComparison.OrdinalIgnoreCase)
+                    || string.IsNullOrEmpty(issue.Field)))
+                {
+                    _lblErrGeneral.Text = issue.Message;
+                    _lblErrGeneral.Visible = true;
+                }
+            }
+        }
+
         private void RunSplit()
         {
-            Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
-            List<ObjectId> gravity = GravityPipes();
-            if (_chkSplitStructure.Checked && _splitPart.Pick == null) { MessageBox.Show(this, "Choose the structure for the split points (parts list, family, size).", Text); return; }
-            List<NetworkEditOps.SplitPlan> plans;
-            int missed = 0;
-            if (_cbSplitMode.SelectedIndex == 0)
+            if (_isSplitRunning) return;
+            _isSplitRunning = true;
+            if (_btnRun != null) _btnRun.Enabled = false;
+
+            try
             {
-                if (!ToolUi.TryNumber(_txtPickTol, out double tol) || tol <= 0) { MessageBox.Show(this, "Enter a positive pick distance.", Text); return; }
-                List<ObjectId> candidates = gravity;
-                if (candidates.Count == 0)
-                    using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                        foreach (ObjectId netId in CivilApplication.ActiveDocument.GetPipeNetworkIds())
-                            if (tr.GetObject(netId, OpenMode.ForRead) is Network n) candidates.AddRange(n.GetPipeIds().Cast<ObjectId>());
-                List<Point3d> picks = new List<Point3d>();
-                Hide();
-                try
+                ClearSplitValidation();
+                Document acDoc = AcadApp.DocumentManager.MdiActiveDocument;
+                if (acDoc == null)
                 {
-                    using (TransientMarkers markers = new TransientMarkers())
+                    _lblErrGeneral.Text = "No active document in Civil 3D.";
+                    _lblErrGeneral.Visible = true;
+                    UpdateSplitWrapping();
+                    SetSplitStatus("[Rejected] No active drawing.", StyleUi.Danger);
+                    MessageBox.Show(this, "Open a drawing in Civil 3D first.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                List<ObjectId> gravity = GravityPipes();
+                if (_chkSplitStructure.Checked && _splitPart.Pick == null)
+                {
+                    const string msg = "Choose the structure for the split points (parts list, family, size).";
+                    _lblErrStructure.Text = msg;
+                    _lblErrStructure.Visible = true;
+                    UpdateSplitWrapping();
+                    SetSplitStatus("[Validation] " + msg, StyleUi.Danger);
+                    MessageBox.Show(this, msg, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                SplitMode mode = (SplitMode)_cbSplitMode.SelectedIndex;
+                SplitRequest request = new SplitRequest
+                {
+                    Drawing = DrawingRefs3D.Identity(acDoc),
+                    Mode = mode,
+                    Pipes = gravity.Select(DrawingRefs3D.Ref).ToList(),
+                    Parts = (int)_numParts.Value,
+                    Structure = _chkSplitStructure.Checked ? SplitCivil3DAccess.ToChoice(_splitPart.Pick) : null
+                };
+
+                // Quick feedback here; the workflow validates again and is authoritative.
+                if (mode == SplitMode.AtPoints)
+                {
+                    if (!ToolUi.TryNumber(_txtPickTol, out double tol) || tol <= 0 || tol > SplitLimits.MaxPickTolerance)
                     {
-                        while (true)
+                        string msg = $"Enter a pick distance above 0 and at most {SplitLimits.MaxPickTolerance:0} m.";
+                        _lblErrPickTol.Text = msg;
+                        _lblErrPickTol.Visible = true;
+                        UpdateSplitWrapping();
+                        SetSplitStatus("[Validation] " + msg, StyleUi.Danger);
+                        MessageBox.Show(this, msg, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    List<Point3d> picks = PickSplitPoints(acDoc);
+                    if (picks.Count == 0)
+                    {
+                        _lblErrPicks.Text = "Pick at least one point on a pipe.";
+                        _lblErrPicks.Visible = true;
+                        UpdateSplitWrapping();
+                        SetSplitStatus("[Cancelled] No split points were picked.", StyleUi.Muted);
+                        return;
+                    }
+                    request = request with { PickTolerance = tol, Picks = picks.Select(DrawingRefs3D.Point).ToList() };
+                }
+                else
+                {
+                    if (!NeedGravity(gravity))
+                    {
+                        _lblErrGeneral.Text = "Choose some gravity pipes first.";
+                        _lblErrGeneral.Visible = true;
+                        UpdateSplitWrapping();
+                        return;
+                    }
+                    if (mode == SplitMode.EqualParts)
+                    {
+                        if (_numParts.Value < SplitLimits.MinParts || _numParts.Value > SplitLimits.MaxParts)
                         {
-                            PromptPointOptions ppo = new PromptPointOptions($"\nPick split point {picks.Count + 1} on a pipe (Enter when done): ") { AllowNone = true };
-                            PromptPointResult r = acDoc.Editor.GetPoint(ppo);
-                            if (r.Status == PromptStatus.None) break;
-                            if (r.Status != PromptStatus.OK) { picks.Clear(); break; }
-                            picks.Add(r.Value);
-                            markers.AddRing(r.Value, 0.5, 1, 0.12);
-                            acDoc.Editor.UpdateScreen();
+                            string msg = $"Enter {SplitLimits.MinParts} to {SplitLimits.MaxParts} parts.";
+                            _lblErrParts.Text = msg;
+                            _lblErrParts.Visible = true;
+                            UpdateSplitWrapping();
+                            SetSplitStatus("[Validation] " + msg, StyleUi.Danger);
+                            MessageBox.Show(this, msg, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
                         }
                     }
+                    else if (mode == SplitMode.FixedLength)
+                    {
+                        if (!ToolUi.TryNumber(_txtEvery, out double every) || every < SplitLimits.MinPieceLength)
+                        {
+                            string msg = $"Enter a length of at least {SplitLimits.MinPieceLength} m.";
+                            _lblErrEvery.Text = msg;
+                            _lblErrEvery.Visible = true;
+                            UpdateSplitWrapping();
+                            SetSplitStatus("[Validation] " + msg, StyleUi.Danger);
+                            MessageBox.Show(this, msg, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        request = request with { Every = every };
+                    }
                 }
-                finally { Show(); }
-                if (picks.Count == 0) return;
-                using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                    plans = NetworkEditOps.PlanSplitAtPoints(tr, candidates, picks, tol, out missed);
-            }
-            else
-            {
-                if (!NeedGravity(gravity)) return;
-                double every = 0;
-                if (_cbSplitMode.SelectedIndex == 2 && (!ToolUi.TryNumber(_txtEvery, out every) || every <= 0)) { MessageBox.Show(this, "Enter a positive length.", Text); return; }
-                using (Transaction tr = acDoc.Database.TransactionManager.StartOpenCloseTransaction())
-                    plans = NetworkEditOps.PlanSplit(tr, gravity, (int)_numParts.Value, _cbSplitMode.SelectedIndex == 2 ? every : 0);
-            }
-            if (plans.Count == 0) { MessageBox.Show(this, missed > 0 ? $"None of the {missed} picked point(s) lies on a pipe (within the pick distance, and not at an end)." : "No pipe is long enough to split that way.", Text); return; }
 
-            List<PreviewRow> rows = plans.Select(p => new PreviewRow
-            {
-                Tag = p,
-                Cells = new[] { p.Name, p.Curved ? "Curved" : "Straight", ToolUi.Format(Math.Round(p.Length, 2)), (p.Points.Count + 1).ToString(),
-                    string.Join("; ", p.Points.Take(4).Select(pt => $"{pt.X:0.00}, {pt.Y:0.00}")) + (p.Points.Count > 4 ? " …" : "") }
-            }).ToList();
-            string intro = $"{plans.Count} pipe(s) will be split{(missed > 0 ? $"; {missed} picked point(s) were not on a pipe and are ignored" : "")}." +
-                           (_chkSplitStructure.Checked ? $" A {_splitPart.Pick?.Label} joins the pieces at every split point." : " The pieces are left touching, without structures.");
-            if (!Confirm("Split pipes", intro, new[] { "Pipe", "Type", "Length (m)", "Pieces", "Split points" }, rows, "Split")) return;
+                SplitPreview preview = _split.Preview(request, CancellationToken.None);
+                ShowSplitFieldIssues(preview.Issues);
 
-            List<NetworkEditOps.SplitPlan> chosen = rows.Select(r => (NetworkEditOps.SplitPlan)r.Tag).ToList();
-            NetworkEditOps.Counts c = Change((tr, ed) => NetworkEditOps.ApplySplit(tr, chosen, _chkSplitStructure.Checked ? _splitPart.Pick : null, ed));
-            string spanWarning = SpanWarning(chosen.Select(p => p.PipeId).Concat(c.NewIds));
-            Report($"Split {c.Done} pipe(s) into {c.Done + c.Created} pieces.", c, ((c.Structures > 0 ? $"Structures added: {c.Structures}\n" : "") + spanWarning).Trim());
+                if (preview.Status != OperationStatus.Succeeded)
+                {
+                    string statusTag = preview.Status switch
+                    {
+                        OperationStatus.Rejected => "[Rejected]",
+                        OperationStatus.NoChange => "[No change]",
+                        OperationStatus.Cancelled => "[Cancelled]",
+                        _ => $"[{preview.Status}]"
+                    };
+                    string issueMsg = IssueText(preview.Issues);
+                    SetSplitStatus($"{statusTag} {issueMsg}", preview.Status == OperationStatus.Rejected ? StyleUi.Danger : StyleUi.Muted);
+                    MessageBox.Show(this, issueMsg, $"{Text} - {statusTag.Trim('[', ']')}", MessageBoxButtons.OK,
+                        preview.Status == OperationStatus.Rejected ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                    return;
+                }
+
+                string unit = preview.Drawing?.Unit ?? "m";
+                List<PreviewRow> rows = preview.Items.Select(p => new PreviewRow
+                {
+                    Tag = p.Pipe,
+                    Checked = true,
+                    Enabled = true,
+                    Cells = new[]
+                    {
+                        p.PipeName,
+                        p.Curved ? "Curved" : "Straight",
+                        ToolUi.Format(Math.Round(p.Length, 2)),
+                        p.PieceCount.ToString(),
+                        string.Join("; ", p.Points.Take(4).Select(pt => $"{pt.X:0.00}, {pt.Y:0.00}")) + (p.Points.Count > 4 ? " …" : "")
+                    }
+                }).ToList();
+
+                HashSet<DrawingObjectRef> plannedPipes = new HashSet<DrawingObjectRef>(preview.Items.Select(p => p.Pipe));
+                List<OperationIssue> leftOutIssues = preview.Issues
+                    .Where(i => i.Object != null && !plannedPipes.Contains(i.Object.Value))
+                    .GroupBy(i => i.Object.Value)
+                    .Select(g => g.First())
+                    .ToList();
+
+                foreach (OperationIssue issue in leftOutIssues)
+                {
+                    DrawingObjectRef pipeRef = issue.Object.Value;
+                    string pipeName = $"Pipe ({pipeRef.Handle})";
+                    string reason = issue.Message;
+                    rows.Add(new PreviewRow
+                    {
+                        Tag = pipeRef,
+                        Checked = false,
+                        Enabled = false,
+                        Cells = new[]
+                        {
+                            pipeName,
+                            "Left out",
+                            "—",
+                            "None",
+                            reason
+                        }
+                    });
+                }
+
+                int leftOutCount = leftOutIssues.Count;
+                string intro = $"{preview.Items.Count} pipe(s) will be split" +
+                    (preview.MissedPicks > 0 ? $"; {preview.MissedPicks} picked point(s) were not on a pipe and are ignored" : "") +
+                    (leftOutCount > 0 ? $"; {leftOutCount} pipe(s) are left out (see greyed rows below)" : "") + "." +
+                    (request.Structure != null ? $" A {request.Structure.Label} joins the pieces at every split point." : " The pieces are left touching, without structures.");
+
+                if (!Confirm("Split pipes", intro, new[] { "Pipe", "Type", $"Length ({unit})", "Pieces", "Split points" }, rows, "Split")) return;
+
+                List<DrawingObjectRef> chosen = rows.Select(r => (DrawingObjectRef)r.Tag).ToList();
+                SplitResult result = _split.Apply(new SplitApplyRequest(preview, chosen), null, CancellationToken.None);
+                ViewHelper.Regen(acDoc);
+                IEnumerable<DrawingObjectRef> touched = result.Items.Where(i => i.Status == ItemStatus.Committed).SelectMany(i => new[] { i.Pipe }.Concat(i.NewPipes));
+                string spanWarning = SpanWarning(DrawingRefs3D.ObjectIds(acDoc.Database, touched));
+                ReportSplit(result, preview, spanWarning);
+            }
+            finally
+            {
+                _isSplitRunning = false;
+                if (_btnRun != null) _btnRun.Enabled = true;
+            }
+        }
+
+        /// <summary>Points picked on the pipes (the form hides while picking); empty when cancelled or none picked.</summary>
+        private List<Point3d> PickSplitPoints(Document acDoc)
+        {
+            List<Point3d> picks = new List<Point3d>();
+            Hide();
+            try
+            {
+                using (TransientMarkers markers = new TransientMarkers())
+                {
+                    while (true)
+                    {
+                        PromptPointOptions ppo = new PromptPointOptions($"\nPick split point {picks.Count + 1} on a pipe (Enter when done): ") { AllowNone = true };
+                        PromptPointResult r = acDoc.Editor.GetPoint(ppo);
+                        if (r.Status == PromptStatus.None) break;
+                        if (r.Status != PromptStatus.OK) { picks.Clear(); break; }
+                        picks.Add(r.Value);
+                        markers.AddRing(r.Value, 0.5, 1, 0.12);
+                        acDoc.Editor.UpdateScreen();
+                    }
+                }
+            }
+            finally { Show(); }
+            return picks;
+        }
+
+        /// <summary>Shows what the split did: committed counts only, then each pipe not split and why, then notes.</summary>
+        private void ReportSplit(SplitResult r, SplitPreview preview, string spanWarning)
+        {
+            (string statusTitle, string what, Color statusColor, MessageBoxIcon icon) = r.Status switch
+            {
+                OperationStatus.Succeeded => (
+                    "Success",
+                    $"Successfully split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces.",
+                    Color.FromArgb(21, 128, 61),
+                    MessageBoxIcon.Information),
+                OperationStatus.PartiallySucceeded => (
+                    "Partial Success",
+                    $"Partially succeeded: split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces; {r.Items.Count - r.PipesSplit} pipe(s) were not split.",
+                    Color.FromArgb(180, 83, 9),
+                    MessageBoxIcon.Warning),
+                OperationStatus.RolledBack => (
+                    "Rolled Back",
+                    "Rolled back: all split operations failed and were undone. The drawing was restored to its original state.",
+                    Color.FromArgb(185, 28, 28),
+                    MessageBoxIcon.Warning),
+                OperationStatus.Rejected => (
+                    "Rejected",
+                    "Rejected: nothing was split. The request was invalid or the drawing did not match.",
+                    Color.FromArgb(190, 18, 60),
+                    MessageBoxIcon.Warning),
+                OperationStatus.NoChange => (
+                    "No Change",
+                    "No change: nothing to split.",
+                    StyleUi.Muted,
+                    MessageBoxIcon.Information),
+                OperationStatus.Cancelled => (
+                    "Cancelled",
+                    $"Cancelled: operation stopped between pipes. {r.PipesSplit} pipe(s) were committed before cancellation.",
+                    StyleUi.Muted,
+                    MessageBoxIcon.Information),
+                OperationStatus.OutcomeUnknown or _ => (
+                    "Outcome Unknown",
+                    "Outcome unknown: work started but the drawing's final state could not be verified. Inspect the drawing before retrying; do not retry automatically.",
+                    StyleUi.Danger,
+                    MessageBoxIcon.Error)
+            };
+
+            List<string> sections = new List<string>();
+
+            // Committed counts
+            if (r.StructuresAdded > 0)
+                sections.Add($"Structures added: {r.StructuresAdded}");
+
+            // Item-level statuses and issues
+            List<string> itemNotes = new List<string>();
+            foreach (SplitItemOutcome item in r.Items)
+            {
+                if (item.Status == ItemStatus.Committed)
+                {
+                    if (item.Issue != null)
+                        itemNotes.Add($"• {item.PipeName}: committed ({item.Issue.Message})");
+                }
+                else
+                {
+                    string statusLabel = item.Status switch
+                    {
+                        ItemStatus.RolledBack => "[Rolled back]",
+                        ItemStatus.Rejected => "[Rejected]",
+                        ItemStatus.NotAttempted => "[Not attempted]",
+                        ItemStatus.OutcomeUnknown => "[Outcome unknown]",
+                        _ => $"[{item.Status}]"
+                    };
+                    string detail = item.Issue != null ? item.Issue.Message : "Failed";
+                    itemNotes.Add($"• {statusLabel} {item.PipeName}: {detail}");
+                }
+            }
+            if (itemNotes.Count > 0)
+            {
+                int maxShow = 10;
+                sections.Add("Item details:\n" + string.Join("\n", itemNotes.Take(maxShow)) +
+                    (itemNotes.Count > maxShow ? $"\n• …and {itemNotes.Count - maxShow} more (see command line)." : ""));
+            }
+
+            // Preview warnings that apply
+            List<string> previewWarnings = preview?.Issues
+                .Where(i => i.Severity == IssueSeverity.Warning)
+                .Select(i => "• " + i.Message)
+                .Distinct()
+                .ToList() ?? new List<string>();
+            if (previewWarnings.Count > 0)
+            {
+                sections.Add("Preview notes:\n" + string.Join("\n", previewWarnings.Take(10)));
+            }
+
+            // Operation-level issues: parts list changes
+            List<string> partsListChanges = r.Issues
+                .Where(i => i.Code == SplitIssueCodes.PartsListChanged)
+                .Select(i => "• " + i.Message)
+                .ToList();
+            if (partsListChanges.Count > 0)
+            {
+                sections.Add("Parts lists:\n" + string.Join("\n", partsListChanges));
+            }
+
+            // Other operation-level issues
+            List<string> opIssues = r.Issues
+                .Where(i => i.Code != SplitIssueCodes.PartsListChanged)
+                .Select(i => "• " + i.Message)
+                .ToList();
+            if (opIssues.Count > 0)
+            {
+                sections.Add(string.Join("\n", opIssues));
+            }
+
+            // Span warning
+            if (!string.IsNullOrWhiteSpace(spanWarning))
+                sections.Add(spanWarning.Trim());
+
+            // Reversibility note
+            if (r.PipesSplit > 0)
+                sections.Add("UNDO reverses the whole change.");
+
+            // Update footer status label
+            SetSplitStatus($"[{statusTitle}] {what}", statusColor);
+
+            // Update split-page result card
+            _lblSplitResultTitle.Text = statusTitle.ToUpperInvariant();
+            _lblSplitResultTitle.ForeColor = statusColor;
+            _lblSplitResultDetails.Text = what + (sections.Count > 0 ? "\n\n" + string.Join("\n\n", sections) : "");
+            UpdateSplitWrapping();
+            _pnlSplitResult.Visible = true;
+
+            string dialogMessage = $"{statusTitle.ToUpperInvariant()}\n\n{what}" +
+                (sections.Count > 0 ? "\n\n" + string.Join("\n\n", sections) : "");
+
+            MessageBox.Show(this, dialogMessage.Trim(), $"{Text} - {statusTitle}", MessageBoxButtons.OK, icon);
+        }
+
+        private static string IssueText(IEnumerable<OperationIssue> issues)
+        {
+            if (issues == null) return "Nothing to split.";
+            List<string> lines = issues
+                .Select(i => (i.Severity == IssueSeverity.Error ? "• Error: " : i.Severity == IssueSeverity.Warning ? "• Warning: " : "• ") + i.Message)
+                .Distinct()
+                .ToList();
+            return lines.Count == 0 ? "Nothing to split." : string.Join("\n", lines);
         }
 
         private void RunParallel()
@@ -1230,7 +1815,7 @@ namespace C3DProTools
                 drawn = NetworkEditOps.DrawFitOutlines(tr, acDoc.Database, structures, face, boxL, boxW, FitOutlineLayer);
                 tr.Commit();
             }
-            acDoc.Editor.Regen();
+            ViewHelper.Regen(acDoc);
             _lblStatus.Text = $"Drew {drawn} outline(s) on layer {FitOutlineLayer}.";
             MessageBox.Show(this, $"Drew {drawn} outline(s) of {what} on layer {FitOutlineLayer} (not plotted).\n\nCheck them against the structures, " +
                                   "then erase them (e.g. LAYDEL on that layer) when done. UNDO also removes them.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1355,7 +1940,8 @@ namespace C3DProTools
                 "Merge pipes: joins straight pipes that continue each other into one.\n" +
                 "Swap parts: lists the chosen pipes, structures, fittings and appurtenances by their current part, across networks; give each row a " +
                 "target (a size, or the nearest inside size in a family) and swap them all at once. Targets can be saved as sets.\n" +
-                "Pressure to gravity: gravity copies of pressure pipes in a new network.\n\n" +
+                "Pressure to gravity: gravity copies of pressure pipes in a new network.\n" +
+                "Rims to surface: sets structure rims on a surface, once or linked to it; sumps and pipes stay where they are.\n\n" +
                 "Levels, cover and profiles are in the Profile & Cover Designer.",
                 "Network Editor - How it works", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }

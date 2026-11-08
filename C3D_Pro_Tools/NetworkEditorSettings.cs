@@ -111,6 +111,10 @@ namespace C3DProTools
         public double FitBoxWidth { get; set; } = 3.0;
         public bool FlowVerify { get; set; } = true;
 
+        public string RimSurface { get; set; }
+        public double RimAboveSurface { get; set; }
+        public bool RimFollow { get; set; }
+
         public string GravityPartsList { get; set; }
         public string GravityFamily { get; set; }
         public string GravitySize { get; set; }

@@ -505,6 +505,7 @@ namespace C3DProTools
         private void Run()
         {
             SaveSettings();
+            bool created = false;
             try
             {
                 Replan();
@@ -533,8 +534,9 @@ namespace C3DProTools
                 {
                     res = NetworkFromLines.Create(tr, CivilApplication.ActiveDocument, rows, main, o, acDoc.Editor);
                     tr.Commit();
+                    created = true;
                 }
-                acDoc.Editor.Regen();
+                ViewHelper.Regen(acDoc);
                 foreach (LineRow r in rows) _networkNames.Add(r.Network);
                 if (o.EraseSource) _rows.RemoveAll(r => r.SourceId.IsErased);
                 Replan();
@@ -559,7 +561,11 @@ namespace C3DProTools
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"The run stopped with an error and nothing was changed.\n\n{ex.GetType().Name}: {ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                C3DProLogger.Error(created ? "Network from lines: the pipes were created, then updating the window failed" : "Network from lines: the run failed", ex);
+                string what = created
+                    ? "The pipes were created and saved in the drawing (UNDO reverses them), but this window could not finish updating. Reopen it before another run."
+                    : "The run stopped with an error and nothing was changed.";
+                MessageBox.Show(this, $"{what}\n\n{ex.GetType().Name}: {ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

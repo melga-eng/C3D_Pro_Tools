@@ -625,7 +625,7 @@ namespace C3DProTools
                 }
             }
             if (manholeLog.Count > 0) ed.WriteMessage("\n[Parts lists] " + string.Join("\n[Parts lists] ", manholeLog));
-            ed.Regen();
+            ViewHelper.Regen(acDoc);
             FillJobs(grid, jobs);
 
             int profiles = 0;

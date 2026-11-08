@@ -7,6 +7,10 @@
         "graphify-out/graph.json"
       ],
       "env": {}
+    },
+    "c3d-bridge": {
+      "type": "http",
+      "url": "http://127.0.0.1:47321/mcp"
     }
   }
 }

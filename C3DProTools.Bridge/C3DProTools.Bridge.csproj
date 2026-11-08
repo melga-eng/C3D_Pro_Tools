@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- C3D Bridge: runs inside Civil 3D and exposes the open drawing to AI agents (Claude Code, Codex, Antigravity,
+	     VS Code) as an MCP server on http://127.0.0.1:47321/mcp. Separate from C3D_Pro_Tools.dll so it can be loaded,
+	     unloaded and left out of the installer independently. -->
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>C3DProTools.Bridge</RootNamespace>
+		<AssemblyName>C3DProTools.Bridge</AssemblyName>
+		<Version>0.1.0</Version>
+		<Product>C3D Pro Tools Bridge</Product>
+		<Company>Mohamed Elgarhy</Company>
+		<Authors>Mohamed Elgarhy</Authors>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<PlatformTarget>x64</PlatformTarget>
+		<NoWarn>MSB3277</NoWarn>
+		<!-- Roslyn's satellite resource folders are not needed inside Civil 3D. -->
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<AutoCAD2026Dir Condition=" '$(AutoCAD2026Dir)' == '' ">C:\Program Files\Autodesk\AutoCAD 2026\</AutoCAD2026Dir>
+		<AcadDir>$([MSBuild]::EnsureTrailingSlash('$(AutoCAD2026Dir)'))</AcadDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Compiles the agents' c3d_execute_csharp snippets. Loaded only when that tool is first used. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="acmgd">
+			<HintPath>$(AcadDir)acmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="acdbmgd">
+			<HintPath>$(AcadDir)acdbmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="accoremgd">
+			<HintPath>$(AcadDir)accoremgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AecBaseMgd">
+			<HintPath>$(AcadDir)Aca\AecBaseMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AeccDbMgd">
+			<HintPath>$(AcadDir)C3D\AeccDbMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+	</ItemGroup>
+</Project>

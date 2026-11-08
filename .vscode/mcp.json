@@ -1,0 +1,15 @@
+{
+  // MCP servers for VS Code's own agent mode (GitHub Copilot Chat). Claude Code and Codex read
+  // .mcp.json and .codex/config.toml instead, in VS Code or out of it.
+  "servers": {
+    "c3d-bridge": {
+      "type": "http",
+      "url": "http://127.0.0.1:47321/mcp"
+    },
+    "graphify": {
+      "type": "stdio",
+      "command": "C:/Users/melga/.local/bin/graphify-mcp.exe",
+      "args": ["graphify-out/graph.json"]
+    }
+  }
+}

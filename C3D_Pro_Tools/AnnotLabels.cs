@@ -53,6 +53,38 @@ namespace C3DProTools
 
     internal enum ExistingLabels { AddMissing, SkipLabelled, Replace }
 
+    /// <summary>
+    /// Breaks an entity apart in memory (nothing in the drawing changes), going into nested blocks. Every piece and collection
+    /// is freed when the walk ends, whatever happens during it, so a visitor must not keep a piece.
+    /// </summary>
+    internal static class ExplodedPieces
+    {
+        /// <param name="blockDepth">How many levels of blocks to go into; a block deeper than that is handed over as it is.</param>
+        public static void ForEach(Entity entity, int blockDepth, Action<DBObject> visit) => Walk(entity, 0, blockDepth, visit);
+
+        private static void Walk(Entity entity, int depth, int blockDepth, Action<DBObject> visit)
+        {
+            using (DBObjectCollection parts = new DBObjectCollection())
+            {
+                try { entity.Explode(parts); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                // Listed first, so the pieces not reached yet are freed too if a visit throws.
+                List<DBObject> pieces = parts.Cast<DBObject>().ToList();
+                try
+                {
+                    foreach (DBObject piece in pieces)
+                    {
+                        if (piece is BlockReference br && depth < blockDepth) Walk(br, depth + 1, blockDepth, visit);
+                        else visit(piece);
+                    }
+                }
+                finally
+                {
+                    foreach (DBObject piece in pieces) try { piece.Dispose(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
+                }
+            }
+        }
+    }
+
     /// <summary>Finding, measuring, locking and creating network labels.</summary>
     internal static class AnnotLabels
     {
@@ -117,26 +149,17 @@ namespace C3DProTools
             List<Point3d> pts = new List<Point3d>();
             double firstText = 0;
             textHeight = 0;
-            DBObjectCollection parts = new DBObjectCollection();
-            try { label.Explode(parts); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-            List<DBObject> toDispose = new List<DBObject>();
-            void Collect(DBObject o, int depth)
+            ExplodedPieces.ForEach(label, 3, o =>
             {
-                toDispose.Add(o);
                 switch (o)
                 {
-                    case BlockReference br when depth < 3:
-                        DBObjectCollection sub = new DBObjectCollection();
-                        try { br.Explode(sub); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                        foreach (DBObject s in sub) Collect(s, depth + 1);
-                        break;
                     case Leader _:
                     case MLeader _:
                         break;
                     case MText mt:
                         if (firstText == 0 && !string.IsNullOrWhiteSpace(mt.Text)) firstText = mt.TextHeight;
-                        try { foreach (Point3d p in mt.GetBoundingPoints()) pts.Add(p); }
-                        catch (Exception) { AddExtents(mt, pts); }
+                        List<Point3d> corners = MTextCorners(mt);
+                        if (corners.Count > 0) pts.AddRange(corners); else AddExtents(mt, pts);
                         break;
                     case Line l:
                         pts.Add(l.StartPoint); pts.Add(l.EndPoint);
@@ -148,9 +171,7 @@ namespace C3DProTools
                         AddExtents(e, pts);
                         break;
                 }
-            }
-            foreach (DBObject o in parts) Collect(o, 0);
-            foreach (DBObject o in toDispose) try { o.Dispose(); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
+            });
             textHeight = firstText;
             if (pts.Count >= 2) return pts;
             // Labels Civil 3D will not break apart (profile structure labels, for one): their extents, leader included.
@@ -257,6 +278,64 @@ namespace C3DProTools
                 if (any) changed++;
             }
             return (changed, leaders);
+        }
+
+        /// <summary>
+        /// The corners of an MText as written, turned with it: its bounding points, and the box of its actual width and height
+        /// round its insertion point (right- or centre-attached text often runs past the width it was given).
+        /// </summary>
+        public static List<Point3d> MTextCorners(MText mt)
+        {
+            List<Point3d> pts = new List<Point3d>();
+            try { pts.AddRange(mt.GetBoundingPoints().Cast<Point3d>()); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            try
+            {
+                double w = mt.ActualWidth, h = mt.ActualHeight;
+                if (w > 0 && h > 0)
+                {
+                    Vector3d x = mt.Direction.GetNormal(), y = mt.Normal.CrossProduct(x).GetNormal();
+                    string a = mt.Attachment.ToString();
+                    double x0 = a.EndsWith("Right") ? -w : a.EndsWith("Center") || a.EndsWith("Mid") ? -w / 2 : 0;
+                    double y0 = a.StartsWith("Top") ? -h : a.StartsWith("Middle") ? -h / 2 : 0;
+                    foreach ((double dx, double dy) in new[] { (x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h) })
+                        pts.Add(mt.Location + x * dx + y * dy);
+                }
+            }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            return pts;
+        }
+
+        /// <summary>The pipe and structure labels shown in the sheets' viewports (by their anchor or their text), plan and / or profile.</summary>
+        public static List<LabelInfo> OnSheets(IEnumerable<LabelInfo> labels, IEnumerable<SheetInfo> sheets, bool plan, bool profile)
+        {
+            List<SheetViewport> views = sheets.SelectMany(s => s.Viewports).ToList();
+            return labels.Where(l => (l.IsProfile ? profile : plan) && views.Any(v => v.Sees(l.Anchor) || v.Sees(l.Location))).ToList();
+        }
+
+        /// <summary>
+        /// Puts labels back where their style places them (Civil 3D's Reset Label, for many at once): dragged labels lose their
+        /// leader and offset. Locked labels are left alone unless <paramref name="includeLocked"/>. Returns how many were reset,
+        /// were locked, and failed.
+        /// </summary>
+        public static (int reset, int locked, int failed) ResetLocations(Transaction tr, IEnumerable<LabelInfo> labels, bool includeLocked)
+        {
+            int reset = 0, locked = 0, failed = 0;
+            foreach (LabelInfo l in labels)
+            {
+                if (l.Locked && !includeLocked) { locked++; continue; }
+                try
+                {
+                    if (!(tr.GetObject(l.Id, OpenMode.ForWrite) is CLabel label)) continue;
+                    label.ResetLocation();
+                    reset++;
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    C3DProLogger.Warn($"Reset labels: label {l.Id.Handle} could not be reset", ex);
+                }
+            }
+            return (reset, locked, failed);
         }
 
         public static void SetLocked(Transaction tr, Database db, IEnumerable<ObjectId> ids, bool locked)
