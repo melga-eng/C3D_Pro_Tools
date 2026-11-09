@@ -383,14 +383,48 @@ namespace C3DProTools.Features.Networks.Application
                     issues.Add(OperationIssue.Error(ConduitIssueCodes.ConduitTooShort, $"{enc.Read.Name}: conduit {c.Column}-{c.Row} would be shorter than {ConduitLimits.MinConduitLengthM} m after its ends are made; it is left out.", null, enc.Read.Encasement));
                     return new List<PlannedConduit>();
                 }
-                Point3 At(EndPoint p) => new Point3(s0.x + (e0.x - s0.x) * p.T, s0.y + (e0.y - s0.y) * p.T, p.Z);
-                list.Add(new PlannedConduit(c.Column, c.Row, c.AcrossM, c.UpM, At(start), At(end), 0, Math.Round((end.T - start.T) * L, 9)));
+                Point3 At(EndPoint p) => new Point3(p.X ?? s0.x + (e0.x - s0.x) * p.T, p.Y ?? s0.y + (e0.y - s0.y) * p.T, p.Z);
+                Point3 a = At(start), b = At(end);
+                list.Add(new PlannedConduit(c.Column, c.Row, c.AcrossM, c.UpM, a, b, 0, Math.Round(a.PlanDistanceTo(b), 9)));
             }
             return list;
         }
 
-        /// <summary>Where one conduit's end is made: parameter along the encasement (0 = start, 1 = end), level, or the problem that blocks it.</summary>
-        private readonly record struct EndPoint(double T, double Z, OperationIssue Problem = null);
+        /// <summary>
+        /// Where one conduit's end is made: parameter along the encasement (0 = start, 1 = end), level, or the problem that
+        /// blocks it. A mitred end also carries its plan point (<see cref="X"/>, <see cref="Y"/>), shared with its partner,
+        /// which may lie slightly off this conduit's own offset line; other ends lie on that line at <see cref="T"/>.
+        /// </summary>
+        private readonly record struct EndPoint(double T, double Z, OperationIssue Problem = null, double? X = null, double? Y = null);
+
+        /// <summary>
+        /// The plan point where one column's conduits of a paired joint meet. Both offset lines are taken through one common
+        /// joint point J, the midpoint of the two encasement ends (they may be up to the joint tolerance apart, so the drawn
+        /// ends would otherwise leave a gap), each along its own encasement's direction towards J and offset by the column's
+        /// distance. The mitre is where the two offset lines cross; for collinear (or practically collinear) encasements it is
+        /// the midpoint of the two offset points at J. Computed in a fixed order of the pair, so both sides get exactly the
+        /// same point and the conduits meet with no gap.
+        /// </summary>
+        private static (double x, double y) SharedMitre(Enc a, int aEnd, Enc b, int bEnd, double acrossRun)
+        {
+            if (string.CompareOrdinal(a.Read.Encasement.Handle, b.Read.Encasement.Handle) > 0) { (a, b) = (b, a); (aEnd, bEnd) = (bEnd, aEnd); }
+            Point3 aj = a.Point(aEnd), bj = b.Point(bEnd);
+            double jx = (aj.X + bj.X) / 2, jy = (aj.Y + bj.Y) / 2;
+            (double px, double py, double ux, double uy) Line(Enc e, int end)
+            {
+                Point3 far = e.Point(1 - end);
+                // The encasement's drawing direction, re-aimed at J.
+                double dx = end == 1 ? jx - far.X : far.X - jx, dy = end == 1 ? jy - far.Y : far.Y - jy, l = Math.Sqrt(dx * dx + dy * dy);
+                double ux = dx / l, uy = dy / l, h = e.Reversed ? -acrossRun : acrossRun;
+                return (jx + uy * h, jy - ux * h, ux, uy); // offset to the right of the drawing direction
+            }
+            var A = Line(a, aEnd);
+            var B = Line(b, bEnd);
+            double cross = A.ux * B.uy - A.uy * B.ux;
+            if (Math.Abs(cross) < 1e-9) return ((A.px + B.px) / 2, (A.py + B.py) / 2);
+            double u = ((B.px - A.px) * B.uy - (B.py - A.py) * B.ux) / cross;
+            return (A.px + A.ux * u, A.py + A.uy * u);
+        }
 
         private static EndPoint MakeEnd(Enc enc, int end, ConduitEndPlan plan, (double x, double y) s0, (double x, double y) e0, double L, double ux, double uy,
             SectionCentre c, ConduitSection section, ConduitRequest request, Func<double, double> grade)
@@ -401,22 +435,17 @@ namespace C3DProTools.Features.Networks.Application
             {
                 case ConduitEndKind.Joint when plan.Joint == JointTreatment.Mitre && enc.Neighbour[end] is Enc n:
                 {
-                    // The neighbour's line for the same column (its offset follows its own direction in the run).
                     EncasementSnapshot ns = n.Read.Snapshot;
                     double ndx = ns.End.X - ns.Start.X, ndy = ns.End.Y - ns.Start.Y, nl = Math.Sqrt(ndx * ndx + ndy * ndy);
                     if (nl < 1e-9) return new EndPoint(t0, grade(t0));
-                    double nux = ndx / nl, nuy = ndy / nl, hn = n.Reversed ? -c.AcrossM : c.AcrossM;
-                    double qx = ns.Start.X + nuy * hn, qy = ns.Start.Y - nux * hn;
-                    double cross = ux * nuy - uy * nux;
-                    double t = t0, tn;
-                    if (Math.Abs(cross) < 1e-9)
-                        tn = n.JointEndOf(enc); // collinear: the offset ends already meet
-                    else
-                    {
-                        t = ((qx - s0.x) * nuy - (qy - s0.y) * nux) / cross / L;
-                        double mx = s0.x + (e0.x - s0.x) * t, my = s0.y + (e0.y - s0.y) * t;
-                        tn = ((mx - qx) * nux + (my - qy) * nuy) / nl;
-                    }
+                    double nux = ndx / nl, nuy = ndy / nl;
+                    // One point for both conduits, collinear joints included (the two encasement ends may be up to the joint
+                    // tolerance apart): see SharedMitre. Each side then measures it along its own line.
+                    (double mx, double my) = SharedMitre(enc, end, n, (int)n.JointEndOf(enc), c.AcrossM);
+                    // Same formula as for the neighbour (from the encasement's own start), so both sides compute both levels alike.
+                    Point3 os = enc.Read.Snapshot.Start;
+                    double t = ((mx - os.X) * ux + (my - os.Y) * uy) / L;
+                    double tn = ((mx - ns.Start.X) * nux + (my - ns.Start.Y) * nuy) / nl;
                     // Both conduits end at one level: the mean of their own grades at the mitre. Each side computes the same
                     // mean from the same two values, so the ends meet in X, Y and Z. A row at another height on the other side
                     // (bottom-referenced in encasements of different heights), or grades too far apart, cannot meet: flagged.
@@ -428,7 +457,7 @@ namespace C3DProTools.Features.Networks.Application
                         return new EndPoint(t, own, OperationIssue.Error(ConduitIssueCodes.MitreLevelMismatch,
                             $"{enc.Read.Name}: at the mitre with {n.Read.Name} (its {endName}), conduit {c.Column}-{c.Row} is {Math.Round(Math.Abs(own - theirs) * 1000)} mm off its partner in level, more than the {Math.Round(2 * ConduitLimits.MitreLevelToleranceM * 1000)} mm a shared end can absorb. Check the two encasements' levels and placement there, or keep encasement ends at joints; it is left out.",
                             null, enc.Read.Encasement));
-                    return new EndPoint(t, (own + theirs) / 2);
+                    return new EndPoint(t, (own + theirs) / 2, X: mx, Y: my);
                 }
                 case ConduitEndKind.Structure when plan.Structure != null && plan.Treatment.HasValue:
                 {

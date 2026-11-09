@@ -146,6 +146,17 @@ MV inner-wall trimming needs verified inner dimensions for each MV manhole size 
 | High: mitred ends met in plan but could miss in elevation | Each paired joint is planned for both sides at once. Both conduits end at the **mean of their two grades** at the mitre point, so corresponding ends meet in X, Y and Z (tested on a sloped, reversed bend). If either side would move more than `MitreLevelToleranceM` (10 mm) from its own grade, the joint is flagged (`conduits.item.mitreLevel`, error) instead of stepping or bending the conduits. One cause is bottom-referenced rows in encasements of different heights. Keeping encasement ends at joints avoids it. |
 | Medium: a conduit missing the requested wall kept its end | `conduits.item.wallMissed` is an **error** that names the conduit (column-row). The user changes the layout or side shift, or chooses Keep encasement end for that end. |
 
+## Engine review 2: collinear joints
+
+The finding: a paired joint whose two encasement ends were up to the joint tolerance apart (e.g. 5 mm) kept separate ends when the banks were collinear. It was reported as mitred while the conduits had a gap.
+
+The fix: the mitre is computed once per pair, about a common joint point J (the midpoint of the two encasement ends), in a fixed order so both sides get exactly the same point. For a bend it is where the two offset lines through J cross. For collinear banks it is the midpoint of the two offset points at J. Mitred ends therefore always share one point in X, Y and Z. Regression tests:
+- collinear banks 5 mm apart along the line;
+- banks 5 mm apart sideways, with one reversed;
+- a 31° bend 5 mm apart (within 10 mm of the true mitre).
+
+The first fails on 391594d.
+
 ## Live pass (2026-11-09, `Test Copy.dwg`, a disposable copy of the ICT model)
 
 The engine build was loaded in isolation (installed plugin untouched). Test run: four "ICT 6x4 way" duct banks (IC-PIP-TDB-NCRD-1345, -1350, -53, -1346) between two rotated 4.6 × 2.3 manholes, ICT-STR-TMHC-2_216 at 300.6° and ICT-STR-TMHC-2_155 at 262.2°. Three of the four segments are reversed and two slope steeply (about 8% and 6.7%). Settings: template ICT-4C-6R, defaults (inner wall, no connection, mitre), part copied from a 100 mm HDPE pipe (OD 0.110, no family).

@@ -299,6 +299,53 @@ namespace C3DProTools.Tests
             }
         }
 
+        /// <summary>Every matching conduit pair of two planned banks meets at one point (XYZ) at their joint.</summary>
+        private static void AssertJointClosed(ConduitSourcePlan a, ConduitSourcePlan b, Func<PlannedConduit, Point3> aEnd, Func<PlannedConduit, Point3> bEnd)
+        {
+            Assert.True(a.CanApply && b.CanApply, string.Join(" | ", a.Issues.Concat(b.Issues).Select(i => i.Message)));
+            Assert.Equal(a.Conduits.Count, b.Conduits.Count);
+            foreach (PlannedConduit pa in a.Conduits)
+            {
+                PlannedConduit pb = b.Conduits.Single(p => p.Column == pa.Column && p.Row == pa.Row);
+                Assert.True(aEnd(pa).DistanceTo(bEnd(pb)) < 1e-9, $"conduit {pa.Column}-{pa.Row}: {aEnd(pa)} vs {bEnd(pb)}");
+            }
+        }
+
+        [Fact]
+        public void Collinear_banks_5mm_apart_share_one_endpoint()
+        {
+            // Paired (5 mm is within the 10 mm joint tolerance) and collinear: the conduits must not keep the 5 mm gap.
+            EncasementRead a = Enc("1A", new Point3(0, 0, 0), new Point3(10, 0, 0));
+            EncasementRead b = Enc("1B", new Point3(10.005, 0, 0), new Point3(20, 0, 0));
+            List<ConduitSourcePlan> items = Plan(Req("ICT-2C-1R", new[] { a, b }), new[] { a, b });
+            Assert.Equal(ConduitEndKind.Joint, items[0].EndEnd.Kind);
+            Assert.Equal(JointTreatment.Mitre, items[0].EndEnd.Joint);
+            AssertJointClosed(items[0], items[1], p => p.End, p => p.Start);
+            Assert.All(items[0].Conduits, p => Assert.Equal(10.0025, p.End.X, 9)); // the midpoint of the two ends
+
+            // Reversed, and 5 mm apart sideways instead of along.
+            EncasementRead c = Enc("1C", new Point3(20, 0.005, 0), new Point3(10, 0.005, 0));
+            List<ConduitSourcePlan> side = Plan(Req("ICT-2C-1R", new[] { a, c }), new[] { a, c });
+            Assert.True(side[1].Reversed);
+            AssertJointClosed(side[0], side[1], p => p.End, p => p.End);
+            // Column 1 stays on the run's left (north) on both sides of the joint.
+            Assert.True(side[0].Conduits.Single(p => p.Column == 1).End.Y > 0.07);
+        }
+
+        [Fact]
+        public void Bent_banks_5mm_apart_meet_near_the_true_mitre()
+        {
+            // A 31° bend whose two ends are 5 mm apart: one shared end, close to the mitre of a perfectly closed joint.
+            EncasementRead a = Enc("1A", new Point3(0, 0, 0), new Point3(10, 0, 0), w: 0.79, ht: 0.63);
+            EncasementRead b = Enc("1B", new Point3(20, 6, 0), new Point3(10.004, 0.003, 0), w: 0.79, ht: 0.63);
+            List<ConduitSourcePlan> items = Plan(Req("ICT-4C-3R", new[] { a, b }), new[] { a, b });
+            AssertJointClosed(items[0], items[1], p => p.End, p => p.End);
+            EncasementRead closed = Enc("1B", new Point3(20, 6, 0), new Point3(10, 0, 0), w: 0.79, ht: 0.63);
+            List<ConduitSourcePlan> exact = Plan(Req("ICT-4C-3R", new[] { a, closed }), new[] { a, closed });
+            foreach (PlannedConduit p in items[0].Conduits)
+                Assert.True(p.End.PlanDistanceTo(exact[0].Conduits.Single(q => q.Column == p.Column && q.Row == p.Row).End) < 0.01);
+        }
+
         [Fact]
         public void Mitre_that_cannot_meet_in_level_is_flagged()
         {
