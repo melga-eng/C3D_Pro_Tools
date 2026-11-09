@@ -138,6 +138,29 @@ Conduit contracts are in metres (fields end in `M`). Phase one accepts metre dra
 
 MV inner-wall trimming needs verified inner dimensions for each MV manhole size first.
 
+## Engine review 1: rules made strict
+
+| Finding | Rule now |
+|---|---|
+| High: a required connection could become optional (a copy-only part in another network) | `conduits.item.connectionImpossible` is an **error**, so the duct bank is blocked. The user changes the destination or part, or turns connection off for that end with an override. A connection is never dropped quietly. |
+| High: mitred ends met in plan but could miss in elevation | Each paired joint is planned for both sides at once. Both conduits end at the **mean of their two grades** at the mitre point, so corresponding ends meet in X, Y and Z (tested on a sloped, reversed bend). If either side would move more than `MitreLevelToleranceM` (10 mm) from its own grade, the joint is flagged (`conduits.item.mitreLevel`, error) instead of stepping or bending the conduits. One cause is bottom-referenced rows in encasements of different heights. Keeping encasement ends at joints avoids it. |
+| Medium: a conduit missing the requested wall kept its end | `conduits.item.wallMissed` is an **error** that names the conduit (column-row). The user changes the layout or side shift, or chooses Keep encasement end for that end. |
+
+## Live pass (2026-11-09, `Test Copy.dwg`, a disposable copy of the ICT model)
+
+The engine build was loaded in isolation (installed plugin untouched). Test run: four "ICT 6x4 way" duct banks (IC-PIP-TDB-NCRD-1345, -1350, -53, -1346) between two rotated 4.6 × 2.3 manholes, ICT-STR-TMHC-2_216 at 300.6° and ICT-STR-TMHC-2_155 at 262.2°. Three of the four segments are reversed and two slope steeply (about 8% and 6.7%). Settings: template ICT-4C-6R, defaults (inner wall, no connection, mitre), part copied from a 100 mm HDPE pipe (OD 0.110, no family).
+
+| Check | Result |
+|---|---|
+| Preview | Succeeded, 96 conduits, no issues. The run is oriented, the three reversed segments are recognised, and both manhole footprints come from the part size. |
+| Apply | Succeeded: 4 duct banks filled, 96 conduits, all registered members of their network, on the duct bank's layer, not connected. |
+| Rotated inner-wall trim | Every manhole-end conduit lies on the inner face (2.300 m along the manhole axis), with an error of 0.000 mm at both manholes. |
+| Sloped reversed run | At all 3 joints, the 24 matching conduit pairs meet in X, Y and Z with a 0.000 mm gap. |
+| One UNDO | The whole Apply was one undo step: one UNDO past the bridge's own snippet step removed all 96 conduits and the network was back to 6 pipes. |
+| Rollback after partial creation | A forced failure after a duct bank's 24 conduits were made: that bank was rolled back with nothing left, the next bank was kept (network 6 → 30), the result was PartiallySucceeded, and both incomplete-run warnings appeared. The test was undone afterwards. |
+
+Not tested live: MV inner-wall trimming (needs verified MV manhole inner sizes), curved encasements, connection on, a new destination network.
+
 ## Not in this proposal
 
 Engine (end fitting with arcs, mitre in either direction, endpoint index, footprint cache), Civil 3D adapter, application workflow, form and settings persistence, subduct modelling, reinforcement or civil section, burial depth. Parallel Copies keeps its current behaviour until phase two.

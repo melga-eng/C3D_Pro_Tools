@@ -24,6 +24,11 @@ namespace C3DProTools.Features.Networks.Contracts
         public const double JointToleranceM = 0.01;
         /// <summary>A part or encasement within this of a template's stated size matches it (m); beyond it the preview warns.</summary>
         public const double SizeMatchToleranceM = 0.002;
+        /// <summary>
+        /// At a mitred joint both conduits end at one common level (the mean of their two grades there). Each may move by at
+        /// most this from its own grade (m); beyond it the joint is flagged instead of stepping or bending the conduits.
+        /// </summary>
+        public const double MitreLevelToleranceM = 0.01;
     }
 
     /// <summary>Which end of an encasement pipe, in its own drawing direction.</summary>
@@ -99,7 +104,8 @@ namespace C3DProTools.Features.Networks.Contracts
         /// <summary>
         /// False by default: conduits are never connected to structures. True: every conduit end at a structure is connected
         /// to it, which then is required: a connection that fails rolls back that encasement's conduits. Possible only for
-        /// conduits in the structure's own network (see <see cref="ConduitDestination"/>); otherwise the preview warns.
+        /// conduits in the structure's own network (see <see cref="ConduitDestination"/>); otherwise the preview blocks that
+        /// encasement (<see cref="ConduitIssueCodes.ConnectionImpossible"/>) rather than dropping the connection.
         /// </summary>
         public bool ConnectToStructures { get; init; }
 

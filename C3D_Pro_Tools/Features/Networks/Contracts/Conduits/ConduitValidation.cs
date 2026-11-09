@@ -75,8 +75,10 @@ namespace C3DProTools.Features.Networks.Contracts
         public const string CurvedJointNotMitred = "conduits.item.curvedJointNotMitred";
         /// <summary>Info: more than two chosen encasements meet at one point; that joint is not mitred and each keeps its end.</summary>
         public const string JointNotPaired = "conduits.item.jointNotPaired";
-        /// <summary>Warning: a conduit's line misses the structure's face; that conduit keeps the encasement's end point.</summary>
+        /// <summary>Error: a conduit's line misses the structure's requested face (e.g. an outer column beside a narrow manhole); the encasement is blocked and the conduit named.</summary>
         public const string WallMissed = "conduits.item.wallMissed";
+        /// <summary>Error: at a mitred joint, corresponding conduits would meet in plan but not in level (different row heights, or grades too different to meet within the tolerance).</summary>
+        public const string MitreLevelMismatch = "conduits.item.mitreLevel";
         /// <summary>Error: segmented, flex or otherwise unsupported encasement pipe.</summary>
         public const string EncasementUnsupported = "conduits.item.unsupported";
         /// <summary>Error (or Warning when allowed): conduits cross the encasement's outside edge.</summary>
@@ -85,7 +87,7 @@ namespace C3DProTools.Features.Networks.Contracts
         public const string EnvelopeDiffers = "conduits.item.envelopeDiffers";
         /// <summary>Error: a conduit would be shorter than the minimum after end treatment.</summary>
         public const string ConduitTooShort = "conduits.item.tooShort";
-        /// <summary>Warning: the conduits will not be in the structure's network, so the asked connection cannot be made.</summary>
+        /// <summary>Error: the conduits will not be in the structure's network, so the required connection cannot be made; the encasement is blocked.</summary>
         public const string ConnectionImpossible = "conduits.item.connectionImpossible";
         public const string NothingToGenerate = "conduits.plan.nothing";
 
