@@ -29,7 +29,7 @@ namespace C3DProTools
     internal sealed partial class FormNetworkEditor : Form
     {
         private const int ASplit = 0, AParallel = 1, AConduits = 2, AFit = 3, AFlow = 4, AMerge = 5, ASwap = 6, AGravity = 7, AChecks = 8, ARims = 9;
-        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Create conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…", "Run the checks…", "Set rims…" };
+        private static readonly string[] RunText = { "Split pipes…", "Create copies…", "Generate conduits…", "Fit pipe ends…", "Change flow direction…", "Merge pipes…", "Swap parts…", "Convert to gravity…", "Run the checks…", "Set rims…" };
 
         private readonly NetworkEditorSettings _s = NetworkEditorSettings.Load();
         /// <summary>The chosen pipes and parts, and the reads made on them; the form shows and edits it.</summary>
@@ -137,7 +137,7 @@ namespace C3DProTools
             ReadDrawing();
             _nav.Add("Split pipes", "At points, in parts or every N m");
             _nav.Add("Parallel copies", "Copies at plan / vertical offsets");
-            _nav.Add("Duct bank conduits", "Conduit grid inside the encasement");
+            _nav.Add("Generate conduits", "Conduit grid inside the encasement");
             _nav.Add("Fit to structures", "Ends to walls, centres or a box of your size");
             _nav.Add("Flow direction", "Reverse pipes, or make runs consistent");
             _nav.Add("Merge pipes", "Join straight pipes end to end");
@@ -198,7 +198,7 @@ namespace C3DProTools
             bar.Controls.Add(_cbNetwork);
             bar.Controls.Add(StyleUi.Secondary("Add", (s, e) => AddNetwork()));
             bar.Controls.Add(StyleUi.Secondary("Show", (s, e) => ShowPipes()));
-            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _session.Pipes.Clear(); _session.Parts.Clear(); ClearSplitValidation(); UpdatePipeSummary(); }));
+            bar.Controls.Add(StyleUi.Secondary("Clear", (s, e) => { _session.Pipes.Clear(); _session.Parts.Clear(); ClearSplitValidation(); ClearConduitValidation(); UpdatePipeSummary(); }));
             bar.Controls.Add(_lblPipes);
             return bar;
         }
@@ -1021,6 +1021,12 @@ namespace C3DProTools
                 _lblStatus.ForeColor = _splitStatusColor ?? StyleUi.Muted;
                 return;
             }
+            if (a == AConduits && _conduitStatusText != null)
+            {
+                _lblStatus.Text = _conduitStatusText;
+                _lblStatus.ForeColor = _conduitStatusColor ?? StyleUi.Muted;
+                return;
+            }
 
             _lblStatus.ForeColor = StyleUi.Muted;
             string usable = a == AGravity ? $"{p} pressure pipe(s) will be converted."
@@ -1051,7 +1057,7 @@ namespace C3DProTools
                         else if (obj is Structure || obj is PressureFitting || obj is PressureAppurtenance) _session.Parts.Add(id);
                     }
             }
-            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); ClearConduitValidation(); UpdatePipeSummary(); }
         }
 
         private void SelectNetworks()
@@ -1079,7 +1085,7 @@ namespace C3DProTools
                 }
                 acDoc.Editor.WriteMessage($"\n{count} network(s), {_session.Pipes.Count} pipe(s) chosen.");
             }
-            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); ClearConduitValidation(); UpdatePipeSummary(); }
         }
 
         /// <summary>Start and end pipe pairs: each adds the connected route between them (the straightest one, as for cover).</summary>
@@ -1119,7 +1125,7 @@ namespace C3DProTools
                 _session.Parts.Clear();
                 _session.Pipes.AddRange(chosen);
             }
-            finally { Show(); ClearSplitValidation(); UpdatePipeSummary(); }
+            finally { Show(); ClearSplitValidation(); ClearConduitValidation(); UpdatePipeSummary(); }
         }
 
         private void AddNetwork()
