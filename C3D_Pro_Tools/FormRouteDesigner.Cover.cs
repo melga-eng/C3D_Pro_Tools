@@ -484,6 +484,19 @@ namespace C3DProTools
 
         private async void Preview(DataGridView grid)
         {
+            // async void: an exception escaping here is unhandled and brings up Civil 3D's crash dialog, so every failure is
+            // reported in a message instead (and logged).
+            try { await PreviewCore(grid); }
+            catch (System.Exception ex)
+            {
+                C3DProLogger.Warn("Cover Optimizer: the preview failed", ex);
+                SetStatus("The preview failed; see the message.");
+                MessageBox.Show(this, $"The preview could not be shown:\n{ex.Message}\n\nNothing was changed in the drawing.", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async System.Threading.Tasks.Task PreviewCore(DataGridView grid)
+        {
             CoverJob job = SelectedJob(grid);
             if (job == null) return;
             List<CoverJob> jobs = grid == _coverGrid ? _coverJobs : _drawJobs;
@@ -495,6 +508,13 @@ namespace C3DProTools
                 FillJobs(grid, jobs);
             }
             if (job.Route == null) { MessageBox.Show(this, job.Error ?? "The route could not be read.", Text); return; }
+            // Nothing to show: a new path with no layout (it has no current pipes), or a route whose reading stopped before its
+            // pipes were checked. The reason is given instead of an empty preview.
+            if (job.Options == null || (job.Current == null && job.Proposed == null))
+            {
+                MessageBox.Show(this, $"There is nothing to preview for {job.Name}:\n{job.Error ?? "no layout was found for it."}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
             string summary = $"{job.Name}: {job.Length:0.00} m" + (job.IsNew ? "" : $", {job.Route.Pipes.Count} pipe(s), {job.Route.Structures.Count} structure(s)") +
                              (job.Reversed ? ", stationed in the flow direction" : "") + (job.Route.Crossings.Count > 0 ? $", {job.Route.Crossings.Count} crossing pipe(s)" : "") + ".\n" +
