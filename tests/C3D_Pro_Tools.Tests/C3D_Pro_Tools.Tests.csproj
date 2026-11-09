@@ -9,6 +9,8 @@
 		<PlatformTarget>x64</PlatformTarget>
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
+		<!-- WinForms only for the preview form's offline regression test (FormCoverPreview); its implicit usings are removed below. -->
+		<UseWindowsForms>true</UseWindowsForms>
 		<!-- CS0649: some model fields are only written by the drawing side of the partial classes, which is not compiled here. -->
 		<NoWarn>$(NoWarn);CS0649</NoWarn>
 	</PropertyGroup>
@@ -30,6 +32,7 @@
 		<Compile Include="..\..\C3D_Pro_Tools\ArrangeCase.cs" Link="Engine\ArrangeCase.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\SheetRefs.cs" Link="Engine\SheetRefs.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\BatchTargets.cs" Link="Engine\BatchTargets.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\FormCoverPreview.cs" Link="Forms\FormCoverPreview.cs" />
 		<!-- Contracts: compiled here, where no Autodesk assembly is referenced, so an Autodesk dependency fails the build. -->
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Networks\Contracts\**\*.cs" Link="Contracts\Networks\%(RecursiveDir)%(Filename)%(Extension)" />
 		<!-- Application layer: also free of Autodesk types (it reaches the drawing only through ISplitDrawingAccess). -->
@@ -51,5 +54,7 @@
 
 	<ItemGroup>
 		<Using Include="Xunit" />
+		<Using Remove="System.Windows.Forms" />
+		<Using Remove="System.Drawing" />
 	</ItemGroup>
 </Project>

@@ -28,9 +28,10 @@ namespace C3DProTools
         {
             _route = route;
             _o = options;
-            _existing = existing;
-            _proposed = proposed;
-            _table = proposed ?? existing;
+            // Callers may have no rows on one side (or none at all); a missing list or row is shown as empty, never dereferenced.
+            _existing = existing?.FindAll(r => r?.Pipe != null);
+            _proposed = proposed?.FindAll(r => r?.Pipe != null);
+            _table = _proposed ?? _existing ?? new List<CoverRow>();
 
             ListView lvRows = new ListView { View = View.Details, FullRowSelect = true, Dock = DockStyle.Fill, HideSelection = false };
             lvRows.Columns.Add("#", 35);
@@ -125,7 +126,7 @@ namespace C3DProTools
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            if (_route.Records.Count == 0) return;
+            if (_route?.Records == null || _route.Records.Count == 0 || _o == null) return;
 
             // Everything is drawn at the cover reference level (e.g. pipe crown), so pipes compare directly with the limit lines.
             double yMin = double.MaxValue, yMax = double.MinValue;
@@ -197,7 +198,8 @@ namespace C3DProTools
             }
         }
 
-        private double Offset(ProfilePipe p) => CoverRoute.ReferenceOffset(_o.Reference, p.Source.InnerHeight, p.Source.OuterHeight);
+        // A proposed pipe with no source pipe to take its size from is drawn at its centreline.
+        private double Offset(ProfilePipe p) => p.Source == null ? 0 : CoverRoute.ReferenceOffset(_o.Reference, p.Source.InnerHeight, p.Source.OuterHeight);
 
         private void DrawLimitLine(Graphics g, Func<double, double, PointF> P, double cover, Color color)
         {
