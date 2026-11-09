@@ -509,9 +509,9 @@ namespace C3DProTools
             /// <summary>When both are positive, copies end at a box of this length × width on each structure instead of its own size.</summary>
             public double BoxLength, BoxWidth;
             /// <summary>Conduits: a copy is made at the source position too (the source is the encasement, not one of the pipes).</summary>
-            public bool IncludeSource;
+            public bool IncludeSource = false;
             /// <summary>Conduits: vertical offsets are measured up from the source pipe's outside bottom instead of its centreline.</summary>
-            public bool FromBottom;
+            public bool FromBottom = false;
             /// <summary>
             /// Straight pipes chosen together that meet end to end with no structure between them: their copies meet at the mitre
             /// of the two offset lines (one continuous offset run, no wedge or gap at the deflection).
