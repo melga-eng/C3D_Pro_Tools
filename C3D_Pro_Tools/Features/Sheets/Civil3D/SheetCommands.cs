@@ -106,7 +106,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 int sceneWarnings = scene.Issues.Count(i => i.Severity == IssueSeverity.Warning);
                 if (sceneWarnings > 0) b.AppendLine($"Reading the drawing gave {sceneWarnings} warning(s); run C3DProSceneReport for the list.");
                 Application.PlanLabelsPlan plan = Application.PlanLabelPlanner.Plan(scene, rules, layouts);
-                string digest = Application.PlanLabelPlanner.Digest(plan);
+                string digest = Application.PlanLabelPlanner.Digest(plan, scene, rules);
                 string previewKey = $"{identity.SessionKey}|{rules.Name}|{string.Join(",", layouts.Select(l => l.ToUpperInvariant()).OrderBy(l => l))}";
                 b.AppendLine($"Rule set \"{rules.Name}\" v{rules.Version}: {plan.Items.Count} sheet(s) to change, "
                     + $"{plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Add))} label(s) to add, {plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Remove))} to remove.");

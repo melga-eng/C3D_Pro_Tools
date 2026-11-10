@@ -263,17 +263,52 @@ namespace C3DProTools.Tests.Sheets
             Assert.NotEmpty(PlanLabelPlanner.Plan(onlyWarnings, Rules(Manholes("MH Name")), null).Items);
         }
 
+        private static string DigestOf(SheetScene scene, LabelRuleSet rules) => PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(scene, rules, null), scene, rules);
+
         [Fact]
         public void Digest_IsTheSameForTheSamePlan_AndChangesWithAnyChange()
         {
-            string a = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Name")), null));
-            string again = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Name")), null));
-            string otherStyle = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Data")), null));
-            string withRemoval = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(new[] { Tool("A22", "ict.plan.gone", "31", "SW-A", "MH Name", "31") }), Rules(Manholes("MH Name")), null));
-            Assert.Equal(a, again);
-            Assert.NotEqual(a, otherStyle);
-            Assert.NotEqual(a, withRemoval);
-            Assert.NotEqual(a, PlanLabelPlanner.Digest(new PlanLabelsPlan(null, null)));
+            string a = DigestOf(Scene(), Rules(Manholes("MH Name")));
+            Assert.Equal(a, DigestOf(Scene(), Rules(Manholes("MH Name"))));
+            Assert.NotEqual(a, DigestOf(Scene(), Rules(Manholes("MH Data"))));
+            Assert.NotEqual(a, DigestOf(Scene(new[] { Tool("A22", "ict.plan.gone", "31", "SW-A", "MH Name", "31") }), Rules(Manholes("MH Name"))));
+            Assert.NotEqual(a, PlanLabelPlanner.Digest(new PlanLabelsPlan(null, null), Scene(), Rules(Manholes("MH Name"))));
+        }
+
+        [Fact]
+        public void Digest_Changes_WhenAUsedStyleIsEditedUnderTheSameName()
+        {
+            SheetScene before = Scene();
+            SheetScene edited = before with { LabelStyles = before.LabelStyles.Select(s => s.Name == "MH Name" ? s with { Fingerprint = "f4-edited" } : s).ToList() };
+            SheetScene unusedEdited = before with { LabelStyles = before.LabelStyles.Select(s => s.Name == "Joint" ? s with { Fingerprint = "f1-edited" } : s).ToList() };
+            LabelRuleSet rules = Rules(Manholes("MH Name"));
+            Assert.Equal(PlanLabelPlanner.Plan(before, rules, null).Items.SelectMany(i => i.Changes).Count(),
+                PlanLabelPlanner.Plan(edited, rules, null).Items.SelectMany(i => i.Changes).Count());   // same changes…
+            Assert.NotEqual(DigestOf(before, rules), DigestOf(edited, rules));                         // …but a stale preview
+            Assert.Equal(DigestOf(before, rules), DigestOf(unusedEdited, rules));                      // a style the plan does not use
+        }
+
+        [Fact]
+        public void Digest_Changes_WhenALabelledPartMovesWithinItsSheet()
+        {
+            LabelRuleSet rules = Rules(Manholes("MH Name"));
+            SheetScene moved = Scene() with
+            {
+                Networks = Scene().Networks.Select(n => n with { Structures = n.Structures.Select(s => s.Ref.Handle == "31" ? s with { Insertion = new Point3(12, 55, 613) } : s).ToList() }).ToList()
+            };
+            Assert.Equal(PlanLabelPlanner.Plan(Scene(), rules, null).Items.SelectMany(i => i.Changes).Select(c => (c.Layout, c.SourceKey)),
+                PlanLabelPlanner.Plan(moved, rules, null).Items.SelectMany(i => i.Changes).Select(c => (c.Layout, c.SourceKey)));
+            Assert.NotEqual(DigestOf(Scene(), rules), DigestOf(moved, rules));
+        }
+
+        [Fact]
+        public void Digest_Changes_WithTheRulesOrAViewport_EvenWhenTheChangesDoNot()
+        {
+            LabelRuleSet rules = Rules(Manholes("MH Name"));
+            LabelRuleSet reprioritised = Rules(Manholes("MH Name") with { Priority = 9 });
+            Assert.NotEqual(DigestOf(Scene(), rules), DigestOf(Scene(), reprioritised));
+            SheetScene widened = Scene() with { Sheets = new[] { SheetA with { Viewports = new[] { Vp("A1", 0, 99) } }, SheetB, Profile } };
+            Assert.NotEqual(DigestOf(Scene(), rules), DigestOf(widened, rules));
         }
 
         // ---- Geometry ------------------------------------------------------------------------------------------------

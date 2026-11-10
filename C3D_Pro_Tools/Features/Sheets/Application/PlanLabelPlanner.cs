@@ -22,17 +22,56 @@ namespace C3DProTools.Features.Sheets.Application
     internal static class PlanLabelPlanner
     {
         /// <summary>
-        /// A digest of what a plan would write: every change with its sheet, rule, source, slot, kind, part, ratio and the label
-        /// it removes. Apply plans again and writes only when the new digest equals the one the user previewed, so a rule edit
-        /// or drawing change after the preview can never be written unseen.
+        /// A digest of everything the plan depends on (section 10, "Stale previews"). Apply plans again and writes only when the
+        /// new digest equals the one the user previewed, so nothing changed after the preview is ever written unseen:
+        /// <list type="bullet">
+        /// <item>the contract version and the rule set (every field of every rule)</item>
+        /// <item>every change: sheet, rule, source, slot, kind, part, ratio, the label it removes</item>
+        /// <item>the content fingerprint of every style a change uses (an incomplete one counts as "unknown", which still
+        /// changes if it becomes complete)</item>
+        /// <item>the geometry of every part a change labels, and the placement of every label it removes</item>
+        /// <item>the viewport outlines of every plan sheet (they decide which sheet owns a part)</item>
+        /// </list>
         /// </summary>
-        public static string Digest(PlanLabelsPlan plan)
+        public static string Digest(PlanLabelsPlan plan, SheetScene scene, LabelRuleSet rules)
         {
             System.Text.StringBuilder b = new System.Text.StringBuilder();
+            string R(double v) => v.ToString("R", CultureInfo.InvariantCulture);
+            void Field(params object[] values) => b.Append(string.Join("\u001F", values)).Append('\u001E');
+
+            Field("contract", SheetContract.Version);
+            Field("rules", rules?.Name, rules?.Version);
+            foreach (LabelRule r in rules?.Rules ?? Array.Empty<LabelRule>())
+                if (r != null)
+                    Field("rule", r.Id, r.View, r.Select?.Kind, r.Select?.NetworkPattern, r.Select?.TypeCodePattern, r.Select?.OtherNetworksOnly,
+                        string.Join("|", r.LabelStyles), r.At, r.Every, r.Leader, r.Side, r.Priority);
+
+            foreach (SheetSnapshot s in scene.Sheets.Where(s => s.Kind == SheetKind.Plan).OrderBy(s => s.Layout, StringComparer.OrdinalIgnoreCase))
+                foreach (ViewportSnapshot v in s.Viewports)
+                    Field("viewport", s.Layout, v.Ref.Handle, string.Join(";", v.ModelBoundary.Select(p => R(p.X) + "," + R(p.Y))));
+
+            Dictionary<string, ScenePipe> pipes = scene.Networks.SelectMany(n => n.Pipes).GroupBy(p => p.Ref.Handle).ToDictionary(g => g.Key, g => g.First());
+            Dictionary<string, SceneStructure> structures = scene.Networks.SelectMany(n => n.Structures).GroupBy(s => s.Ref.Handle).ToDictionary(g => g.Key, g => g.First());
+            Dictionary<string, LabelSnapshot> labels = scene.Labels.GroupBy(l => l.Ref.Handle).ToDictionary(g => g.Key, g => g.First());
+            HashSet<string> slots = new HashSet<string>(StringComparer.Ordinal);
             foreach (BuildItem item in plan.Items)
                 foreach (PlannedChange c in item.Changes)
-                    b.Append(string.Join("\u001F", item.ItemKey, c.ChangeId, c.Kind, c.Layout, c.RuleId, c.SourceKey, c.StyleSlot,
-                        c.Part?.Handle, c.Ratio?.ToString("R", CultureInfo.InvariantCulture), c.Existing?.Handle)).Append('\u001E');
+                {
+                    Field("change", item.ItemKey, c.ChangeId, c.Kind, c.Layout, c.RuleId, c.SourceKey, c.StyleSlot,
+                        c.Part?.Handle, c.Ratio.HasValue ? R(c.Ratio.Value) : "", c.Existing?.Handle);
+                    if (c.StyleSlot != null) slots.Add(c.StyleSlot);
+                    string part = c.Part?.Handle;
+                    if (part != null && pipes.TryGetValue(part, out ScenePipe p))
+                        Field("pipe", part, p.Name, p.Network, p.TypeCode, R(p.Start.X), R(p.Start.Y), R(p.Start.Z), R(p.End.X), R(p.End.Y), R(p.End.Z), R(p.OuterWidthM), R(p.OuterHeightM));
+                    else if (part != null && structures.TryGetValue(part, out SceneStructure st))
+                        Field("structure", part, st.Name, st.Network, st.TypeName, R(st.Insertion.X), R(st.Insertion.Y), R(st.Insertion.Z));
+                    if (c.Existing.HasValue && labels.TryGetValue(c.Existing.Value.Handle, out LabelSnapshot l))
+                        Field("label", l.Ref.Handle, l.Target.Handle, l.Current?.StyleName, l.Current?.Dragged, R(l.Current?.TextXM ?? 0), R(l.Current?.TextYM ?? 0), l.Tag?.Pin);
+                }
+            foreach (string slot in slots.OrderBy(s => s, StringComparer.Ordinal))
+                foreach (SceneLabelStyle st in scene.LabelStyles.Where(x => x.Name == slot).OrderBy(x => x.Kind))
+                    Field("style", st.Kind, st.Name, st.Ref.Handle, string.IsNullOrEmpty(st.Fingerprint) ? "unknown" : st.Fingerprint);
+
             using System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create();
             return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(b.ToString()))).ToLowerInvariant();
         }
