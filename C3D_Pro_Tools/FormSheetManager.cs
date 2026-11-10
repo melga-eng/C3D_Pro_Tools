@@ -168,7 +168,7 @@ namespace C3DProTools
             _lblDrawing.Text = Path.GetFileName(_doc.Name);
             FillAll();
             int parts = _sheets.Count(s => s.IsPart);
-            SetStatus($"{_sheets.Count} sheet(s): {parts} tile part(s) in {_sheets.Where(s => s.IsPart).Select(s => s.Tile).Distinct().Count()} tile(s); {_issues.Count} issue(s) found.");
+            SetStatus($"{_sheets.Count} sheet(s): {parts} tile part(s) in {_sheets.Where(s => s.IsPart).Select(s => s.Tile).Distinct().Count()} tile(s); {_issues.Count(i => !i.IsNote)} issue(s) found.");
         }
 
         private bool Ready()
@@ -334,7 +334,7 @@ namespace C3DProTools
         {
             _filling = true;
             _gridSheets.Rows.Clear();
-            Dictionary<string, int> issues = _issues.GroupBy(i => i.Layout).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, int> issues = _issues.Where(i => !i.IsNote).GroupBy(i => i.Layout).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
             foreach (SheetRecord s in _sheets)
             {
                 string scale = s.ViewportScale + (s.Attr(P.ScaleTag).Length > 0 && s.Attr(P.ScaleTag).Replace(" ", "") != s.ViewportScale ? $" ≠ {s.Attr(P.ScaleTag)}" : "");

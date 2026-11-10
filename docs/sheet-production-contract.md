@@ -102,6 +102,25 @@ scale on purpose, to fit the parts in it: sheet 102054's viewport is 1:564, turn
 - `feature/sheet-scene` changes Sheet Manager's "the sheet says X but its viewport is Y" check (`SheetManager.cs:801`) from a
   problem with an automatic fix to an Info note with no fix.
 
+**How the reader fills the scene (`SheetSceneCivil3D`).**
+- **Type code:** regular expressions tried on the pipe's description, then its layer; the first group is the code. The default is
+  `Type:\s*([A-Za-z0-9-]+)` (the ICT duct banks write "Type:IC-3B" in their description). The patterns are a setting, because
+  each network writes its type differently.
+- **Profiles:** layout profiles give the ends of every tangent plus 1 m samples along vertical curves, so grade breaks stay
+  exact vertices for the DIM engine. Surface profiles give 1 m samples. A station with no elevation ends a run.
+- **A view's own network** is the network with the longest pipes drawn in the view. Parts of other networks are crossings or
+  other structures.
+- **Structure faces** are the stations of the structure's plan box corners, projected on the alignment.
+- **Crossings** are found on each pipe's own sampled path: every change of side of the alignment, kept when the interpolated
+  point lies within 0.5 m of it. This does not use Parts to Profile's categories, which call a pipe "partial" when one sample is
+  near the alignment.
+- **A label's target** is its model part: a profile label's feature (a profile view part) leads to the model part.
+- **A label's sheet** is the first sheet (by tab order) whose viewport shows its text location.
+- **Phase 1 limits:** gravity networks only (no pressure networks), and the band set name is left empty.
+- An object that cannot be read is left out, with a Warning `sheets.scene.readFailed` naming it.
+- The read-only command `C3DProSceneReport` writes what the reader sees, and the style fingerprints, to
+  `%TEMP%\C3DProSceneReport.txt`.
+
 ## 3. Crossings (Claude, phase 1 reader)
 
 A limited reader that covers only what phase 1 needs. Full coordination analysis stays in roadmap phase 3. It reuses the Cover
@@ -310,6 +329,7 @@ A view of length L = E − S that is ≤ C is never split, even when it is short
   The first slot's offset is 0.
 - Every piece of a split view starts a new row. The view or piece after the last piece may share that row if it fits.
 - Rows fill sheets top to bottom. A new sheet starts after `RowsPerSheet` rows.
+- `PackedSheet.Index` counts from 1 across the plan; `PackedRow.Index` counts from 1 within its sheet; `PieceNo` counts from 1 within its view.
 
 Order of placement:
 - **Preserve** (the default) is next-fit: items in `Order`, then `Key` (ordinal). Each item goes in the current row if it fits,
@@ -647,9 +667,11 @@ contains:
   together with the text styles they reference.
 - Handle references are filed as handles, so a reference to a different object changes the hash. A change inside the
   referenced object changes only that object's own fingerprint.
-- `feature/sheet-scene` verifies live that editing a label style component (for example its text height) changes the
-  fingerprint. If some Civil 3D style does not file its components that way, the adapter adds those components' own objects
-  to the covered list.
+- **Checked live (2026-11-10, TEST DRAWING.dwg):** a label style files its own data only. Its text, line and block components are
+  separate objects it owns (owner = the style), so changing a component's text height left the style's own fingerprint
+  unchanged. The fingerprint therefore covers the style **and every object it owns**: the owned IDs the filer sees, followed to
+  six levels, plus each label style's components from `LabelStyle.GetComponents`. Whether that catches the edit is re-checked
+  live after the next install.
 
 **Postcondition (a second safety net).** Before an item commits, every label and DIM it created or moved is measured again:
 - each label's outline must match its planned box to 0.5 mm on paper
@@ -742,3 +764,14 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 1 | medium · Profile snapshots omit the geometry needed for DIM planning and stale detection | `SceneProfile.Runs` (station/elevation runs; gaps break runs) and `ProfileViewSnapshot.DrawnParts` as `ViewPart` (stations, and outside top and bottom in the view). Section 7 maps them to `DimInput`. Both are part of the scene, so the scene stamp covers them |
 | 2 | medium · Build-tag identity cannot tell several chosen styles apart | `BuildTag.StyleSlot`, and `IdentityKey` = rule + source + sheet + slot, used for duplicate tags (section 4, "Identity"). The table "When the user changes a rule's styles" defines reordered, added, removed, replaced and restyled. The acceptance check is now "one label per selected style" (section 5) |
 | 3 | low · The acceptance wording omits the pinned-label exception | Section 5: "…except pinned labels kept and reported as `sheets.label.orphanPinned`" |
+
+## Code review of `feature/sheet-scene`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | medium · Real crossings can be excluded by the detector's category | `FindCrossings` tests every pipe's path for changes of side, independently of `ProfilePartDetection`; a pipe can cross more than once |
+| 2 | medium · Profile-label targets are not resolved to model parts | `ModelTarget` turns a `ProfileViewPart` / `ProfileViewPressurePart` into its `ModelPartId`; labels with no target are left out |
+| 3 | medium · The mismatch fix still writes profile-sheet scale notes | The title-block/scale-note fix is offered for tile parts only, and `SyncNoteToTitle` refuses other sheets itself. The note's first scale only is replaced, so "H 1:500 V 1:50" keeps its V |
+| 4 | low · The nominal-scale mismatch remains an ordinary issue | `SheetIssue.IsNote`: shown, never fixed, and not counted in the sheet list or the status line |
+| 5 | medium · Orphan labels disappear from the scene | Labels whose part is gone are kept, with `Target = default` (`LabelSnapshot.IsOrphan`), their tag and placement. They stay obstacles, and a pinned one gives a Warning `sheets.label.orphanPinned` |
+| 6 | medium · Unreadable owned objects are silently skipped | An owned part that cannot be opened, or lies deeper than six levels, makes the fingerprint incomplete (empty), with the reason logged. The build treats an empty fingerprint as unknown: Warning `sheets.scene.fingerprintIncomplete`, and the apply postcondition guards that style |

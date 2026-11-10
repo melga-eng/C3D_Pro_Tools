@@ -171,12 +171,14 @@ namespace C3DProTools.Features.Sheets.Contracts
     }
 
     /// <summary>A network, alignment or profile label in the drawing.</summary>
-    /// <param name="Target">The part or alignment it labels.</param>
+    /// <param name="Target">The model part or alignment it labels; <c>default</c> (not valid) when that is gone (an orphan label).</param>
     /// <param name="Tag">Its build tag; null for a label placed by hand (never moved or deleted; an obstacle).</param>
     /// <param name="Current">Its placement as it is now, in the same fields as <see cref="BuildTag.Placement"/>.</param>
     internal sealed record LabelSnapshot(DrawingObjectRef Ref, DrawingObjectRef Target, string Layout, BuildTag Tag, RecordedPlacement Current)
     {
         public bool IsToolLabel => Tag != null;
+        /// <summary>True when the part it labelled no longer exists.</summary>
+        public bool IsOrphan => !Target.IsValid;
         public bool IsPinned => Tag != null && Tag.IsPinned(Current);
     }
 

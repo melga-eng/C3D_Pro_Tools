@@ -116,6 +116,11 @@ namespace C3DProTools.Tests.Sheets
 
             Assert.False(new LabelSnapshot(DrawingObjectRef.Of("1A"), DrawingObjectRef.Of("2A3F"), "SW-102054", null, Placed).IsPinned,
                 "a hand-placed label is not a pinned tool label (it is never touched at all)");
+
+            LabelSnapshot orphan = new LabelSnapshot(DrawingObjectRef.Of("1B"), default, "SW-102054", auto with { Pin = PinState.Pinned }, Placed);
+            Assert.True(orphan.IsOrphan);
+            Assert.True(orphan.IsPinned, "an orphan keeps its tag and pin, so the build can report it");
+            Assert.False(new LabelSnapshot(DrawingObjectRef.Of("1C"), DrawingObjectRef.Of("2A3F"), "SW-102054", auto, Placed).IsOrphan);
         }
 
         [Fact]
