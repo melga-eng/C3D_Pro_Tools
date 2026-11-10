@@ -58,6 +58,7 @@ namespace C3DProTools.Features.Sheets.UI
             : "No active drawing";
 
         public string DrawingUnit => ActiveDrawing?.Unit ?? "m";
+        public bool IsSyntheticService => _service is SyntheticSheetProduction;
 
         public ObservableCollection<SheetItemViewModel> Sheets { get; } = new ObservableCollection<SheetItemViewModel>();
         public ObservableCollection<IssueItemViewModel> AllIssues { get; } = new ObservableCollection<IssueItemViewModel>();
@@ -294,14 +295,7 @@ namespace C3DProTools.Features.Sheets.UI
                 AllIssues.Clear();
                 foreach (var issue in overview.Issues)
                 {
-                    // Resolve location using object reference / service; do not guess from message text (Codex finding 5)
-                    string layout = null;
-                    if (_service is SyntheticSheetProduction syn && issue.Object.HasValue)
-                    {
-                        syn.TryGetLocation(issue.Object, out layout);
-                    }
-
-                    AllIssues.Add(new IssueItemViewModel(issue, layout));
+                    AllIssues.Add(new IssueItemViewModel(issue));
                 }
 
                 ApplyIssueFilter();

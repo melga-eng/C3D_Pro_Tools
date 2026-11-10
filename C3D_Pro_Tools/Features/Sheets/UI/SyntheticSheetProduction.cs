@@ -50,44 +50,6 @@ namespace C3DProTools.Features.Sheets.UI
             );
         }
 
-        /// <summary>
-        /// Resolves the layout location of an object in the synthetic drawing, or false/null if unknown.
-        /// Does not guess from text; maps known object handles to their layout.
-        /// </summary>
-        public bool TryGetLocation(DrawingObjectRef? obj, out string layout)
-        {
-            layout = null;
-            if (!obj.HasValue) return false;
-
-            string handle = obj.Value.Handle;
-            switch (handle)
-            {
-                case "3A12":
-                    layout = "124-PROF-1";
-                    return true;
-                case "3B45":
-                case "3C90":
-                case "5A20":
-                case "5A30":
-                    layout = "124-PROF-2";
-                    return true;
-                case "4D11":
-                case "2C05":
-                    layout = "124-C";
-                    return true;
-                case "2A10":
-                    layout = "124-A";
-                    return true;
-                case "2B15":
-                case "2B20":
-                case "2B30":
-                    layout = "124-B";
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
         public Task<SheetOverview> GetOverviewAsync(DrawingIdentity drawing, CancellationToken ct)
         {
             // Tile 124 fake data: 4 plan sheets (124-A to D) and 2 profile sheets (124-PROF-1, 124-PROF-2).
@@ -222,25 +184,25 @@ namespace C3DProTools.Features.Sheets.UI
                     "Candidate cover dimension at STA 1+240 dropped (spacing < 10 m)",
                     field: "Dims",
                     obj: objInfo
-                ),
+                ) with { Layout = "124-PROF-1" },
                 OperationIssue.Warning(
                     DimCodes.ClearanceBelowMinimum,
                     "Clearance between duct bank and storm culvert is 0.25 m (minimum 0.30 m)",
                     field: "Dims",
                     obj: objWarn
-                ),
+                ) with { Layout = "124-PROF-2" },
                 OperationIssue.Error(
                     DimCodes.ClearanceClash,
                     "Clearance clash detected with existing 200mm DI water main at STA 0+850",
                     field: "Crossings",
                     obj: objErr
-                ),
+                ) with { Layout = "124-PROF-2" },
                 OperationIssue.Error(
                     ContinuationCodes.BoundaryInvalid,
                     "Sheet 124-C match line boundary polygon is non-closed or self-intersecting",
                     field: "Continuation",
                     obj: objErr2
-                )
+                ) with { Layout = "124-C" }
             };
 
             return Task.FromResult(new SheetOverview(drawing ?? _activeDrawing, sheets, issues));
@@ -411,7 +373,7 @@ namespace C3DProTools.Features.Sheets.UI
 
                 var issues = new List<OperationIssue>
                 {
-                    OperationIssue.Info(DimCodes.CoverSpacing, "2 minor grade break cover dimensions spaced < 10m merged", "Dims")
+                    OperationIssue.Info(DimCodes.CoverSpacing, "2 minor grade break cover dimensions spaced < 10m merged", "Dims") with { Layout = "124-PROF-1" }
                 };
 
                 return new BuildSheetsPreview(
@@ -484,17 +446,18 @@ namespace C3DProTools.Features.Sheets.UI
                             }
                             if (p.Items.Count > 1)
                             {
+                                string failedLayout = p.Items[1].Layouts?.FirstOrDefault() ?? "124-B";
                                 partOutcomes.Add(new BuildItemOutcome(p.Items[1].ItemKey, ItemStatus.RolledBack, 0, 0, 0, null,
-                                    new[] { OperationIssue.Error("apply.failed", $"Item '{p.Items[1].ItemKey}' failed validation and was rolled back.") }));
+                                    new[] { OperationIssue.Error("apply.failed", $"Item '{p.Items[1].ItemKey}' failed validation and was rolled back.") with { Layout = failedLayout } }));
                             }
                             return new BuildSheetsResult(OperationStatus.PartiallySucceeded, Guid.NewGuid().ToString("N"), p.PreviewId, partOutcomes, null);
 
                         case OperationStatus.RolledBack:
                             var rolledBackOutcomes = (p.Items != null && p.Items.Count > 0)
                                 ? p.Items.Select(item => new BuildItemOutcome(item.ItemKey, ItemStatus.RolledBack, 0, 0, 0, null,
-                                    new[] { OperationIssue.Error("apply.rolledBack", $"Item '{item.ItemKey}' rolled back.") })).ToList()
+                                    new[] { OperationIssue.Error("apply.rolledBack", $"Item '{item.ItemKey}' rolled back.") with { Layout = item.Layouts?.FirstOrDefault() ?? "124-A" } })).ToList()
                                 : new List<BuildItemOutcome> { new BuildItemOutcome("Item-124-A", ItemStatus.RolledBack, 0, 0, 0, null,
-                                    new[] { OperationIssue.Error("apply.rolledBack", "Item rolled back.") }) };
+                                    new[] { OperationIssue.Error("apply.rolledBack", "Item rolled back.") with { Layout = "124-A" } }) };
                             return new BuildSheetsResult(OperationStatus.RolledBack, Guid.NewGuid().ToString("N"), p.PreviewId, rolledBackOutcomes,
                                 new[] { OperationIssue.Error("apply.failed", "All changes were rolled back to preserve drawing integrity.") });
 

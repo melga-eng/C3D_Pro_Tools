@@ -504,11 +504,14 @@ namespace C3DProTools.Features.Sheets.UI
             btnBuild.Margin = new Thickness(0, 0, 8, 4);
             btnRow.Children.Add(btnBuild);
 
-            var btnBusyTest = WpfStyle.CreateSecondaryButton("Test Busy (Preview ×2)");
-            btnBusyTest.Command = _vm.BuildTwiceTestBusyCommand;
-            btnBusyTest.ToolTip = "Launches two simultaneous previews to verify busy rejection (sheets.busy)";
-            btnBusyTest.Margin = new Thickness(0, 0, 8, 4);
-            btnRow.Children.Add(btnBusyTest);
+            if (_vm.IsSyntheticService)
+            {
+                var btnBusyTest = WpfStyle.CreateSecondaryButton("Test Busy (Preview ×2)");
+                btnBusyTest.Command = _vm.BuildTwiceTestBusyCommand;
+                btnBusyTest.ToolTip = "Launches two simultaneous previews to verify busy rejection (sheets.busy)";
+                btnBusyTest.Margin = new Thickness(0, 0, 8, 4);
+                btnRow.Children.Add(btnBusyTest);
+            }
 
             stack.Children.Add(btnRow);
 
@@ -547,37 +550,40 @@ namespace C3DProTools.Features.Sheets.UI
 
             stack.Children.Add(pinRow);
 
-            // Status Simulator Controls (to test all preview and result statuses)
-            var simExpander = new Expander
+            // Status Simulator Controls (to test all preview and result statuses; shown only when synthetic)
+            if (_vm.IsSyntheticService)
             {
-                Header = new TextBlock { Text = "Status Handling Simulator (Test All Statuses)", FontSize = WpfStyle.SmallFontSize, Foreground = WpfStyle.MutedBrush },
-                Margin = new Thickness(0, 4, 0, 0)
-            };
-            var simStack = new StackPanel { Orientation = WpfOrientation.Vertical, Margin = new Thickness(6, 6, 6, 4) };
+                var simExpander = new Expander
+                {
+                    Header = new TextBlock { Text = "Status Handling Simulator (Test All Statuses)", FontSize = WpfStyle.SmallFontSize, Foreground = WpfStyle.MutedBrush },
+                    Margin = new Thickness(0, 4, 0, 0)
+                };
+                var simStack = new StackPanel { Orientation = WpfOrientation.Vertical, Margin = new Thickness(6, 6, 6, 4) };
 
-            var simText = new TextBlock
-            {
-                Text = "Force service return status to test UI handling of every preview and result status:",
-                FontSize = WpfStyle.SmallFontSize,
-                Foreground = WpfStyle.MutedBrush,
-                Margin = new Thickness(0, 0, 0, 4)
-            };
-            simStack.Children.Add(simText);
+                var simText = new TextBlock
+                {
+                    Text = "Force service return status to test UI handling of every preview and result status:",
+                    FontSize = WpfStyle.SmallFontSize,
+                    Foreground = WpfStyle.MutedBrush,
+                    Margin = new Thickness(0, 0, 0, 4)
+                };
+                simStack.Children.Add(simText);
 
-            var simBtns = new WrapPanel { Orientation = WpfOrientation.Horizontal };
-            simBtns.Children.Add(CreateSimButton("Normal", null, isApply: false));
-            simBtns.Children.Add(CreateSimButton("Preview NoChange", OperationStatus.NoChange, isApply: false));
-            simBtns.Children.Add(CreateSimButton("Preview Rejected", OperationStatus.Rejected, isApply: false));
-            simBtns.Children.Add(CreateSimButton("Preview Cancelled", OperationStatus.Cancelled, isApply: false));
-            simBtns.Children.Add(CreateSimButton("Preview OutcomeUnknown", OperationStatus.OutcomeUnknown, isApply: false));
-            simBtns.Children.Add(CreateSimButton("Apply PartiallySucceeded", OperationStatus.PartiallySucceeded, isApply: true));
-            simBtns.Children.Add(CreateSimButton("Apply OutcomeUnknown", OperationStatus.OutcomeUnknown, isApply: true));
-            simBtns.Children.Add(CreateSimButton("Apply RolledBack", OperationStatus.RolledBack, isApply: true));
-            simBtns.Children.Add(CreateSimButton("Apply Rejected", OperationStatus.Rejected, isApply: true));
-            simStack.Children.Add(simBtns);
+                var simBtns = new WrapPanel { Orientation = WpfOrientation.Horizontal };
+                simBtns.Children.Add(CreateSimButton("Normal", null, isApply: false));
+                simBtns.Children.Add(CreateSimButton("Preview NoChange", OperationStatus.NoChange, isApply: false));
+                simBtns.Children.Add(CreateSimButton("Preview Rejected", OperationStatus.Rejected, isApply: false));
+                simBtns.Children.Add(CreateSimButton("Preview Cancelled", OperationStatus.Cancelled, isApply: false));
+                simBtns.Children.Add(CreateSimButton("Preview OutcomeUnknown", OperationStatus.OutcomeUnknown, isApply: false));
+                simBtns.Children.Add(CreateSimButton("Apply PartiallySucceeded", OperationStatus.PartiallySucceeded, isApply: true));
+                simBtns.Children.Add(CreateSimButton("Apply OutcomeUnknown", OperationStatus.OutcomeUnknown, isApply: true));
+                simBtns.Children.Add(CreateSimButton("Apply RolledBack", OperationStatus.RolledBack, isApply: true));
+                simBtns.Children.Add(CreateSimButton("Apply Rejected", OperationStatus.Rejected, isApply: true));
+                simStack.Children.Add(simBtns);
 
-            simExpander.Content = simStack;
-            stack.Children.Add(simExpander);
+                simExpander.Content = simStack;
+                stack.Children.Add(simExpander);
+            }
 
             return WpfStyle.CreateCard(stack, new Thickness(0, 0, 0, 10));
         }

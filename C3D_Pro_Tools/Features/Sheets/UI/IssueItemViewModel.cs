@@ -12,15 +12,14 @@ namespace C3DProTools.Features.Sheets.UI
         public string Field => Issue.Field ?? "";
         public string ObjectHandle => Issue.Object.HasValue ? Issue.Object.Value.Handle : "";
         public DrawingObjectRef? ObjectRef => Issue.Object;
-        public string Layout { get; }
+        public string Layout => string.IsNullOrWhiteSpace(Issue.Layout) ? null : Issue.Layout.Trim();
 
         /// <summary>True when the issue is associated with a known sheet layout.</summary>
         public bool HasLocation => !string.IsNullOrWhiteSpace(Layout);
 
-        public IssueItemViewModel(OperationIssue issue, string layout = null)
+        public IssueItemViewModel(OperationIssue issue)
         {
             Issue = issue ?? throw new ArgumentNullException(nameof(issue));
-            Layout = string.IsNullOrWhiteSpace(layout) ? null : layout.Trim();
         }
     }
 }
