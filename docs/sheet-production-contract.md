@@ -325,6 +325,7 @@ A view of length L = E − S that is ≤ C is never split, even when it is short
   The first slot's offset is 0.
 - Every piece of a split view starts a new row. The view or piece after the last piece may share that row if it fits.
 - Rows fill sheets top to bottom. A new sheet starts after `RowsPerSheet` rows.
+- `PackedSheet.Index` counts from 1 across the plan; `PackedRow.Index` counts from 1 within its sheet; `PieceNo` counts from 1 within its view.
 
 Order of placement:
 - **Preserve** (the default) is next-fit: items in `Order`, then `Key` (ordinal). Each item goes in the current row if it fits,
