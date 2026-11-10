@@ -31,8 +31,8 @@ New feature folder `C3D_Pro_Tools/Features/Sheets/`, namespace `C3DProTools.Feat
 
 | Folder / file | Holds | Owner | Branch |
 |---|---|---|---|
-| `Features/Shared/Contracts/` | `DrawingIdentity`, `DrawingObjectRef`, `Point3`, `OperationStatus`, `OperationIssue`, `ItemStatus`, `Atomicity` and `Frozen`, moved from `Features/Networks/Contracts` | Claude | `feature/sheets-contracts` |
-| `Features/Sheets/Contracts/` | Every type in sections 2–5 and 10–11, plus the engine signatures of sections 6–9, with no bodies | Claude | `feature/sheets-contracts` |
+| `Features/Shared/Contracts/` | `DrawingIdentity`, `DrawingObjectRef`, `Point3`, `OperationStatus`, `OperationIssue`, `ItemStatus`, `Atomicity` and `Frozen`, moved from `Features/Networks/Contracts`; new `Point2` and `Rect2` | Claude | `feature/sheets-contracts` |
+| `Features/Sheets/Contracts/` | Every type in sections 2–11 (the engines' data types too), the issue codes and the request and rule validation | Claude | `feature/sheets-contracts` |
 | `Features/Sheets/Engines/ProfileSheetPacking.cs` | Section 6 | **Codex** | `feature/profile-sheet-packing` |
 | `Features/Sheets/Engines/DimStations.cs` | Section 7 | **Codex** | `feature/dim-stations` |
 | `Features/Sheets/Engines/ContinuationNotes.cs` | Section 8 | **Codex** | `feature/continuation-notes` |
@@ -43,7 +43,8 @@ New feature folder `C3D_Pro_Tools/Features/Sheets/`, namespace `C3DProTools.Feat
 | `tests/C3D_Pro_Tools.Tests/Sheets/` | One test file per engine or contract file, owned by that file's owner | as above | with its file |
 | `tests/C3D_Pro_Tools.Tests/Cases/` | Arrangement cases exported from the tile 124 sheets | Claude | `feature/sheet-scene` |
 
-`feature/sheets-contracts` is merged first. Every other branch starts from that merge commit. Engines take and return plain
+`feature/sheets-contracts` is merged first. Every other branch starts from that merge commit. The four engine files start there
+as signature stubs that throw `NotImplementedException`. Each becomes Codex's file on its own branch. Engines take and return plain
 values only (no Autodesk, WinForms or WPF types) and never read the drawing.
 
 **Units.** Metres only. The adapter rejects drawings where `MetresPerDrawingUnit != 1` (`sheets.units.notMetres`). Stations
@@ -81,7 +82,7 @@ SheetSnapshot(string Layout, int TabOrder, SheetKind Kind /* Plan | Profile | Ot
               string DrawingNumber, IReadOnlyList<ViewportSnapshot> Viewports)
 
 ViewportSnapshot(DrawingObjectRef Ref, double PaperMmPerModelM /* 2.0 at 1:500, 1.333… at 1:750 */, double TwistDeg,
-                 IReadOnlyList<Point2> ModelBoundary /* clip boundary if clipped */, Box2 PaperBoxMm, bool Locked)
+                 IReadOnlyList<Point2> ModelBoundary /* clip boundary if clipped */, Rect2 PaperBoxMm, bool Locked)
 ```
 
 **Sheet kind.**
@@ -454,8 +455,8 @@ static ScoreComparison PlacementScoring.Compare(PlacementScore baseline, Placeme
 PlacementInput(IReadOnlyList<Point2> ViewportMm, double MarginMm,
                IReadOnlyList<ScoredObstacle> Obstacles,  // Group (Text | Leader | Network), Network, outline (2 points = segment)
                IReadOnlyList<ScoredLabel> Labels)
-ScoredLabel(string Key, Point2 AnchorMm, IReadOnlySet<string> KeepClearOf /* networks */, Box2? RegionMm /* profile view it must stay in; null in plan */,
-            bool Placed, Box2? BoxMm, Point2? LeaderStartMm, Point2? LeaderEndMm)
+ScoredLabel(string Key, Point2 AnchorMm, IReadOnlySet<string> KeepClearOf /* networks */, Rect2? RegionMm /* profile view it must stay in; null in plan */,
+            bool Placed, Rect2? BoxMm, Point2? LeaderStartMm, Point2? LeaderEndMm)
 
 PlacementScore(int Unplaced, int Overlaps, int OutsideArea, int LeaderCrossings, int LeaderOverText,
                double MeanLeaderMm, double MaxLeaderMm)
