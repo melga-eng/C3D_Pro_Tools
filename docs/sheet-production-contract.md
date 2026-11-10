@@ -252,6 +252,27 @@ in the workspace for each job.
 
 Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinned and hand-placed labels as obstacles.
 
+### The PlanLabels step (`PlanLabelPlanner`, `PlanLabelsCivil3D`)
+
+- **Targets:** structures by their type name, pipes and joints by the pipe's type code; network and type patterns as in
+  `TargetSelector`.
+- **A joint label is one per pipe, at its start** (pipe label at ratio 0): the label names the pipe that begins there, as on
+  sheet 102054.
+- **Desired labels** are rule × target × selected style, each with its identity (rule, source, sheet, slot).
+- Compared with the tool labels already tagged on the sheets being built:
+  - missing labels are **added**
+  - unpinned tool labels no rule asks for any more (including orphans) are **removed**
+  - pinned ones are kept, with `sheets.label.orphanPinned`
+  - labels placed by hand and other sheets are never touched
+- **Running again changes nothing.** Moving labels is the Arrange step's job.
+- **A rule whose style is missing** (from the drawing, or of the wrong kind) is skipped whole, and its existing labels are left
+  as they are (`sheets.rule.styleMissing`).
+- **Not built yet:** alignment and station labels, and one label per run (pipes are labelled one by one, with an Info).
+- **Writing:** one transaction per sheet. Each new label gets its build tag, recorded from the label as created, so it is never
+  mistaken for a user's edit, and is checked before commit. A sheet that fails rolls back whole.
+- **The command `C3DProPlanLabels`:** Preview, the default, writes the plan to `%TEMP%\C3DProPlanLabels.txt`; Apply writes it.
+  Sheet names limit it to those sheets. Rules come from `C3DPro.project.json` beside the drawing.
+
 ## 5. Build steps and the inventory
 
 Every item on the target sheets maps to one step, one owner and one acceptance check.

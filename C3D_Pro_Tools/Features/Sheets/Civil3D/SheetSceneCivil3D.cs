@@ -112,8 +112,32 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 return new SheetScene
                 {
                     Sheets = sheets, Networks = networks, Alignments = alignments, ProfileViews = views, Crossings = crossings,
-                    Labels = labels, BuildRecords = BuildXData.ReadRecords(tr, db), Issues = _issues
+                    Labels = labels, BuildRecords = BuildXData.ReadRecords(tr, db), LabelStyles = ReadLabelStyles(tr, civil), Issues = _issues
                 };
+            }
+
+            // ---- Label styles ------------------------------------------------------------------------------------------
+
+            private List<SceneLabelStyle> ReadLabelStyles(Transaction tr, CivilDocument civil)
+            {
+                List<SceneLabelStyle> styles = new List<SceneLabelStyle>();
+                void Add(LabelStyleKind kind, IEnumerable<ObjectId> ids)
+                {
+                    foreach (ObjectId id in ids)
+                    {
+                        if (id.IsNull || id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is StyleBase st)) continue;
+                        string fingerprint = StyleFingerprint.Of(tr, st);
+                        if (fingerprint.Length == 0)
+                            _issues.Add(OperationIssue.Warning(SheetCodes.FingerprintIncomplete,
+                                $"Label style \"{st.Name}\" could not be fingerprinted in full; an edit to it is caught only when the build checks its result.", obj: DrawingRefs3D.Ref(id)));
+                        styles.Add(new SceneLabelStyle(kind, st.Name, DrawingRefs3D.Ref(id), fingerprint));
+                    }
+                }
+                try { Add(LabelStyleKind.Pipe, civil.Styles.LabelStyles.PipeLabelStyles.PlanProfileLabelStyles.Cast<ObjectId>()); }
+                catch (Exception ex) { Warn("The pipe label styles could not be read.", ex); }
+                try { Add(LabelStyleKind.Structure, civil.Styles.LabelStyles.StructureLabelStyles.LabelStyles.Cast<ObjectId>()); }
+                catch (Exception ex) { Warn("The structure label styles could not be read.", ex); }
+                return styles;
             }
 
             // ---- Sheets and viewports --------------------------------------------------------------------------------------

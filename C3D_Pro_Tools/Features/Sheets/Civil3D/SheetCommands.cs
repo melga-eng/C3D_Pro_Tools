@@ -44,6 +44,84 @@ namespace C3DProTools.Features.Sheets.Civil3D
             }
         }
 
+        /// <summary>
+        /// The PlanLabels step on its own, with the rules in C3DPro.project.json beside the drawing. "Preview" (the default)
+        /// writes the plan to %TEMP%\C3DProPlanLabels.txt and changes nothing; "Apply" then writes it, one sheet at a time, each
+        /// sheet whole or not at all. Optional sheet names after the keyword limit it to those sheets. The full build (arranging,
+        /// profile views, DIMs) comes with the workspace's Build.
+        /// </summary>
+        [CommandMethod("C3DProPlanLabels")]
+        public void PlanLabels()
+        {
+            Document doc = AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            var ed = doc.Editor;
+            try
+            {
+                var kw = new Autodesk.AutoCAD.EditorInput.PromptKeywordOptions("\nPlan labels [Preview/Apply] <Preview>: ") { AllowNone = true };
+                kw.Keywords.Add("Preview"); kw.Keywords.Add("Apply");
+                kw.Keywords.Default = "Preview";
+                var r = ed.GetKeywords(kw);
+                if (r.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.OK && r.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.None) return;
+                bool apply = r.StringResult == "Apply";
+                var sheetsPrompt = new Autodesk.AutoCAD.EditorInput.PromptStringOptions("\nSheets (comma separated, Enter for every plan sheet): ") { AllowSpaces = true };
+                var sr = ed.GetString(sheetsPrompt);
+                if (sr.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.OK) return;
+                List<string> layouts = (sr.StringResult ?? "").Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+
+                Application.ProjectSettings settings = Application.ProjectSettings.Load(doc.Name, out string problem);
+                LabelRuleSet rules = settings.RuleSet(null) ?? settings.LabelRules.FirstOrDefault();
+                StringBuilder b = new StringBuilder();
+                b.AppendLine($"Plan labels for {doc.Name} ({(apply ? "apply" : "preview")}), rules from {Application.ProjectSettings.PathFor(doc.Name)}");
+                if (problem != null) b.AppendLine("Problem: " + problem);
+                IReadOnlyList<OperationIssue> ruleIssues = LabelRuleValidation.Validate(rules);
+                if (rules == null || ruleIssues.Count > 0)
+                {
+                    b.AppendLine(rules == null ? "No label rule set in the settings file: nothing planned." : "The rule set has errors: nothing planned.");
+                    foreach (OperationIssue i in ruleIssues) b.AppendLine($"  {i.Code}: {i.Message}");
+                    Finish(doc, b, "C3DProPlanLabels.txt");
+                    return;
+                }
+
+                SheetScene scene = new SheetSceneCivil3D().Read(new SheetSceneRequest { Drawing = DrawingRefs3D.Identity(doc), Layouts = layouts }, CancellationToken.None);
+                Application.PlanLabelsPlan plan = Application.PlanLabelPlanner.Plan(scene, rules, layouts);
+                b.AppendLine($"Rule set \"{rules.Name}\" v{rules.Version}: {plan.Items.Count} sheet(s) to change, "
+                    + $"{plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Add))} label(s) to add, {plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Remove))} to remove.");
+                foreach (OperationIssue i in plan.Issues) b.AppendLine($"  {i.Severity} {i.Code} {i.Layout} {i.Object}: {i.Message}");
+                foreach (BuildItem item in plan.Items)
+                {
+                    b.AppendLine($"{item.ItemKey}: {item.Changes.Count} change(s)");
+                    foreach (PlannedChange c in item.Changes.Take(200)) b.AppendLine($"  {c.ChangeId}  {c.Kind}  {c.RuleId}  {c.SourceKey}  {c.Description}");
+                }
+
+                if (apply && plan.Items.Count > 0)
+                {
+                    b.AppendLine();
+                    b.AppendLine("Apply:");
+                    using (doc.LockDocument())
+                        foreach (BuildItem item in plan.Items)
+                        {
+                            BuildItemOutcome o = PlanLabelsCivil3D.Apply(doc, item);
+                            b.AppendLine($"  {item.ItemKey}: {o.Status}, added {o.Added}, removed {o.Removed}");
+                            foreach (OperationIssue i in o.Issues) b.AppendLine($"    {i.Code}: {i.Message}");
+                        }
+                }
+                Finish(doc, b, "C3DProPlanLabels.txt");
+            }
+            catch (System.Exception ex)
+            {
+                C3DProLogger.Error("Plan labels failed", ex);
+                ed.WriteMessage($"\nPlan labels failed: {ex.Message}\n");
+            }
+        }
+
+        private static void Finish(Document doc, StringBuilder b, string fileName)
+        {
+            string file = Path.Combine(Path.GetTempPath(), fileName);
+            File.WriteAllText(file, b.ToString());
+            doc.Editor.WriteMessage("\n" + string.Join("\n", b.ToString().Split('\n').Take(30)) + $"\n… full report: {file}\n");
+        }
+
         private static string Report(SheetScene s, Document doc, TimeSpan took)
         {
             StringBuilder b = new StringBuilder();
