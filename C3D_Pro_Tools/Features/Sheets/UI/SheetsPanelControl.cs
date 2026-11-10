@@ -311,7 +311,9 @@ namespace C3DProTools.Features.Sheets.UI
                 BorderBrush = WpfStyle.BorderBrush,
                 BorderThickness = new Thickness(1)
             };
-            _progressBar.SetBinding(ProgressBar.ValueProperty, new WpfBinding("ProgressPercent"));
+            // One-way: a progress bar's Value binds two-way by default, and ProgressPercent is read-only. A two-way binding to it
+            // throws while the palette is built inside PaletteSet.AddVisual, which crashed Civil 3D (2026-11-10).
+            _progressBar.SetBinding(ProgressBar.ValueProperty, new WpfBinding("ProgressPercent") { Mode = BindingMode.OneWay });
             stack.Children.Add(_progressBar);
 
             border.Child = stack;

@@ -21,18 +21,34 @@ namespace C3DProTools.Features.Workspace
         {
             if (_paletteSet == null)
             {
-                _paletteSet = new PaletteSet("C3D Pro Workspace", WorkspacePaletteGuid)
+                // An exception while the palette is built (a broken WPF binding, say) is reported and logged, and the palette is
+                // not shown: left unhandled it ends Civil 3D with a fatal error, as a read-only two-way binding did on 2026-11-10.
+                PaletteSet set = null;
+                try
                 {
-                    Style = PaletteSetStyles.ShowAutoHideButton |
-                            PaletteSetStyles.ShowCloseButton |
-                            PaletteSetStyles.ShowPropertiesMenu,
-                    MinimumSize = new System.Drawing.Size(440, 560),
-                    Dock = DockSides.None
-                };
+                    set = new PaletteSet("C3D Pro Workspace", WorkspacePaletteGuid)
+                    {
+                        Style = PaletteSetStyles.ShowAutoHideButton |
+                                PaletteSetStyles.ShowCloseButton |
+                                PaletteSetStyles.ShowPropertiesMenu,
+                        MinimumSize = new System.Drawing.Size(440, 560),
+                        Dock = DockSides.None
+                    };
 
-                _syntheticService = new SyntheticSheetProduction();
-                _workspaceView = new WorkspaceView(_syntheticService);
-                _paletteSet.AddVisual("Workspace", _workspaceView);
+                    _syntheticService = new SyntheticSheetProduction();
+                    _workspaceView = new WorkspaceView(_syntheticService);
+                    set.AddVisual("Workspace", _workspaceView);
+                    _paletteSet = set;
+                }
+                catch (Exception ex)
+                {
+                    C3DProLogger.Error("Workspace palette could not be built", ex);
+                    try { set?.Dispose(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    _workspaceView = null;
+                    Autodesk.AutoCAD.ApplicationServices.Core.Application.DocumentManager.MdiActiveDocument?.Editor
+                        .WriteMessage($"\nThe C3D Pro workspace could not be opened: {ex.Message}\nThe details are in the C3D Pro log.\n");
+                    return;
+                }
             }
 
             _paletteSet.Visible = true;
