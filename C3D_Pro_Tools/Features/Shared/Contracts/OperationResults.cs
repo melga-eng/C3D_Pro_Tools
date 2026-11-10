@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-// Statuses, issues and item outcomes as ARCHITECTURE.md ("Error and result conventions") defines them. Kept with the network
-// contracts for the first extraction; they move to a shared folder when a second feature uses them.
-namespace C3DProTools.Features.Networks.Contracts
+// Statuses, issues and item outcomes as ARCHITECTURE.md ("Error and result conventions") defines them. Shared by every
+// feature (networks, sheets): moved here from Features/Networks/Contracts when the sheet production feature needed them.
+namespace C3DProTools.Features.Shared.Contracts
 {
     /// <summary>How an operation (or a preview) ended. Never <see cref="Succeeded"/> before the changes are committed.</summary>
     internal enum OperationStatus

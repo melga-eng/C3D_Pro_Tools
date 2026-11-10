@@ -3,7 +3,7 @@ using System.Globalization;
 
 // Plain values that name a drawing, an object in it, and a point in it. No Autodesk or UI types: the Civil 3D adapter turns
 // them into documents, ObjectIds and Point3d, and back. See ARCHITECTURE.md, "Contracts".
-namespace C3DProTools.Features.Networks.Contracts
+namespace C3DProTools.Features.Shared.Contracts
 {
     /// <summary>
     /// Which open drawing an operation is meant for. The adapter makes it from the document when a request is built, and checks
@@ -70,7 +70,7 @@ namespace C3DProTools.Features.Networks.Contracts
         public override string ToString() => Handle ?? "";
     }
 
-    /// <summary>A point in the drawing's world coordinates, in drawing units (never converted; see <see cref="SplitLimits"/>).</summary>
+    /// <summary>A point in the drawing's world coordinates, in drawing units (never converted; each feature names its units in its contract).</summary>
     internal readonly record struct Point3(double X, double Y, double Z)
     {
         public bool IsFinite => double.IsFinite(X) && double.IsFinite(Y) && double.IsFinite(Z);
