@@ -168,7 +168,7 @@ namespace C3DProTools.Features.Sheets.UI
                 FontWeight = FontWeights.SemiBold,
                 Foreground = WpfStyle.HeaderBrush
             };
-            title.SetBinding(TextBlock.TextProperty, new WpfBinding("DrawingTitle"));
+            title.SetBinding(TextBlock.TextProperty, new WpfBinding("DrawingTitle") { Mode = BindingMode.OneWay });
 
             var subTitle = new TextBlock
             {
@@ -177,7 +177,7 @@ namespace C3DProTools.Features.Sheets.UI
                 Foreground = WpfStyle.MutedBrush,
                 Margin = new Thickness(0, 2, 0, 0)
             };
-            var sessionBinding = new WpfBinding("ActiveDrawing.SessionKey") { StringFormat = "Drawing unit: m · Session: {0}" };
+            var sessionBinding = new WpfBinding("ActiveDrawing.SessionKey") { Mode = BindingMode.OneWay, StringFormat = "Drawing unit: m · Session: {0}" };
             subTitle.SetBinding(TextBlock.TextProperty, sessionBinding);
 
             titleStack.Children.Add(title);
@@ -280,7 +280,7 @@ namespace C3DProTools.Features.Sheets.UI
                 FontWeight = FontWeights.SemiBold,
                 Foreground = WpfStyle.AccentBrush
             };
-            _progressPhase.SetBinding(TextBlock.TextProperty, new WpfBinding("ProgressPhaseText"));
+            _progressPhase.SetBinding(TextBlock.TextProperty, new WpfBinding("ProgressPhaseText") { Mode = BindingMode.OneWay });
             topGrid.Children.Add(_progressPhase);
             Grid.SetColumn(_progressPhase, 0);
 
@@ -300,7 +300,7 @@ namespace C3DProTools.Features.Sheets.UI
                 Foreground = WpfStyle.MutedBrush,
                 Margin = new Thickness(0, 3, 0, 6)
             };
-            _progressItem.SetBinding(TextBlock.TextProperty, new WpfBinding("ProgressItemText"));
+            _progressItem.SetBinding(TextBlock.TextProperty, new WpfBinding("ProgressItemText") { Mode = BindingMode.OneWay });
             stack.Children.Add(_progressItem);
 
             _progressBar = new ProgressBar
