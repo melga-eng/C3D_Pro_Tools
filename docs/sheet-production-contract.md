@@ -102,6 +102,21 @@ scale on purpose, to fit the parts in it: sheet 102054's viewport is 1:564, turn
 - `feature/sheet-scene` changes Sheet Manager's "the sheet says X but its viewport is Y" check (`SheetManager.cs:801`) from a
   problem with an automatic fix to an Info note with no fix.
 
+**How the reader fills the scene (`SheetSceneCivil3D`).**
+- **Type code:** regular expressions tried on the pipe's description, then its layer; the first group is the code. The default is
+  `Type:\s*([A-Za-z0-9-]+)` (the ICT duct banks write "Type:IC-3B" in their description). The patterns are a setting, because
+  each network writes its type differently.
+- **Profiles:** layout profiles give the ends of every tangent plus 1 m samples along vertical curves, so grade breaks stay
+  exact vertices for the DIM engine. Surface profiles give 1 m samples. A station with no elevation ends a run.
+- **A view's own network** is the network with the longest pipes drawn in the view. Parts of other networks are crossings or
+  other structures.
+- **Structure faces** are the stations of the structure's plan box corners, projected on the alignment.
+- **A label's sheet** is the first sheet (by tab order) whose viewport shows its text location.
+- **Phase 1 limits:** gravity networks only (no pressure networks), and the band set name is left empty.
+- An object that cannot be read is left out, with a Warning `sheets.scene.readFailed` naming it.
+- The read-only command `C3DProSceneReport` writes what the reader sees, and the style fingerprints, to
+  `%TEMP%\C3DProSceneReport.txt`.
+
 ## 3. Crossings (Claude, phase 1 reader)
 
 A limited reader that covers only what phase 1 needs. Full coordination analysis stays in roadmap phase 3. It reuses the Cover

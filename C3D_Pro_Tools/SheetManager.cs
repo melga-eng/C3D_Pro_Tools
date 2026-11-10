@@ -708,19 +708,36 @@ namespace C3DProTools
         // Viewports and scale
         // =====================================================================================
 
-        /// <summary>The title block scale and the scale note set from the main viewport's scale.</summary>
+        /// <summary>
+        /// The title block scale and the scale note set from the main viewport's scale. Tile part (plan) sheets only: a profile
+        /// sheet's title block gives the drawing's horizontal scale (1:500) while its viewport is at another (1:750), so its scale
+        /// text is never written from the viewport (docs/sheet-production-contract.md, section 2).
+        /// </summary>
         public static bool SyncScale(Transaction tr, SheetRecord s, SheetProfile p)
         {
+            if (!s.IsPart) return false;
             string scale = s.ViewportScale;
             if (scale.Length == 0) return false;
             bool changed = SetAttributes(tr, s, new Dictionary<string, string> { [p.ScaleTag] = scale }) > 0;
-            if (!s.ScaleTextId.IsNull)
-            {
-                Entity e = (Entity)tr.GetObject(s.ScaleTextId, OpenMode.ForRead);
-                string text = PlainText(e), now = Regex.Replace(text, @"1\s*:\s*[\d.,]+", scale);
-                if (now != text) { ReplaceText(tr, s.ScaleTextId, text, now); s.ScaleText = now; changed = true; }
-            }
-            return changed;
+            return SetScaleNote(tr, s, scale) || changed;
+        }
+
+        /// <summary>The scale note set to the title block's scale (the intended one), whatever the viewport is at.</summary>
+        public static bool SyncNoteToTitle(Transaction tr, SheetRecord s, SheetProfile p)
+        {
+            string title = Regex.Match(s.Attr(p.ScaleTag), @"1\s*:\s*[\d.,]+").Value.Replace(" ", "");
+            return title.Length > 0 && SetScaleNote(tr, s, title);
+        }
+
+        private static bool SetScaleNote(Transaction tr, SheetRecord s, string scale)
+        {
+            if (s.ScaleTextId.IsNull) return false;
+            Entity e = (Entity)tr.GetObject(s.ScaleTextId, OpenMode.ForRead);
+            string text = PlainText(e), now = Regex.Replace(text, @"1\s*:\s*[\d.,]+", scale);
+            if (now == text) return false;
+            ReplaceText(tr, s.ScaleTextId, text, now);
+            s.ScaleText = now;
+            return true;
         }
 
         /// <summary>The main viewport at 1:<paramref name="n"/> (model metres, paper millimetres), its view centre kept; then the scale notes.</summary>
@@ -795,12 +812,12 @@ namespace C3DProTools
                     string title = Regex.Match(s.Attr(p.ScaleTag), @"1\s*:\s*[\d.,]+").Value.Replace(" ", "");
                     string note = Regex.Match(s.ScaleText, @"1\s*:\s*[\d.,]+").Value.Replace(" ", "");
                     string shown = title.Length > 0 ? title : note;
-                    // The scale written on the sheet is the intended one: the fix sets the viewport to it. Plan sheets of a tile
-                    // only: a profile sheet's viewport is not at its horizontal scale.
-                    if (s.IsPart && shown.Length > 0 && shown != s.ViewportScale && double.TryParse(shown.Substring(2).Replace(",", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out double n) && n > 0)
-                        Add(s, $"The sheet says {shown} but its viewport is {s.ViewportScale}.", $"Set the viewport to {shown}", t => SetScale(t, s, n, p));
-                    else if (title.Length > 0 && note.Length > 0 && title != note)
-                        Add(s, $"The title block says {title}, the scale note {note}.", "Write the viewport's scale in both", t => SyncScale(t, s, p));
+                    // The scale written on the sheet is the nominal one. A plan viewport may be scaled differently on purpose, to
+                    // fit its parts, so that is a note with no fix. A profile sheet's viewport is never at its horizontal scale.
+                    if (s.IsPart && shown.Length > 0 && shown != s.ViewportScale)
+                        Add(s, $"Note: the sheet says {shown}; its viewport is at {s.ViewportScale} (kept, as a viewport may be scaled to fit).");
+                    if (title.Length > 0 && note.Length > 0 && title != note)
+                        Add(s, $"The title block says {title}, the scale note {note}.", $"Write {title} in the scale note", t => SyncNoteToTitle(t, s, p));
                 }
                 if (matchRx != null)
                     foreach (string tag in new[] { p.MatchRightTag, p.MatchLeftTag, p.MatchUpTag, p.MatchDownTag })

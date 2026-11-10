@@ -14,6 +14,8 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string UnitsNotMetres = "sheets.units.notMetres";
         public const string Busy = "sheets.busy";
         public const string Internal = "sheets.internal";
+        /// <summary>An object the scene reader could not read: left out of the scene, with a warning naming it.</summary>
+        public const string SceneReadFailed = "sheets.scene.readFailed";
 
         public const string RequestDrawing = "sheets.request.drawing";
         public const string RequestNoSteps = "sheets.request.noSteps";
