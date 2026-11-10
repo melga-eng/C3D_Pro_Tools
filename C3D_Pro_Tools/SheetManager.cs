@@ -55,6 +55,8 @@ namespace C3DProTools
         public string Layout = "", Text = "";
         /// <summary>What a fix does, or null when it cannot be fixed automatically.</summary>
         public string FixText;
+        /// <summary>Information only (a viewport scaled on purpose): shown, but not counted as a problem and never fixed.</summary>
+        public bool IsNote;
         public Action<Transaction> Fix;
     }
 
@@ -725,6 +727,7 @@ namespace C3DProTools
         /// <summary>The scale note set to the title block's scale (the intended one), whatever the viewport is at.</summary>
         public static bool SyncNoteToTitle(Transaction tr, SheetRecord s, SheetProfile p)
         {
+            if (!s.IsPart) return false;
             string title = Regex.Match(s.Attr(p.ScaleTag), @"1\s*:\s*[\d.,]+").Value.Replace(" ", "");
             return title.Length > 0 && SetScaleNote(tr, s, title);
         }
@@ -733,7 +736,8 @@ namespace C3DProTools
         {
             if (s.ScaleTextId.IsNull) return false;
             Entity e = (Entity)tr.GetObject(s.ScaleTextId, OpenMode.ForRead);
-            string text = PlainText(e), now = Regex.Replace(text, @"1\s*:\s*[\d.,]+", scale);
+            // The first scale in the note only, so a note that also gives a second scale keeps it.
+            string text = PlainText(e), now = new Regex(@"1\s*:\s*[\d.,]+").Replace(text, scale, 1);
             if (now == text) return false;
             ReplaceText(tr, s.ScaleTextId, text, now);
             s.ScaleText = now;
@@ -815,9 +819,13 @@ namespace C3DProTools
                     // The scale written on the sheet is the nominal one. A plan viewport may be scaled differently on purpose, to
                     // fit its parts, so that is a note with no fix. A profile sheet's viewport is never at its horizontal scale.
                     if (s.IsPart && shown.Length > 0 && shown != s.ViewportScale)
-                        Add(s, $"Note: the sheet says {shown}; its viewport is at {s.ViewportScale} (kept, as a viewport may be scaled to fit).");
+                        issues.Add(new SheetIssue { Layout = s.Layout, IsNote = true, Text = $"Note: the sheet says {shown}; its viewport is at {s.ViewportScale} (kept, as a viewport may be scaled to fit)." });
+                    // Only a tile part's note is rewritten: a profile sheet's note gives two scales (H and V) and stays as the user wrote it.
                     if (title.Length > 0 && note.Length > 0 && title != note)
-                        Add(s, $"The title block says {title}, the scale note {note}.", $"Write {title} in the scale note", t => SyncNoteToTitle(t, s, p));
+                    {
+                        if (s.IsPart) Add(s, $"The title block says {title}, the scale note {note}.", $"Write {title} in the scale note", t => SyncNoteToTitle(t, s, p));
+                        else Add(s, $"The title block says {title}, the scale note {note}.");
+                    }
                 }
                 if (matchRx != null)
                     foreach (string tag in new[] { p.MatchRightTag, p.MatchLeftTag, p.MatchUpTag, p.MatchDownTag })

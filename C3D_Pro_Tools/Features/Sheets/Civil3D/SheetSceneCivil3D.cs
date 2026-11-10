@@ -227,8 +227,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         List<DrawingObjectRef> viewRefs = new List<DrawingObjectRef>();
                         ObjectIdCollection viewIds = al.GetProfileViewIds();
                         List<ObjectId> viewIdList = viewIds.Cast<ObjectId>().ToList();
-                        List<DetectedPart> detected = viewIdList.Count == 0 ? new List<DetectedPart>()
-                            : ProfilePartDetection.Detect(tr, al, networkIds, _o.CrossingToleranceM, true, viewIdList);
+                        List<PlanCrossing> detected = viewIdList.Count == 0 ? new List<PlanCrossing>() : FindCrossings(tr, al, networkIds);
                         foreach (ObjectId vid in viewIdList)
                         {
                             if (vid.IsErased || !(tr.GetObject(vid, OpenMode.ForRead) is ProfileView pv)) continue;
@@ -350,20 +349,55 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 catch (Exception ex) { Warn($"Profile view {pv.Name} could not be read.", ex, pv); return null; }
             }
 
-            private List<CrossingSnapshot> ReadCrossings(Transaction tr, Alignment al, ProfileViewSnapshot view, List<DetectedPart> detected)
+            /// <summary>A pipe crossing an alignment in plan: where, and the pipe's centre level and half outer height there.</summary>
+            private sealed record PlanCrossing(ObjectId Id, string Network, string Name, double Station, double CentreZ, double HalfHeightM);
+
+            /// <summary>
+            /// Every point where a gravity pipe crosses the alignment in plan, tested on each pipe's own path. This does not use
+            /// ProfilePartDetection's categories: a pipe with one sample near the alignment is "Partial" there and would be missed.
+            /// </summary>
+            private List<PlanCrossing> FindCrossings(Transaction tr, Alignment al, List<ObjectId> networkIds)
+            {
+                List<PlanCrossing> found = new List<PlanCrossing>();
+                Extents3d reach;
+                try { reach = al.GeometricExtents; } catch (Exception) { return found; }
+                double pad = Math.Max(1.0, _o.CrossingToleranceM);
+                foreach (ObjectId netId in networkIds)
+                {
+                    if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
+                    foreach (ObjectId id in net.GetPipeIds())
+                    {
+                        if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Pipe pipe)) continue;
+                        try
+                        {
+                            Extents3d box = pipe.GeometricExtents;
+                            if (box.MaxPoint.X < reach.MinPoint.X - pad || box.MinPoint.X > reach.MaxPoint.X + pad
+                                || box.MaxPoint.Y < reach.MinPoint.Y - pad || box.MinPoint.Y > reach.MaxPoint.Y + pad) continue;
+                            ArcInfo? arc = null;
+                            if (pipe.SubEntityType == PipeSubEntityType.Curved && PipeArcGeometry.TryGetGravityArc(pipe, out ArcInfo a)) arc = a;
+                            List<Point3d> path = PipeArcGeometry.SamplePath(pipe.StartPoint, pipe.EndPoint, arc, 1.0, 2000);
+                            double half = CoverRoute.OuterHeightOf(pipe) / 2;
+                            foreach ((double station, double z) in CrossingPoints(al, path, _o.CrossingToleranceM))
+                                found.Add(new PlanCrossing(id, net.Name, pipe.Name, station, z, half));
+                        }
+                        catch (Exception ex) { Warn($"Pipe {pipe.Name} could not be tested for crossings.", ex, pipe); }
+                    }
+                }
+                return found;
+            }
+
+            private List<CrossingSnapshot> ReadCrossings(Transaction tr, Alignment al, ProfileViewSnapshot view, List<PlanCrossing> crossings)
             {
                 HashSet<string> drawn = new HashSet<string>(view.DrawnParts.Select(p => p.Part.Handle));
                 string own = view.DrawnParts.Where(p => p.IsOwnNetwork).Select(p => DrawingRefs3D.TryResolve(al.Database, p.Part, out ObjectId id) && _networkOfPart.TryGetValue(id, out string n) ? n : null)
                     .FirstOrDefault(n => n != null) ?? "";
                 List<CrossingSnapshot> list = new List<CrossingSnapshot>();
-                foreach (DetectedPart d in detected.Where(d => d.Category == ProfilePartCategory.Crossing))
+                foreach (PlanCrossing c in crossings)
                 {
-                    if (d.NetworkName == own || !(tr.GetObject(d.Id, OpenMode.ForRead) is Pipe pipe)) continue;
-                    if (!CrossingPoint(al, d.Path, out double station, out double z)) continue;
-                    if (station < view.StartStationM - 1e-6 || station > view.EndStationM + 1e-6) continue;
-                    double h = CoverRoute.OuterHeightOf(pipe) / 2;
-                    DrawingObjectRef r = DrawingRefs3D.Ref(d.Id);
-                    list.Add(new CrossingSnapshot(view.Ref, r, d.NetworkName, d.Name, station, z + h, z - h, drawn.Contains(r.Handle)));
+                    if (c.Network == own) continue;
+                    if (c.Station < view.StartStationM - 1e-6 || c.Station > view.EndStationM + 1e-6) continue;
+                    DrawingObjectRef r = DrawingRefs3D.Ref(c.Id);
+                    list.Add(new CrossingSnapshot(view.Ref, r, c.Network, c.Name, c.Station, c.CentreZ + c.HalfHeightM, c.CentreZ - c.HalfHeightM, drawn.Contains(r.Handle)));
                 }
                 return list;
             }
@@ -387,25 +421,35 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 return f1 >= f0;
             }
 
-            /// <summary>Where a crossing path crosses the alignment in plan: the station there, and the path's level (centre line).</summary>
-            private static bool CrossingPoint(Alignment al, List<Point3d> path, out double station, out double z)
+            /// <summary>
+            /// Where a path crosses the alignment in plan: each change of side (the sign of the offset) between two samples,
+            /// interpolated, and kept only when the interpolated point lies within <paramref name="tolerance"/> of the alignment
+            /// (a side change far from it, past an alignment end or across a tight bend, is not a crossing). Samples exactly on
+            /// the alignment take no side: a path that touches and turns back does not cross.
+            /// </summary>
+            private static List<(double station, double z)> CrossingPoints(Alignment al, List<Point3d> path, double tolerance)
             {
-                station = 0; z = 0;
-                double prevSta = 0, prevOff = 0;
-                for (int i = 0; i < path.Count; i++)
+                List<(double, double)> points = new List<(double, double)>();
+                int lastSide = 0;
+                double lastSta = 0, lastOff = 0;
+                Point3d lastP = default;
+                foreach (Point3d p in path)
                 {
                     double sta = 0, off = 0;
-                    try { al.StationOffset(path[i].X, path[i].Y, ref sta, ref off); } catch (Exception) { prevOff = double.NaN; continue; }
-                    if (i > 0 && !double.IsNaN(prevOff) && Math.Sign(off) != Math.Sign(prevOff))
+                    try { al.StationOffset(p.X, p.Y, ref sta, ref off); } catch (Exception) { lastSide = 0; continue; }
+                    int side = off > 1e-9 ? 1 : off < -1e-9 ? -1 : 0;
+                    if (side == 0) continue;
+                    if (lastSide != 0 && side != lastSide)
                     {
-                        double t = Math.Abs(prevOff) / (Math.Abs(prevOff) + Math.Abs(off));
-                        station = prevSta + (sta - prevSta) * t;
-                        z = path[i - 1].Z + (path[i].Z - path[i - 1].Z) * t;
-                        return true;
+                        double t = Math.Abs(lastOff) / (Math.Abs(lastOff) + Math.Abs(off));
+                        Point3d x = lastP + (p - lastP) * t;
+                        double s2 = 0, o2 = 0;
+                        try { al.StationOffset(x.X, x.Y, ref s2, ref o2); } catch (Exception) { o2 = double.MaxValue; }
+                        if (Math.Abs(o2) <= tolerance) points.Add((s2, x.Z));
                     }
-                    prevSta = sta; prevOff = off;
+                    lastSide = side; lastSta = sta; lastOff = off; lastP = p;
                 }
-                return false;
+                return points;
             }
 
             // ---- Labels ------------------------------------------------------------------------------------------------
@@ -428,11 +472,30 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         RecordedPlacement current = new RecordedPlacement(label.StyleName, label.Dragged, at.X, at.Y, ratio, label.RotationAngle);
                         BuildTag tag = BuildXData.Decode(label.GetXDataForApplication(BuildTag.XDataApplication));
                         string layout = byTab.FirstOrDefault(v => v.Sees(at))?.Layout ?? "";
-                        labels.Add(new LabelSnapshot(DrawingRefs3D.Ref(id), DrawingRefs3D.Ref(label.FeatureId), layout, tag, current));
+                        ObjectId target = ModelTarget(tr, label.FeatureId);
+                        if (target.IsNull) continue;    // labels nothing (a label left over from an erased part)
+                        labels.Add(new LabelSnapshot(DrawingRefs3D.Ref(id), DrawingRefs3D.Ref(target), layout, tag, current));
                     }
                     catch (Exception ex) { Warn("A label could not be read.", ex, label); }
                 }
                 return labels;
+            }
+
+            /// <summary>
+            /// The model part (or alignment, profile…) a label belongs to. A profile label's feature is the part's representation
+            /// in the view (a ProfileViewPart / ProfileViewPressurePart), which leads to the model part, as AnnotLabels.Read does.
+            /// </summary>
+            private static ObjectId ModelTarget(Transaction tr, ObjectId feature)
+            {
+                if (feature.IsNull || feature.IsErased) return ObjectId.Null;
+                try
+                {
+                    DBObject obj = tr.GetObject(feature, OpenMode.ForRead);
+                    if (obj is ProfileViewPart vp) return vp.ModelPartId;
+                    if (obj is ProfileViewPressurePart pp) return pp.ModelPartId;
+                }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                return feature;
             }
         }
     }

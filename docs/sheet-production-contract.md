@@ -111,6 +111,10 @@ scale on purpose, to fit the parts in it: sheet 102054's viewport is 1:564, turn
 - **A view's own network** is the network with the longest pipes drawn in the view. Parts of other networks are crossings or
   other structures.
 - **Structure faces** are the stations of the structure's plan box corners, projected on the alignment.
+- **Crossings** are found on each pipe's own sampled path: every change of side of the alignment, kept when the interpolated
+  point lies within 0.5 m of it. This does not use Parts to Profile's categories, which call a pipe "partial" when one sample is
+  near the alignment.
+- **A label's target** is its model part: a profile label's feature (a profile view part) leads to the model part.
 - **A label's sheet** is the first sheet (by tab order) whose viewport shows its text location.
 - **Phase 1 limits:** gravity networks only (no pressure networks), and the band set name is left empty.
 - An object that cannot be read is left out, with a Warning `sheets.scene.readFailed` naming it.
@@ -754,3 +758,12 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 1 | medium · Profile snapshots omit the geometry needed for DIM planning and stale detection | `SceneProfile.Runs` (station/elevation runs; gaps break runs) and `ProfileViewSnapshot.DrawnParts` as `ViewPart` (stations, and outside top and bottom in the view). Section 7 maps them to `DimInput`. Both are part of the scene, so the scene stamp covers them |
 | 2 | medium · Build-tag identity cannot tell several chosen styles apart | `BuildTag.StyleSlot`, and `IdentityKey` = rule + source + sheet + slot, used for duplicate tags (section 4, "Identity"). The table "When the user changes a rule's styles" defines reordered, added, removed, replaced and restyled. The acceptance check is now "one label per selected style" (section 5) |
 | 3 | low · The acceptance wording omits the pinned-label exception | Section 5: "…except pinned labels kept and reported as `sheets.label.orphanPinned`" |
+
+## Code review of `feature/sheet-scene`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | medium · Real crossings can be excluded by the detector's category | `FindCrossings` tests every pipe's path for changes of side, independently of `ProfilePartDetection`; a pipe can cross more than once |
+| 2 | medium · Profile-label targets are not resolved to model parts | `ModelTarget` turns a `ProfileViewPart` / `ProfileViewPressurePart` into its `ModelPartId`; labels with no target are left out |
+| 3 | medium · The mismatch fix still writes profile-sheet scale notes | The title-block/scale-note fix is offered for tile parts only, and `SyncNoteToTitle` refuses other sheets itself. The note's first scale only is replaced, so "H 1:500 V 1:50" keeps its V |
+| 4 | low · The nominal-scale mismatch remains an ordinary issue | `SheetIssue.IsNote`: shown, never fixed, and not counted in the sheet list or the status line |
