@@ -21,8 +21,22 @@
   - a plan viewport scaled on purpose is a note, not a problem
   - a scale note is fixed from the title block
 
+### Fixed (found live on TEST DRAWING.dwg)
+- **Opening the workspace palette crashed Civil 3D with a fatal error.** A progress bar was bound two-way to a read-only
+  property, and WPF threw while the palette was being built. The binding is now one-way. A palette that fails to build is now
+  logged and reported instead of crashing, and a new smoke test builds the whole view off screen.
+- **The scene reader read only 81 of 2,684 labels** (`RotationAngle` throws on labels that cannot rotate).
+- **Style fingerprints missed edits to a style's components.** They now cover everything the style owns, and this was
+  checked live: an edit changes the fingerprint. Restoring the edit does not bring the old fingerprint back, because Civil 3D
+  also files a change marker. That is the safe side: the next Apply asks for a fresh preview.
+
+### Checked live
+- `C3DProPlanLabels`: Preview planned 143 labels on tile 124. Apply committed four sheets (46 + 72 + 13 + 12). Every label read
+  back with its tag, and none counted as pinned. Running it again planned 0 changes. One UNDO removed all 143, and a Preview
+  afterwards planned the same 143 again.
+
 ### Known limitations
-- **Not yet run live in Civil 3D:** creating labels with `C3DProPlanLabels` Apply, rolling back and UNDO. The scene reader was
+- **Not yet run live in Civil 3D:** a rollback when a sheet fails to write. The scene reader was
   checked live on TEST DRAWING.dwg, and its two live findings are fixed.
 - **Style edits:** the fingerprint fix (owned components) still needs a live check.
 - **New labels land at their style's default position.** Arranging them is the next step (`feature/build-sheets`).
