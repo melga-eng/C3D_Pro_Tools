@@ -1,7 +1,7 @@
 # Sheet production: contract proposal (phase 1)
 
-Status: **v0.2, for Codex review.** It answers the eight findings of review 1; see "Revision 2" at the end. No engine, adapter
-or UI code until the user accepts it.
+Status: **v0.3, for Codex review.** It answers review 1 ("Revision 2") and review 2 ("Revision 3"), both at the end. No engine,
+adapter or UI code until the user accepts it.
 Branch: `feature/redesign-roadmap` from `main` at 1243c94. Contract owner: Claude.
 
 Inputs:
@@ -210,7 +210,7 @@ Every item on the target sheets maps to one step, one owner and one acceptance c
 | Item | Step | Made by | Owner | Acceptance check on tile 124 |
 |---|---|---|---|---|
 | Manhole, joint, alignment and station labels (plan) | `PlanLabels` | Rules in section 4 | Claude | Every ICT structure, joint and alignment in a plan viewport has exactly one label from its rule |
-| Placement of all labels | `Arrange` | `LabelPlanner`, scored by section 9 | Claude; Codex for the score | Placement score: 0 unplaced, 0 overlaps, 0 outside the viewport |
+| Placement of all labels | `Arrange` | `LabelPlanner`, scored by section 9 | Claude; Codex for the score | Placement score: 0 unplaced, 0 overlaps, 0 outside the area |
 | Profile views: create, split, pack, place, viewports | `ProfileViews` | Section 6 + adapter | Codex (packing), Claude | Every ICT alignment of the tile appears in exactly one slot. Rows ≤ 450 m. Every viewport at 1:750 and locked |
 | Bands, datum, view title | `ProfileViews` | Existing `ProfileViewRecipe` and `ProfileViewMath.DatumRange` | Claude | The six bands present; the title reads "name / SCALE: H = 1:500, V = 1:50" |
 | Crossing pipes drawn in views | `ProfileViews` | Section 3 | Claude | Every crossing in the view range is drawn |
@@ -315,6 +315,7 @@ DimInput
   IReadOnlyList<IReadOnlyList<StationElevation>> ProposedSurface // continuous runs; a gap in the surface is a break between runs
   IReadOnlyList<StructureSpan> Structures                       // Key, StartStationM, EndStationM: the structure's outer faces
   IReadOnlyList<CrossingPipe> Crossings                         // Key, StationM, TopElevM, BottomElevM (outside)
+  double OwnedFromM, OwnedToM; bool OwnsEnd                     // the stations this view (or piece) dimensions; see "Ownership"
 
 DimRules
   double MajorGradeChangePct = 2.0
@@ -334,6 +335,23 @@ PlannedDim(DimKind Kind /* Cover | Clearance */, double StationM, double LowerEl
 - Two vertices within 1e-6 m of each other with the same elevation (to 1e-6) are merged.
 - With different elevations they are a vertical step, which is an Error: `dims.input.verticalStep`.
 - Interpolation is linear between neighbouring vertices. A station outside a polyline's range has no value there.
+- **Duct consistency.** DuctBottom must cover the same station range as DuctTop, with both ends equal to 1e-6 m. At every
+  vertex of either line, the bottom must be ≤ the top − 1e-6 m. Otherwise: Error `dims.input.ductInconsistent`, empty plan.
+- **Surface runs** come in ascending station order and must not overlap. A run may start exactly where the one before it ends
+  (to 1e-6 m), but only with the same elevation there (to 1e-6 m). Any overlap, or a touching point with two different
+  elevations, gives an Error `dims.input.surfaceOverlap` and an empty plan. A station between two runs has no surface.
+- **Owned range.** `OwnedFromM` < `OwnedToM`, and both lie inside DuctTop's range. Otherwise: Error `dims.input.invalid`.
+
+### Ownership
+
+When a view is split into overlapping pieces, each station is dimensioned in exactly one piece:
+- The adapter gives piece *k* the owned range [start of the view, or the end of piece *k* − 1, up to the end of piece *k*).
+  The overlap therefore belongs to the earlier piece, as for labels (section 4).
+- `OwnsEnd` is true only for the last piece, which also owns its end station.
+- An unsplit view owns its whole range, with `OwnsEnd` true.
+- Every DIM, of either kind, is kept only when its station is owned.
+- Spacing (rule 4) is checked among owned cover DIMs only. Pieces sit in different rows on paper, so their DIMs never crowd
+  each other.
 
 ### Cover DIMs
 
@@ -346,7 +364,8 @@ PlannedDim(DimKind Kind /* Cover | Clearance */, double StationM, double LowerEl
    - A cluster's change is |grade after its last vertex − grade before its first vertex|.
    - Its station is the vertex with the largest single |Δgrade|; on a tie, the lower station.
    - It is major when the change ≥ `MajorGradeChangePct`.
-2. **Structure faces** (when `AtStructureFaces` is set): each face station that lies strictly inside DuctTop's range.
+2. **Structure faces** (when `AtStructureFaces` is set): each face station inside DuctTop's range, **its ends included** (to
+   1e-6 m). A piece that starts where the duct leaves a manhole therefore gets that DIM, when it owns the station.
 3. **Value.** At each candidate station, `ValueM` = surface − duct top.
    - No surface at that station: no DIM, Warning `dims.surface.missing`.
    - `ValueM ≤ 0`: no DIM, Error `dims.cover.negative`.
@@ -376,6 +395,8 @@ One per crossing whose station lies inside DuctTop's range. A crossing outside t
 | `dims.rules.invalid` | Error | Empty plan: a value not finite, a grade change ≤ 0, or a negative merge distance, spacing or clearance |
 | `dims.input.invalid` | Error | Empty plan: fewer than 2 vertices, stations not ascending, or a value not finite |
 | `dims.input.verticalStep` | Error | Empty plan |
+| `dims.input.ductInconsistent` | Error | Empty plan: DuctTop and DuctBottom differ in range, or the bottom is not below the top |
+| `dims.input.surfaceOverlap` | Error | Empty plan: surface runs overlap, or touch with two elevations |
 | `dims.crossing.invalid` | Error | Crossing skipped: not finite, or bottom > top |
 | `dims.surface.missing` | Warning | DIM skipped |
 | `dims.cover.negative` | Error | DIM skipped |
@@ -433,10 +454,10 @@ static ScoreComparison PlacementScoring.Compare(PlacementScore baseline, Placeme
 PlacementInput(IReadOnlyList<Point2> ViewportMm, double MarginMm,
                IReadOnlyList<ScoredObstacle> Obstacles,  // Group (Text | Leader | Network), Network, outline (2 points = segment)
                IReadOnlyList<ScoredLabel> Labels)
-ScoredLabel(string Key, Point2 AnchorMm, IReadOnlySet<string> KeepClearOf /* networks */,
+ScoredLabel(string Key, Point2 AnchorMm, IReadOnlySet<string> KeepClearOf /* networks */, Box2? RegionMm /* profile view it must stay in; null in plan */,
             bool Placed, Box2? BoxMm, Point2? LeaderStartMm, Point2? LeaderEndMm)
 
-PlacementScore(int Unplaced, int Overlaps, int OutsideViewport, int LeaderCrossings, int LeaderOverText,
+PlacementScore(int Unplaced, int Overlaps, int OutsideArea, int LeaderCrossings, int LeaderOverText,
                double MeanLeaderMm, double MaxLeaderMm)
 ScoreComparison(bool NoWorse, IReadOnlyList<string> Worse /* metric names */)
 ```
@@ -445,7 +466,7 @@ ScoreComparison(bool NoWorse, IReadOnlyList<string> Worse /* metric names */)
 - `Spot == null` → not placed.
 - Otherwise `Spot.Box` → box, `Start` → leader start, `Spot.End` → leader end.
 
-It takes the obstacles, viewport and margin from the case. `PlanLabel` and `ArrangeCase` are plain types with no Autodesk API,
+It takes the obstacles, viewport and margin from the case, and each label's `Region` from the case label with the same key. `PlanLabel` and `ArrangeCase` are plain types with no Autodesk API,
 so this stays a pure engine.
 
 ### Metrics
@@ -457,7 +478,7 @@ enlarged by the gap.
 |---|---|
 | `Unplaced` | Labels with `Placed = false` |
 | `Overlaps` | Pairs of placed label boxes that overlap, plus label–obstacle pairs where the box overlaps or crosses the obstacle. Network obstacles count only for networks in the label's `KeepClearOf`. Leader obstacles count against the box, as `LabelLayout` treats them |
-| `OutsideViewport` | Labels with a box corner that is not inside the viewport by at least `MarginMm` (`ArrangeCase.Inside`) |
+| `OutsideArea` | Labels with a box corner that is not inside the viewport by at least `MarginMm` (`ArrangeCase.Inside`), **or** not inside `RegionMm` when it is set. This is the same area test as the planner's `InArea` in `ArrangeCase.BuildLabels`. A label that has moved into another profile row counts |
 | `LeaderCrossings` | Pairs of leaders that cross at a point that is not an endpoint of both |
 | `LeaderOverText` | Leaders that cross a Text obstacle or another label's box |
 | `MeanLeaderMm`, `MaxLeaderMm` | Leader lengths (0 when no label is placed) |
@@ -476,7 +497,7 @@ enlarged by the gap.
 - `Cases\` is **empty today**. In `feature/sheet-scene`, Claude exports one case per viewport of the tile 124 sheets, with
   Annotation Studio's "Export arrangement case".
 - Until those cases exist, Codex tests with hand-built cases.
-- **Phase 1 gate:** every tile 124 case scores 0 unplaced, 0 overlaps and 0 outside the viewport. Every other case is no worse
+- **Phase 1 gate:** every tile 124 case scores 0 unplaced, 0 overlaps and 0 outside its area. Every other case is no worse
   than its baseline.
 
 ## 10. Build operation and service (Claude; Antigravity builds against it)
@@ -499,8 +520,8 @@ PlannedChange(string ChangeId, BuildStep Step, ChangeKind Kind, ChangeTarget Tar
               string SourceKey, DrawingObjectRef? Existing, string Description)
 BuildItem(string ItemKey, BuildItemKind Kind, IReadOnlyList<string> Layouts, IReadOnlyList<PlannedChange> Changes)
 
-BuildSheetsPreview(string PreviewId, DrawingIdentity Drawing, string SceneStamp, BuildSheetsRequest Request,
-                   IReadOnlyList<BuildItem> Items, IReadOnlyList<OperationIssue> Issues)
+BuildSheetsPreview(OperationStatus Status, string PreviewId, DrawingIdentity Drawing, string SceneStamp,
+                   BuildSheetsRequest Request, IReadOnlyList<BuildItem> Items, IReadOnlyList<OperationIssue> Issues)
 BuildSheetsApplyRequest(BuildSheetsPreview Preview, IReadOnlyList<string> ItemKeys /* empty = all items */)
 
 BuildItemOutcome(string ItemKey, ItemStatus Status, int Added, int Updated, int Removed,
@@ -531,13 +552,29 @@ interface ISheetProductionService
 - The service runs all drawing work on the AutoCAD main thread, through the document's command context. The UI never touches
   Autodesk types.
 - Tasks complete on the caller's synchronization context.
-- A second Preview or Apply while one is running is **rejected** with `sheets.busy`, not queued.
+- **Outcomes are values, never exceptions.** Expected outcomes (busy, invalid, wrong drawing, stale, cancelled) come back as
+  a status on the returned object. `OperationCanceledException` never escapes the service. An unexpected exception is logged
+  and returned as `OutcomeUnknown` during Apply, or as `Rejected` with `sheets.internal` during Preview, which writes nothing.
+- A second Preview, PreviewPin or Apply while one is running is **rejected**, not queued. It returns status `Rejected` with
+  the issue `sheets.busy`. This works the same way on a preview and on a result.
+
+### Preview status
+
+| `BuildSheetsPreview.Status` | Meaning | Items |
+|---|---|---|
+| `Succeeded` | A plan ready to apply | One or more |
+| `NoChange` | Valid; the drawing already matches the rules | None |
+| `Rejected` | Busy, an invalid request or the wrong drawing; the issues say which | None |
+| `Cancelled` | Cancelled while reading or planning | None |
+
+`ApplyAsync` accepts only a preview with status `Succeeded`. Any other preview returns `Rejected`
+`sheets.preview.notApplicable`.
 
 ### Cancellation
 
 | When | Effect |
 |---|---|
-| During Preview | Nothing in the drawing changes. Returns status `Cancelled` with no items |
+| During Preview | Nothing in the drawing changes. The preview's status is `Cancelled` |
 | During Apply | Checked **between items** only. The current item finishes or rolls back. Items not reached are `NotAttempted`. Status `Cancelled`, and the result lists the committed items |
 
 ### Atomicity
@@ -551,8 +588,27 @@ The stamp is a SHA-256 over a canonical serialisation of:
 1. the whole `SheetScene` read for the request
 2. the request's `Rules`, including every rule's fields
 3. its `Settings`
-4. the name and drawing handle of every label style, band set and DIM style the plan uses
+4. a **content fingerprint** of every definition the plan depends on (below)
 5. the contract version
+
+**Content fingerprints.** A name and a handle do not change when a style is edited, so the stamp hashes what the style
+contains:
+- Each definition is filed out through a custom `DwgFiler` subclass passed to `DBObject.DwgOut`, and the filed values are
+  hashed. `DwgFiler` has a protected constructor and `DBObject.DwgOut(DwgFiler)` exists, both checked in the c3d-api database.
+- Covered: every label style, label set, band set, profile view style and DIM style (`DimStyleTableRecord`) the plan uses,
+  together with the text styles they reference.
+- Handle references are filed as handles, so a reference to a different object changes the hash. A change inside the
+  referenced object changes only that object's own fingerprint.
+- `feature/sheet-scene` verifies live that editing a label style component (for example its text height) changes the
+  fingerprint. If some Civil 3D style does not file its components that way, the adapter adds those components' own objects
+  to the covered list.
+
+**Postcondition (a second safety net).** Before an item commits, every label and DIM it created or moved is measured again:
+- each label's outline must match its planned box to 0.5 mm on paper
+- each DIM's text must match its `ValueM`
+
+Otherwise that item rolls back with `sheets.apply.postconditionFailed`. A style change the fingerprint missed therefore
+cannot commit a wrong sheet.
 
 Apply re-reads the scene for the same request and recomputes the stamp. A different drawing gives `Rejected`
 `sheets.preview.wrongDrawing`. A different stamp gives `Rejected` `sheets.preview.stale`. In both cases nothing changes, and the
@@ -616,3 +672,15 @@ Closed in v0.1: Q2 (cable notes are out of scope), Q3 (below the duct: duct bott
 | 6 | medium · Pinning has no tolerance | Section 4: the model frame, the recorded fields, the tolerances, a persistent `Pin` flag, Pin and Release actions, and duplicate tags from copied objects |
 | 7 | medium · Phase 1 needs crossings that were deferred to phase 3 | Section 3: a limited phase 1 crossing reader, assigned to Claude, reusing the Cover Optimizer's crossing code. Duct top and bottom come from `DimInput.DuctTop` and `DuctBottom` |
 | 8 | medium · The delivery sequence omits work | Section 5 maps every inventory item to a step, an owner and an acceptance check, including alignment labels and pavement marks. `feature/placement-score` and the case export are scheduled (section 1; roadmap) |
+
+## Revision 3: answers to review 2
+
+Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 partly resolved. It added these five findings:
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | high · Style identity does not detect style edits | Section 10: the stamp hashes each definition's content through a `DwgFiler` subclass, covering label styles, label sets, band sets, view styles, DIM styles and their text styles. The fingerprint gets a live check in `feature/sheet-scene`. A postcondition (outline to 0.5 mm, DIM text to `ValueM`) rolls back an item if a change was missed |
+| 2 | medium · Preview cannot return a cancellation status | Section 10: `BuildSheetsPreview.Status`, with a table of what each status means. Outcomes are values; `OperationCanceledException` never escapes. Busy gives `Rejected` + `sheets.busy` for both Preview and Apply. Apply only accepts a `Succeeded` preview |
+| 3 | medium · Duct and surface polylines can disagree | Section 7: DuctBottom must match DuctTop's range and stay below it (`dims.input.ductInconsistent`). Surface runs may not overlap, and may touch only at one shared elevation (`dims.input.surfaceOverlap`) |
+| 4 | medium · The structure-face rule omits view ends | Section 7: faces at the duct's ends count. A new "Ownership" rule: each piece owns a half-open station range, the earlier piece owns the overlap, and the last piece owns its end. So DIMs are neither lost nor duplicated at splits |
+| 5 | medium · The placement score drops profile-region containment | Section 9: `ScoredLabel.RegionMm`, filled from the case. `OutsideViewport` becomes `OutsideArea` and counts a label outside the viewport margin or outside its region, the same test as the planner's `InArea` |
