@@ -488,7 +488,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         labels.Add(snap);
                         if (target.IsNull && snap.IsPinned)
                             _issues.Add(OperationIssue.Warning(SheetCodes.LabelOrphanPinned,
-                                "A pinned label's part no longer exists. The label is kept; delete or release it if it is not needed.", obj: snap.Ref));
+                                "A pinned label's part no longer exists. The label is kept; delete or release it if it is not needed.", obj: snap.Ref) with { Layout = layout.Length > 0 ? layout : null });
                     }
                     catch (Exception ex) { Warn("A label could not be read.", ex, label); }
                 }
