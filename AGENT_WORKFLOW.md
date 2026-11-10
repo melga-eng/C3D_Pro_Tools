@@ -8,8 +8,8 @@ You orchestrate every step. Three agents, one repo, and one live connection to C
                      └──────┬───────────────┬──────────────┬──────┘
                             ▼               ▼              ▼
                      Claude Code       OpenAI Codex    Antigravity
-                     main builder      reviewer /      UI design &
-                     feature/<x>       auditor         heavy work, ui/<x>
+                     main builder      engines +       UI design &
+                     feature/<x>       reviewer        heavy work, ui/<x>
                             │               │              │
          shared rules:      └──── AGENTS.md (CLAUDE.md, GEMINI.md import it) ────┘
          shared code map:         graphify-out/  (graphify MCP)
@@ -95,6 +95,23 @@ Set the `C3D_BRIDGE_PORT` environment variable before starting it if you need tw
 6. **Antigravity: UI, when the feature has a form.** *"Branch `ui/<name>` from `feature/<name>`. Redesign
    `FormX.cs` layout: <what you want>. Don't touch engine files."* Then back to Codex for a quick review.
 7. **You: merge** to `main` when you're happy.
+
+## The parallel loop (larger features)
+
+Use this when a feature splits into engines, Civil 3D integration and UI. The redesign
+([docs/redesign-roadmap.md](docs/redesign-roadmap.md)) works this way.
+
+1. **Claude: contract.** Writes the contract proposal in `docs/` and names each file's owner.
+2. **Codex: review the contract.** You accept it. That commit is the base for every branch below.
+3. **All three in parallel, each in its own worktree and branch from that commit:**
+   - **Claude:** adapters and orchestration, `feature/<x>`.
+   - **Codex:** the pure-logic engines assigned to it, with tests, `feature/<x>`:
+     > Branch `feature/<engine>` from `<commit>`. Implement section N of `docs/<contract>.md` in `<files>` with tests in
+     > `<test file>`. Touch no other files. Build and test with `.\build.ps1 -Configuration Debug`. End with a handoff note.
+   - **Antigravity:** UI against the contract's service interface and synthetic provider, `ui/<x>`.
+4. **Cross review:** Claude reviews Codex's branches, and Codex reviews Claude's and Antigravity's.
+5. **Claude: integrate.** Joins the reviewed branches, runs the live checks, and writes a handoff note.
+6. **You: merge.**
 
 ## Working inside Civil 3D through an agent
 

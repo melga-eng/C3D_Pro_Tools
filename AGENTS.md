@@ -12,14 +12,15 @@ Three agents work on this repo. Each has one job. None starts another agent's wo
 
 | Agent | Role | Does | Does not |
 |---|---|---|---|
-| **Claude Code** | Main builder | Implements features and fixes on a feature branch, builds, runs tests, commits when asked | Review its own work as final |
-| **OpenAI Codex** | Reviewer and auditor | Reviews a branch's diff against `main` with the `civil3d-auditor` skill, reports findings by severity | Edit code unless the user asks it to fix a specific finding |
+| **Claude Code** | Main builder | Implements features and fixes on a feature branch, writes the contracts, builds, runs tests, commits when asked. Reviews Codex's engine branches | Review its own work as final |
+| **OpenAI Codex** | Engine builder, reviewer and auditor | Builds the pure-logic engines the user assigns to it (plain data in and out, no Autodesk API, no UI), with unit tests, on its own `feature/<x>` branch against an accepted contract. Reviews Claude's and Antigravity's branches against `main` with the `civil3d-auditor` skill and reports findings by severity | Edit Civil 3D adapters, forms or files outside its assigned engine and test files; change a contract (it proposes the change to the user instead) |
 | **Google Antigravity** | UI design and heavy work | WinForms/WPF form layouts, ribbon/icons, large mechanical refactors, browser research | Change engine logic (`Cover*`, `Navis*`, `Network*` solvers) without a note to the user |
 
 Rules for all three:
 
 - **One branch per task.** Work on `feature/<short-name>` (or `ui/<short-name>` for Antigravity). Never commit to `main`.
 - **Two agents never edit the same files at the same time.** If a task needs another agent's files, stop and tell the user.
+- **Nobody gives their own code the final review.** Codex reviews Claude's and Antigravity's branches. Claude reviews Codex's engine branches.
 - **Leave a handoff note.** When you finish, end with: the branch, what changed (files), how you checked it (build/tests/live Civil 3D), and what is not done. The user pastes this into the next agent.
 - **Build and test before handing off:** `.\build.ps1 -Configuration Debug` (builds everything and runs the tests). Report failures as they are.
 - **Review findings** go in the format: `severity (high/medium/low) · file:line · problem · concrete failure scenario · suggested fix`.
