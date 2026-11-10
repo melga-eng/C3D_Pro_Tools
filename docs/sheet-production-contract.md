@@ -170,6 +170,7 @@ Each label the tool creates carries XData (application `C3DPRO_BUILD`):
 | `RuleId` | The rule that made it |
 | `SourceKey` | The part handle, plus `start` / `end` / joint index |
 | `Layout` | The sheet it belongs to |
+| `StyleSlot` | The rule style it was made for (a name in `LabelStyles`, trimmed). Set when the label is created and never changed, even when the user restyles the label |
 | `Pin` | `Auto` or `Pinned` |
 | Recorded placement | Label style name, dragged state, dragged text location in **model** X/Y, anchor ratio along the part, text rotation |
 
@@ -191,8 +192,22 @@ What a build may do with each kind of label:
 | Tool label, pinned | Never | Never; Warning `sheets.label.orphanPinned` if its part is gone | Never | Yes |
 | Label without a build tag (placed by hand) | Never | Never | Never | Yes |
 
-**Duplicate tags.** A copied object copies its XData. When two labels carry the same `RuleId` + `SourceKey` + `Layout`, the
-lowest handle keeps the tag. The others count as hand-placed, with a Warning `sheets.label.duplicateTag`.
+**Identity.** A tool label is identified by `RuleId` + `SourceKey` + `Layout` + `StyleSlot`, each trimmed and compared ignoring
+case (`BuildTag.IdentityKey`). A rule with two styles therefore gives each target two labels with two identities.
+
+**Duplicate tags.** A copied object copies its XData. When two labels have the same identity, the lowest handle keeps the tag.
+The others count as hand-placed, with a Warning `sheets.label.duplicateTag`.
+
+**When the user changes a rule's styles**, the next build compares each target's labels with the rule's style list, slot by
+slot:
+
+| Change | Effect on existing labels | Effect on the next build |
+|---|---|---|
+| Styles reordered | None: same names, same slots | `NoChange` for those labels; the order only sets placement priority for new labels |
+| A style added | None | One new label per target for the new slot |
+| A style removed | Its labels are removed, unless pinned. A pinned one is kept with a Warning `sheets.label.orphanPinned` | Remove changes in the preview |
+| A style replaced (A → B) | Counts as removing A and adding B | Remove A's labels and add B's, so the label moves to the new style's own placement |
+| The user restyles one label in the drawing | Its slot stays; the different style name pins it | Never touched again until released |
 
 **Pin and Release.** The workspace has a Pin action and a Release action for the selected labels or for a sheet, each with its
 own preview:
@@ -224,7 +239,7 @@ Every item on the target sheets maps to one step, one owner and one acceptance c
 
 | Item | Step | Made by | Owner | Acceptance check on tile 124 |
 |---|---|---|---|---|
-| Manhole, joint, alignment and station labels (plan) | `PlanLabels` | Rules in section 4 | Claude | Every ICT structure, joint and alignment in a plan viewport has exactly one label from its rule |
+| Manhole, joint, alignment and station labels (plan) | `PlanLabels` | Rules in section 4 | Claude | Every ICT structure, joint and alignment in a plan viewport has exactly one label per style its rule selects, and no tool label whose slot is not in its rule |
 | Placement of all labels | `Arrange` | `LabelPlanner`, scored by section 9 | Claude; Codex for the score | Placement score: 0 unplaced, 0 overlaps, 0 outside the area |
 | Profile views: create, split, pack, place, viewports | `ProfileViews` | Section 6 + adapter | Codex (packing), Claude | Every ICT alignment of the tile appears in exactly one slot. Rows ≤ 450 m. Every viewport at 1:750 and locked |
 | Bands, datum, view title | `ProfileViews` | Existing `ProfileViewRecipe` and `ProfileViewMath.DatumRange` | Claude | The six bands present; the title reads "name / SCALE: H = 1:500, V = 1:50" |
@@ -721,3 +736,4 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | # | Finding | Change |
 |---|---|---|
 | 1 | medium · Profile snapshots omit the geometry needed for DIM planning and stale detection | `SceneProfile.Runs` (station/elevation runs; gaps break runs) and `ProfileViewSnapshot.DrawnParts` as `ViewPart` (stations, and outside top and bottom in the view). Section 7 maps them to `DimInput`. Both are part of the scene, so the scene stamp covers them |
+| 2 | medium · Build-tag identity cannot tell several chosen styles apart | `BuildTag.StyleSlot`, and `IdentityKey` = rule + source + sheet + slot, used for duplicate tags (section 4, "Identity"). The table "When the user changes a rule's styles" defines reordered, added, removed, replaced and restyled. The acceptance check is now "one label per selected style" (section 5) |

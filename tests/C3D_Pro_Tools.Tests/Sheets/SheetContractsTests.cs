@@ -108,7 +108,7 @@ namespace C3DProTools.Tests.Sheets
         [Fact]
         public void BuildTag_IsPinned_ByFlagOrByUserChange()
         {
-            BuildTag auto = new BuildTag("ict.plan.joint", "2A3F:start", "SW-102054", PinState.Auto, Placed);
+            BuildTag auto = new BuildTag("ict.plan.joint", "2A3F:start", "SW-102054", "Joint Plan", PinState.Auto, Placed);
             Assert.False(auto.IsPinned(Placed));
             Assert.True(auto.IsPinned(Placed with { TextYM = Placed.TextYM + 1 }));
             Assert.True((auto with { Pin = PinState.Pinned }).IsPinned(Placed));
@@ -116,6 +116,21 @@ namespace C3DProTools.Tests.Sheets
 
             Assert.False(new LabelSnapshot(DrawingObjectRef.Of("1A"), DrawingObjectRef.Of("2A3F"), "SW-102054", null, Placed).IsPinned,
                 "a hand-placed label is not a pinned tool label (it is never touched at all)");
+        }
+
+        [Fact]
+        public void BuildTag_Identity_SeparatesStyleSlots()
+        {
+            BuildTag name = new BuildTag("ict.plan.manhole", "3A1F", "SW-102054", "MH Name", PinState.Auto, Placed);
+            BuildTag data = name with { StyleSlot = "MH Data NE" };
+            Assert.NotEqual(name.IdentityKey, data.IdentityKey);
+
+            BuildTag copy = name with { StyleSlot = " mh name ", RuleId = "ICT.PLAN.MANHOLE", Pin = PinState.Pinned };
+            Assert.Equal(name.IdentityKey, copy.IdentityKey);
+
+            Assert.NotEqual(name.IdentityKey, (name with { Layout = "SW-102053" }).IdentityKey);
+            Assert.NotEqual(name.IdentityKey, (name with { SourceKey = "3A20" }).IdentityKey);
+            Assert.NotEqual((name with { RuleId = "a", SourceKey = "b|c" }).IdentityKey, (name with { RuleId = "a|b", SourceKey = "c" }).IdentityKey);
         }
 
         // ---- Selectors (section 4) --------------------------------------------------------------------------------------

@@ -147,9 +147,22 @@ namespace C3DProTools.Features.Sheets.Contracts
 
     /// <summary>The XData a tool label carries (application <c>C3DPRO_BUILD</c>; section 4).</summary>
     /// <param name="SourceKey">The part handle, plus "start" / "end" / joint index.</param>
-    internal sealed record BuildTag(string RuleId, string SourceKey, string Layout, PinState Pin, RecordedPlacement Placement)
+    /// <param name="StyleSlot">
+    /// The rule style this label was made for: the name in <see cref="LabelRule.LabelStyles"/>, trimmed. It stays what it was at
+    /// creation, even when the user restyles the label (that restyle shows in the placement, and pins it). A rule with two
+    /// styles gives each target two labels with two slots.
+    /// </param>
+    internal sealed record BuildTag(string RuleId, string SourceKey, string Layout, string StyleSlot, PinState Pin, RecordedPlacement Placement)
     {
         public const string XDataApplication = "C3DPRO_BUILD";
+
+        /// <summary>
+        /// A tool label's identity: rule, source, sheet and style slot, each trimmed, compared ignoring case. Two tags with the
+        /// same key are a copy (section 4, "Duplicate tags"); different slots are different labels.
+        /// </summary>
+        public string IdentityKey => string.Join("\u001F", Norm(RuleId), Norm(SourceKey), Norm(Layout), Norm(StyleSlot));
+
+        private static string Norm(string s) => (s ?? "").Trim().ToUpperInvariant();
 
         /// <summary>
         /// Pinned when its flag says so, or when the label as it is now differs from the placement the last build recorded.
