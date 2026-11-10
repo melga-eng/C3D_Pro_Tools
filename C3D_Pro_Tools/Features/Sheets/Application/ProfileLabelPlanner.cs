@@ -115,7 +115,7 @@ namespace C3DProTools.Features.Sheets.Application
                         $"Rule '{rule.Id}' is not a per-part pipe, structure or joint rule; it is skipped."));
                     skipped.Add(rule.Id.Trim()); continue;
                 }
-                LabelStyleKind kind = rule.Select.Kind == TargetKind.Structure ? LabelStyleKind.Structure : LabelStyleKind.Pipe;
+                LabelStyleKind kind = StyleKindOf(rule);
                 bool missing = rule.LabelStyles.Any(slot => !scene.LabelStyles.Any(s => s.Kind == kind && s.Name == slot.Trim()));
                 bool incomplete = rule.LabelStyles.Any(slot => scene.LabelStyles.Any(s => s.Kind == kind && s.Name == slot.Trim() && string.IsNullOrEmpty(s.Fingerprint)));
                 if (missing || incomplete)
@@ -201,6 +201,22 @@ namespace C3DProTools.Features.Sheets.Application
                     mine.Select((c, i) => c with { ChangeId = $"profile:{context.Sheet.Layout}:{context.View.Ref.Handle}#{i + 1}" }).ToArray()));
             }
             return new ProfileLabelsPlan(results, issues);
+        }
+
+        /// <summary>
+        /// The kind of label style a profile rule uses: crossing pipes (a pipe rule for other networks) take crossing pipe
+        /// profile label styles, other pipe and joint rules pipe label styles, structure rules structure label styles.
+        /// </summary>
+        public static LabelStyleKind StyleKindOf(LabelRule rule) =>
+            rule.Select.Kind == TargetKind.Structure ? LabelStyleKind.Structure
+            : rule.Select.Kind == TargetKind.Pipe && rule.Select.OtherNetworksOnly ? LabelStyleKind.CrossingPipe : LabelStyleKind.Pipe;
+
+        /// <summary>The profile view a profile label's source key names (see <see cref="SourceKey"/>); default when none.</summary>
+        public static DrawingObjectRef ViewOf(string sourceKey)
+        {
+            string s = sourceKey ?? "";
+            int at = s.LastIndexOf(ViewMarker, StringComparison.OrdinalIgnoreCase);
+            return at >= 0 && DrawingObjectRef.TryCreate(s.Substring(at + ViewMarker.Length), out DrawingObjectRef r) ? r : default;
         }
 
         private static ProfileLabelsPlan Invalid(string message) => new(null, new[] { OperationIssue.Error(SheetCodes.SceneIncomplete, message) });

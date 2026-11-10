@@ -12,7 +12,7 @@ namespace C3DProTools.Features.Sheets.Application
     internal static class BuildSheetsPlanner
     {
         /// <summary>The steps this version builds; the others are reported as not built yet.</summary>
-        public static readonly IReadOnlyCollection<BuildStep> Built = new[] { BuildStep.PlanLabels, BuildStep.Arrange };
+        public static readonly IReadOnlyCollection<BuildStep> Built = new[] { BuildStep.PlanLabels, BuildStep.ProfileLabels, BuildStep.Arrange };
 
         /// <summary>The source key of a sheet's Arrange change.</summary>
         public const string ArrangeSource = "arrange";
@@ -31,18 +31,25 @@ namespace C3DProTools.Features.Sheets.Application
             foreach (BuildStep step in request.Steps.Where(s => !Built.Contains(s)).OrderBy(s => s))
                 issues.Add(OperationIssue.Info(SheetCodes.StepNotBuilt, $"The {step} step is not built yet; it is left out of this build."));
 
-            bool plan = request.Steps.Contains(BuildStep.PlanLabels), arrange = request.Steps.Contains(BuildStep.Arrange);
+            bool plan = request.Steps.Contains(BuildStep.PlanLabels), profile = request.Steps.Contains(BuildStep.ProfileLabels),
+                arrange = request.Steps.Contains(BuildStep.Arrange);
             PlanLabelsPlan labels = PlanLabelPlanner.Plan(scene, rules, request.Layouts);
             issues.AddRange(labels.Issues);
             if (labels.Issues.Any(i => i.Code == SheetCodes.SceneIncomplete))
                 return BuildSheetsPreview.Empty(OperationStatus.Rejected, request.Drawing, effective, issues);
+            ProfileLabelsPlan profiles = profile ? ProfileLabelPlanner.Plan(scene, rules, ProfileViews(scene), request.Layouts) : new ProfileLabelsPlan(null, null);
+            issues.AddRange(profiles.Issues.Where(i => !issues.Contains(i)));
+            if (profiles.Issues.Any(i => i.Code == SheetCodes.SceneIncomplete))
+                return BuildSheetsPreview.Empty(OperationStatus.Rejected, request.Drawing, effective, issues);
 
             HashSet<string> wanted = new HashSet<string>(request.Layouts, StringComparer.OrdinalIgnoreCase);
             List<BuildItem> items = new List<BuildItem>();
-            foreach (SheetSnapshot sheet in scene.Sheets.Where(s => s.Kind == SheetKind.Plan && (wanted.Count == 0 || wanted.Contains(s.Layout))).OrderBy(s => s.TabOrder))
+            foreach (SheetSnapshot sheet in scene.Sheets.Where(s => s.Kind != SheetKind.Other && (wanted.Count == 0 || wanted.Contains(s.Layout))).OrderBy(s => s.TabOrder))
             {
                 List<PlannedChange> changes = new List<PlannedChange>();
-                if (plan) changes.AddRange(labels.Items.Where(i => i.Layouts.Contains(sheet.Layout, StringComparer.OrdinalIgnoreCase)).SelectMany(i => i.Changes));
+                bool isPlan = sheet.Kind == SheetKind.Plan;
+                if (isPlan && plan) changes.AddRange(labels.Items.Where(i => i.Layouts.Contains(sheet.Layout, StringComparer.OrdinalIgnoreCase)).SelectMany(i => i.Changes));
+                if (!isPlan && profile) changes.AddRange(profiles.Views.Where(v => string.Equals(v.Layout, sheet.Layout, StringComparison.OrdinalIgnoreCase)).SelectMany(v => v.Changes));
                 if (arrange)
                 {
                     int movable = Movable(scene, sheet.Layout).Count + changes.Count(c => c.Kind == ChangeKind.Add);
@@ -52,12 +59,22 @@ namespace C3DProTools.Features.Sheets.Application
                 }
                 if (changes.Count == 0) continue;
                 List<PlannedChange> numbered = changes.Select((c, i) => c with { ChangeId = $"{sheet.Layout}#{i + 1}" }).ToList();
-                items.Add(new BuildItem("plan:" + sheet.Layout, BuildItemKind.PlanSheet, new[] { sheet.Layout }, numbered));
+                items.Add(new BuildItem((isPlan ? "plan:" : "profile:") + sheet.Layout, isPlan ? BuildItemKind.PlanSheet : BuildItemKind.ProfileSheetSet,
+                    new[] { sheet.Layout }, numbered));
             }
 
             string digest = Digest(scene, effective, rules, items);
             return new BuildSheetsPreview(items.Count > 0 ? OperationStatus.Succeeded : OperationStatus.NoChange, Guid.NewGuid().ToString("N"),
                 request.Drawing, digest, effective, items, issues);
+        }
+
+        /// <summary>The profile views shown on profile sheets, each with its sheet, keeping only views the planner accepts.</summary>
+        public static List<ProfileViewLayout> ProfileViews(SheetScene scene)
+        {
+            Dictionary<string, ProfileViewSnapshot> views = scene.ProfileViews.GroupBy(v => v.Ref.Handle).ToDictionary(g => g.Key, g => g.First());
+            return ProfileViewSheets.Map(scene).Where(m => views.TryGetValue(m.View.Handle, out ProfileViewSnapshot v) && v.Alignment.IsValid
+                && double.IsFinite(v.StartStationM) && double.IsFinite(v.EndStationM) && v.EndStationM > v.StartStationM
+                && v.DrawnParts.All(p => double.IsFinite(p.StartStationM) && double.IsFinite(p.EndStationM))).ToList();
         }
 
         /// <summary>The unpinned tool labels on a sheet: what Arrange may move.</summary>
