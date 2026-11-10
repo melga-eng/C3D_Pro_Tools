@@ -282,6 +282,17 @@ namespace C3DProTools.Tests.Sheets
         }
 
         [Fact]
+        public void Issue_Layout_IsOptional_AndKeptByWith()
+        {
+            OperationIssue drawingWide = OperationIssue.Warning(SheetCodes.UnitsNotMetres, "Not metres.");
+            Assert.Null(drawingWide.Layout);
+            OperationIssue onSheet = OperationIssue.Error(SheetCodes.LabelOrphanPinned, "Orphan.", obj: DrawingObjectRef.Of("1B")) with { Layout = "SW-102054" };
+            Assert.Equal("SW-102054", onSheet.Layout);
+            Assert.Equal("SW-102054", (onSheet with { Message = "Changed." }).Layout);
+            Assert.NotEqual(onSheet, onSheet with { Layout = "SW-102053" });
+        }
+
+        [Fact]
         public void EmptyPreview_CarriesItsStatusAndNoItems()
         {
             BuildSheetsPreview p = BuildSheetsPreview.Empty(OperationStatus.Rejected, Drawing, ValidRequest(), new[] { OperationIssue.Error(SheetCodes.Busy, "busy") });
