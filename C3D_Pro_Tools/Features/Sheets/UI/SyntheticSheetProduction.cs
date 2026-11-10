@@ -536,7 +536,39 @@ namespace C3DProTools.Features.Sheets.UI
 
             try
             {
-                await Task.Delay(200, ct).ConfigureAwait(false);
+                if (ct.IsCancellationRequested)
+                {
+                    return BuildSheetsPreview.Empty(
+                        OperationStatus.Cancelled,
+                        drawing ?? _activeDrawing,
+                        null,
+                        new[] { OperationIssue.Info("sheets.cancelled", "Pin/Release preview was cancelled by user.") }
+                    );
+                }
+
+                try
+                {
+                    await Task.Delay(500, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return BuildSheetsPreview.Empty(
+                        OperationStatus.Cancelled,
+                        drawing ?? _activeDrawing,
+                        null,
+                        new[] { OperationIssue.Info("sheets.cancelled", "Pin/Release preview was cancelled by user.") }
+                    );
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    return BuildSheetsPreview.Empty(
+                        OperationStatus.Cancelled,
+                        drawing ?? _activeDrawing,
+                        null,
+                        new[] { OperationIssue.Info("sheets.cancelled", "Pin/Release preview was cancelled by user.") }
+                    );
+                }
 
                 var changes = new List<PlannedChange>();
                 if (labels != null)

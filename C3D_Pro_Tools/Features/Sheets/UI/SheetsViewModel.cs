@@ -431,6 +431,8 @@ namespace C3DProTools.Features.Sheets.UI
             {
                 IsOperationRunning = false;
                 CanCancel = false;
+                _cts?.Dispose();
+                _cts = null;
             }
         }
 
@@ -553,6 +555,8 @@ namespace C3DProTools.Features.Sheets.UI
             {
                 IsOperationRunning = false;
                 CanCancel = false;
+                _cts?.Dispose();
+                _cts = null;
             }
         }
 
@@ -672,11 +676,17 @@ namespace C3DProTools.Features.Sheets.UI
             }
 
             var reqDwg = ActiveDrawing;
+            _cts = new CancellationTokenSource();
             IsOperationRunning = true;
             CanCancel = true;
+            ProgressPercent = 0.0;
+            ProgressPhaseText = $"{(pin ? "Pinning" : "Releasing")} label {handle}...";
+            ProgressItemText = handle;
+            StatusBannerVisible = false;
+
             try
             {
-                var preview = await _service.PreviewPinAsync(reqDwg, new[] { objRef }, pin, CancellationToken.None).ConfigureAwait(true);
+                var preview = await _service.PreviewPinAsync(reqDwg, new[] { objRef }, pin, _cts.Token).ConfigureAwait(true);
 
                 if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
 
@@ -687,10 +697,24 @@ namespace C3DProTools.Features.Sheets.UI
                     LastFeedbackMessage = $"Planned {(pin ? "Pin" : "Release")} for label handle {handle}. Click Apply to commit.";
                 }
             }
+            catch (OperationCanceledException)
+            {
+                if (ActiveDrawing != null && reqDwg.Matches(ActiveDrawing))
+                {
+                    HandlePreviewResult(BuildSheetsPreview.Empty(
+                        OperationStatus.Cancelled,
+                        reqDwg,
+                        null,
+                        new[] { OperationIssue.Info("sheets.cancelled", "Pin/Release preview was cancelled by user.") }
+                    ));
+                }
+            }
             finally
             {
                 IsOperationRunning = false;
                 CanCancel = false;
+                _cts?.Dispose();
+                _cts = null;
             }
         }
 
