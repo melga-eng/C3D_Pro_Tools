@@ -63,7 +63,29 @@ namespace C3DProTools.Features.Sheets.Contracts
         public IReadOnlyList<SceneStructure> Structures { get => _structures; init => _structures = Frozen.List(value); }
     }
 
-    internal sealed record SceneProfile(DrawingObjectRef Ref, string Name, SceneProfileRole Role);
+    /// <summary>
+    /// A profile with its geometry: the station/elevation runs the adapter read (vertices, plus samples at ≤ 1 m for surface
+    /// profiles), in station order. A gap in the profile (no surface data) is a break between runs. The geometry is part of the
+    /// scene, so an edit that keeps the name and role (a regraded surface) still changes the scene stamp.
+    /// </summary>
+    internal sealed record SceneProfile(DrawingObjectRef Ref, string Name, SceneProfileRole Role, IReadOnlyList<IReadOnlyList<StationElevation>> Runs)
+    {
+        private readonly IReadOnlyList<IReadOnlyList<StationElevation>> _runs = FreezeRuns(Runs);
+        public IReadOnlyList<IReadOnlyList<StationElevation>> Runs { get => _runs; init => _runs = FreezeRuns(value); }
+
+        internal static IReadOnlyList<IReadOnlyList<StationElevation>> FreezeRuns(IEnumerable<IEnumerable<StationElevation>> runs) =>
+            Frozen.List(runs == null ? null : System.Linq.Enumerable.Select(runs, r => Frozen.List(r)));
+    }
+
+    internal enum ViewPartKind { Pipe = 0, Structure = 1 }
+
+    /// <summary>
+    /// A network part as one profile view draws it (section 7 builds DimInput from these). Pipes: stations and outside top and
+    /// bottom at both ends. Structures: StartStationM / EndStationM are its outer faces, and the levels are its top and floor.
+    /// </summary>
+    /// <param name="IsOwnNetwork">True when the part belongs to the view's own network (the ICT duct); false for a crossing part.</param>
+    internal sealed record ViewPart(DrawingObjectRef Part, ViewPartKind Kind, bool IsOwnNetwork, double StartStationM, double EndStationM,
+        double StartTopM, double StartBottomM, double EndTopM, double EndBottomM);
 
     internal sealed record AlignmentSnapshot(DrawingObjectRef Ref, string Name, double StartStationM, double EndStationM,
         IReadOnlyList<SceneProfile> Profiles, IReadOnlyList<DrawingObjectRef> ProfileViews)
@@ -74,14 +96,14 @@ namespace C3DProTools.Features.Sheets.Contracts
         public IReadOnlyList<DrawingObjectRef> ProfileViews { get => _views; init => _views = Frozen.List(value); }
     }
 
-    /// <param name="DrawnParts">The network parts this view draws (its own and crossing ones).</param>
+    /// <param name="DrawnParts">The network parts this view draws (its own and crossing ones), with their geometry in the view.</param>
     /// <param name="VerticalExaggeration">Vertical scale ÷ horizontal scale: 10 for H 1:500, V 1:50.</param>
     internal sealed record ProfileViewSnapshot(DrawingObjectRef Ref, string Name, DrawingObjectRef Alignment,
         double StartStationM, double EndStationM, double ElevationMinM, double ElevationMaxM, string BandSetName,
-        IReadOnlyList<DrawingObjectRef> DrawnParts, double VerticalExaggeration)
+        IReadOnlyList<ViewPart> DrawnParts, double VerticalExaggeration)
     {
-        private readonly IReadOnlyList<DrawingObjectRef> _parts = Frozen.List(DrawnParts);
-        public IReadOnlyList<DrawingObjectRef> DrawnParts { get => _parts; init => _parts = Frozen.List(value); }
+        private readonly IReadOnlyList<ViewPart> _parts = Frozen.List(DrawnParts);
+        public IReadOnlyList<ViewPart> DrawnParts { get => _parts; init => _parts = Frozen.List(value); }
     }
 
     /// <summary>
@@ -125,9 +147,22 @@ namespace C3DProTools.Features.Sheets.Contracts
 
     /// <summary>The XData a tool label carries (application <c>C3DPRO_BUILD</c>; section 4).</summary>
     /// <param name="SourceKey">The part handle, plus "start" / "end" / joint index.</param>
-    internal sealed record BuildTag(string RuleId, string SourceKey, string Layout, PinState Pin, RecordedPlacement Placement)
+    /// <param name="StyleSlot">
+    /// The rule style this label was made for: the name in <see cref="LabelRule.LabelStyles"/>, trimmed. It stays what it was at
+    /// creation, even when the user restyles the label (that restyle shows in the placement, and pins it). A rule with two
+    /// styles gives each target two labels with two slots.
+    /// </param>
+    internal sealed record BuildTag(string RuleId, string SourceKey, string Layout, string StyleSlot, PinState Pin, RecordedPlacement Placement)
     {
         public const string XDataApplication = "C3DPRO_BUILD";
+
+        /// <summary>
+        /// A tool label's identity: rule, source, sheet and style slot, each trimmed, compared ignoring case. Two tags with the
+        /// same key are a copy (section 4, "Duplicate tags"); different slots are different labels.
+        /// </summary>
+        public string IdentityKey => string.Join("\u001F", Norm(RuleId), Norm(SourceKey), Norm(Layout), Norm(StyleSlot));
+
+        private static string Norm(string s) => (s ?? "").Trim().ToUpperInvariant();
 
         /// <summary>
         /// Pinned when its flag says so, or when the label as it is now differs from the placement the last build recorded.

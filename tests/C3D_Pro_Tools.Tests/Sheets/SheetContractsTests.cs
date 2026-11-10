@@ -16,15 +16,15 @@ namespace C3DProTools.Tests.Sheets
         /// <summary>The starting rule set of contract section 4.</summary>
         private static LabelRuleSet StartingSet() => new LabelRuleSet("KSIA ICT", 1, new[]
         {
-            new LabelRule("ict.plan.manhole", ViewKind.Plan, new TargetSelector(TargetKind.Structure, "ICT*"), "MH Plan", LabelAnchor.Insertion, Priority: 2),
-            new LabelRule("ict.plan.joint", ViewKind.Plan, new TargetSelector(TargetKind.Joint, "ICT*"), "Joint Plan", LabelAnchor.EachJoint, Priority: 3),
-            new LabelRule("ict.plan.alignment", ViewKind.Plan, new TargetSelector(TargetKind.Alignment, "ICT*"), "Alignment Name", LabelAnchor.Insertion, LabelFrequency.OncePerViewport),
-            new LabelRule("ict.plan.stations", ViewKind.Plan, new TargetSelector(TargetKind.AlignmentStations, "ICT*"), "Chainage 20m", LabelAnchor.Insertion, Leader: false),
-            new LabelRule("ict.profile.manhole", ViewKind.Profile, new TargetSelector(TargetKind.Structure, "ICT*"), "MH Profile", LabelAnchor.Insertion),
-            new LabelRule("ict.profile.segment", ViewKind.Profile, new TargetSelector(TargetKind.Pipe, "ICT*"), "Segment L S", LabelAnchor.Middle),
-            new LabelRule("ict.profile.joint", ViewKind.Profile, new TargetSelector(TargetKind.Joint, "ICT*"), "Joint Profile", LabelAnchor.EachJoint),
-            new LabelRule("other.profile.crossing", ViewKind.Profile, new TargetSelector(TargetKind.Pipe, OtherNetworksOnly: true), "Crossing", LabelAnchor.Middle),
-            new LabelRule("other.profile.structure", ViewKind.Profile, new TargetSelector(TargetKind.Structure, OtherNetworksOnly: true), "Other Structure", LabelAnchor.Insertion),
+            new LabelRule("ict.plan.manhole", ViewKind.Plan, new TargetSelector(TargetKind.Structure, "ICT*"), new[] { "MH Plan" }, LabelAnchor.Insertion, Priority: 2),
+            new LabelRule("ict.plan.joint", ViewKind.Plan, new TargetSelector(TargetKind.Joint, "ICT*"), new[] { "Joint Plan" }, LabelAnchor.EachJoint, Priority: 3),
+            new LabelRule("ict.plan.alignment", ViewKind.Plan, new TargetSelector(TargetKind.Alignment, "ICT*"), new[] { "Alignment Name" }, LabelAnchor.Insertion, LabelFrequency.OncePerViewport),
+            new LabelRule("ict.plan.stations", ViewKind.Plan, new TargetSelector(TargetKind.AlignmentStations, "ICT*"), new[] { "Chainage 20m" }, LabelAnchor.Insertion, Leader: false),
+            new LabelRule("ict.profile.manhole", ViewKind.Profile, new TargetSelector(TargetKind.Structure, "ICT*"), new[] { "MH Profile" }, LabelAnchor.Insertion),
+            new LabelRule("ict.profile.segment", ViewKind.Profile, new TargetSelector(TargetKind.Pipe, "ICT*"), new[] { "Segment L S" }, LabelAnchor.Middle),
+            new LabelRule("ict.profile.joint", ViewKind.Profile, new TargetSelector(TargetKind.Joint, "ICT*"), new[] { "Joint Profile" }, LabelAnchor.EachJoint),
+            new LabelRule("other.profile.crossing", ViewKind.Profile, new TargetSelector(TargetKind.Pipe, OtherNetworksOnly: true), new[] { "Crossing" }, LabelAnchor.Middle),
+            new LabelRule("other.profile.structure", ViewKind.Profile, new TargetSelector(TargetKind.Structure, OtherNetworksOnly: true), new[] { "Other Structure" }, LabelAnchor.Insertion),
         });
 
         private static BuildSheetsRequest ValidRequest() => new BuildSheetsRequest
@@ -55,7 +55,7 @@ namespace C3DProTools.Tests.Sheets
             DimRules d = new DimRules();
             Assert.Equal(2.0, d.MajorGradeChangePct);
             Assert.Equal(5.0, d.MergeWithinM);
-            Assert.Equal(15.0, d.MinSpacingM);
+            Assert.Equal(10.0, d.MinSpacingM);
             Assert.True(d.AtStructureFaces);
             Assert.Equal(0.30, d.MinClearanceM);
             Assert.True(new DimInput().OwnsEnd);
@@ -108,7 +108,7 @@ namespace C3DProTools.Tests.Sheets
         [Fact]
         public void BuildTag_IsPinned_ByFlagOrByUserChange()
         {
-            BuildTag auto = new BuildTag("ict.plan.joint", "2A3F:start", "SW-102054", PinState.Auto, Placed);
+            BuildTag auto = new BuildTag("ict.plan.joint", "2A3F:start", "SW-102054", "Joint Plan", PinState.Auto, Placed);
             Assert.False(auto.IsPinned(Placed));
             Assert.True(auto.IsPinned(Placed with { TextYM = Placed.TextYM + 1 }));
             Assert.True((auto with { Pin = PinState.Pinned }).IsPinned(Placed));
@@ -116,6 +116,21 @@ namespace C3DProTools.Tests.Sheets
 
             Assert.False(new LabelSnapshot(DrawingObjectRef.Of("1A"), DrawingObjectRef.Of("2A3F"), "SW-102054", null, Placed).IsPinned,
                 "a hand-placed label is not a pinned tool label (it is never touched at all)");
+        }
+
+        [Fact]
+        public void BuildTag_Identity_SeparatesStyleSlots()
+        {
+            BuildTag name = new BuildTag("ict.plan.manhole", "3A1F", "SW-102054", "MH Name", PinState.Auto, Placed);
+            BuildTag data = name with { StyleSlot = "MH Data NE" };
+            Assert.NotEqual(name.IdentityKey, data.IdentityKey);
+
+            BuildTag copy = name with { StyleSlot = " mh name ", RuleId = "ICT.PLAN.MANHOLE", Pin = PinState.Pinned };
+            Assert.Equal(name.IdentityKey, copy.IdentityKey);
+
+            Assert.NotEqual(name.IdentityKey, (name with { Layout = "SW-102053" }).IdentityKey);
+            Assert.NotEqual(name.IdentityKey, (name with { SourceKey = "3A20" }).IdentityKey);
+            Assert.NotEqual((name with { RuleId = "a", SourceKey = "b|c" }).IdentityKey, (name with { RuleId = "a|b", SourceKey = "c" }).IdentityKey);
         }
 
         // ---- Selectors (section 4) --------------------------------------------------------------------------------------
@@ -171,14 +186,29 @@ namespace C3DProTools.Tests.Sheets
             TargetKind kind = (TargetKind)kindValue;
             LabelAnchor at = (LabelAnchor)atValue;
             LabelFrequency every = (LabelFrequency)everyValue;
-            LabelRuleSet set = new LabelRuleSet("s", 1, new[] { new LabelRule("r", ViewKind.Plan, new TargetSelector(kind), "Style", at, every) });
+            LabelRuleSet set = new LabelRuleSet("s", 1, new[] { new LabelRule("r", ViewKind.Plan, new TargetSelector(kind), new[] { "Style" }, at, every) });
             Assert.Equal(new[] { code }, Codes(LabelRuleValidation.Validate(set)));
+        }
+
+        [Fact]
+        public void Rule_SeveralStyles_GiveSeveralLabels_AndMustBeDistinct()
+        {
+            LabelRule two = new LabelRule("ict.plan.manhole", ViewKind.Plan, new TargetSelector(TargetKind.Structure), new[] { "MH Name", "MH Data NE" }, LabelAnchor.Insertion);
+            Assert.Empty(LabelRuleValidation.Validate(new LabelRuleSet("s", 1, new[] { two })));
+            Assert.Equal(2, two.LabelStyles.Count);
+
+            LabelRule dup = two with { LabelStyles = new[] { "MH Name", "mh name " } };
+            Assert.Equal(new[] { SheetCodes.RuleStyleDuplicate }, Codes(LabelRuleValidation.Validate(new LabelRuleSet("s", 1, new[] { dup }))));
+
+            LabelRule none = two with { LabelStyles = Array.Empty<string>() };
+            Assert.Equal(new[] { SheetCodes.RuleStyleEmpty }, Codes(LabelRuleValidation.Validate(new LabelRuleSet("s", 1, new[] { none }))));
+            Assert.Equal(new[] { SheetCodes.RuleStyleEmpty }, Codes(LabelRuleValidation.Validate(new LabelRuleSet("s", 1, new[] { two with { LabelStyles = null } }))));
         }
 
         [Fact]
         public void Rule_PerRun_IsAllowedForPipes()
         {
-            LabelRuleSet set = new LabelRuleSet("s", 1, new[] { new LabelRule("r", ViewKind.Plan, new TargetSelector(TargetKind.Pipe), "Style", LabelAnchor.Middle, LabelFrequency.PerRun) });
+            LabelRuleSet set = new LabelRuleSet("s", 1, new[] { new LabelRule("r", ViewKind.Plan, new TargetSelector(TargetKind.Pipe), new[] { "Style" }, LabelAnchor.Middle, LabelFrequency.PerRun) });
             Assert.Empty(LabelRuleValidation.Validate(set));
         }
 
@@ -187,10 +217,10 @@ namespace C3DProTools.Tests.Sheets
         {
             LabelRuleSet set = new LabelRuleSet(" ", 1, new[]
             {
-                new LabelRule("", ViewKind.Plan, new TargetSelector(TargetKind.Structure), " ", LabelAnchor.Insertion),
-                new LabelRule("bad.enum", (ViewKind)9, new TargetSelector(TargetKind.Structure), "S", LabelAnchor.Insertion),
-                new LabelRule("no.selector", ViewKind.Plan, null, "S", LabelAnchor.Insertion),
-                new LabelRule("plan.crossing", ViewKind.Plan, new TargetSelector(TargetKind.Pipe, OtherNetworksOnly: true), "S", LabelAnchor.Middle),
+                new LabelRule("", ViewKind.Plan, new TargetSelector(TargetKind.Structure), new[] { " " }, LabelAnchor.Insertion),
+                new LabelRule("bad.enum", (ViewKind)9, new TargetSelector(TargetKind.Structure), new[] { "S" }, LabelAnchor.Insertion),
+                new LabelRule("no.selector", ViewKind.Plan, null, new[] { "S" }, LabelAnchor.Insertion),
+                new LabelRule("plan.crossing", ViewKind.Plan, new TargetSelector(TargetKind.Pipe, OtherNetworksOnly: true), new[] { "S" }, LabelAnchor.Middle),
                 null,
             });
             Assert.Equal(
@@ -297,8 +327,31 @@ namespace C3DProTools.Tests.Sheets
         }
 
         [Fact]
+        public void SceneGeometry_IsFrozen_AndEqualOnlyWhenTheSame()
+        {
+            List<StationElevation> run = new List<StationElevation> { new(0, 612.5), new(10, 612.7) };
+            SceneProfile fg = new SceneProfile(DrawingObjectRef.Of("5A"), "FG", SceneProfileRole.Proposed, new[] { run });
+            run.Add(new StationElevation(20, 612.9));
+            Assert.Single(fg.Runs);
+            Assert.Equal(2, fg.Runs[0].Count);
+
+            SceneProfile regraded = fg with { Runs = new[] { new[] { new StationElevation(0, 612.5), new StationElevation(10, 612.8) } } };
+            Assert.Equal(612.8, regraded.Runs[0][1].ElevationM);
+            Assert.Equal(612.7, fg.Runs[0][1].ElevationM);
+
+            List<ViewPart> parts = new List<ViewPart> { new(DrawingObjectRef.Of("6B"), ViewPartKind.Pipe, true, 0, 44.58, 611.8, 611.0, 611.6, 610.8) };
+            ProfileViewSnapshot view = new ProfileViewSnapshot(DrawingObjectRef.Of("7C"), "ICT-ALI-124-1-89-01", DrawingObjectRef.Of("8D"),
+                0, 313.56, 605, 615, "KSIA bands", parts, 10);
+            parts.Clear();
+            Assert.Single(view.DrawnParts);
+            Assert.Equal(611.0, view.DrawnParts[0].StartBottomM);
+        }
+
+        [Fact]
         public void NullLists_BecomeEmpty()
         {
+            Assert.Empty(new SceneProfile(DrawingObjectRef.Of("5A"), "FG", SceneProfileRole.Proposed, null).Runs);
+            Assert.Empty(new DimInput().ProposedSurface);
             Assert.Empty(new ProfileSheetPlan(null, null).Sheets);
             Assert.Empty(new DimPlan(null, null).Issues);
             Assert.Empty(new ContinuationPlan(null, null).Edges);
