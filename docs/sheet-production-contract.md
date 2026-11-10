@@ -239,7 +239,7 @@ Every item on the target sheets maps to one step, one owner and one acceptance c
 
 | Item | Step | Made by | Owner | Acceptance check on tile 124 |
 |---|---|---|---|---|
-| Manhole, joint, alignment and station labels (plan) | `PlanLabels` | Rules in section 4 | Claude | Every ICT structure, joint and alignment in a plan viewport has exactly one label per style its rule selects, and no tool label whose slot is not in its rule |
+| Manhole, joint, alignment and station labels (plan) | `PlanLabels` | Rules in section 4 | Claude | Every ICT structure, joint and alignment in a plan viewport has exactly one label per style its rule selects, and no tool label whose slot is not in its rule, except pinned labels kept and reported as `sheets.label.orphanPinned` |
 | Placement of all labels | `Arrange` | `LabelPlanner`, scored by section 9 | Claude; Codex for the score | Placement score: 0 unplaced, 0 overlaps, 0 outside the area |
 | Profile views: create, split, pack, place, viewports | `ProfileViews` | Section 6 + adapter | Codex (packing), Claude | Every ICT alignment of the tile appears in exactly one slot. Rows ≤ 450 m. Every viewport at 1:750 and locked |
 | Bands, datum, view title | `ProfileViews` | Existing `ProfileViewRecipe` and `ProfileViewMath.DatumRange` | Claude | The six bands present; the title reads "name / SCALE: H = 1:500, V = 1:50" |
@@ -737,3 +737,4 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 |---|---|---|
 | 1 | medium · Profile snapshots omit the geometry needed for DIM planning and stale detection | `SceneProfile.Runs` (station/elevation runs; gaps break runs) and `ProfileViewSnapshot.DrawnParts` as `ViewPart` (stations, and outside top and bottom in the view). Section 7 maps them to `DimInput`. Both are part of the scene, so the scene stamp covers them |
 | 2 | medium · Build-tag identity cannot tell several chosen styles apart | `BuildTag.StyleSlot`, and `IdentityKey` = rule + source + sheet + slot, used for duplicate tags (section 4, "Identity"). The table "When the user changes a rule's styles" defines reordered, added, removed, replaced and restyled. The acceptance check is now "one label per selected style" (section 5) |
+| 3 | low · The acceptance wording omits the pinned-label exception | Section 5: "…except pinned labels kept and reported as `sheets.label.orphanPinned`" |
