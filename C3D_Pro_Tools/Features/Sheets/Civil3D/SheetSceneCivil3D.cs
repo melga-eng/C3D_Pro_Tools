@@ -99,6 +99,13 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 List<AlignmentSnapshot> alignments = ReadAlignments(tr, db, civil, views, crossings);
                 _ct.ThrowIfCancellationRequested();
 
+                // A role no profile matches usually means a stale surface name in the role settings (Profile View Tools).
+                foreach ((SceneProfileRole role, string surface) in new[] { (SceneProfileRole.Existing, _rules.ExistingSurface), (SceneProfileRole.Proposed, _rules.ProposedSurface) })
+                    if (alignments.Count > 0 && !alignments.Any(a => a.Profiles.Any(p => p.Role == role)))
+                        _issues.Add(OperationIssue.Warning(SheetCodes.SceneRoleUnmatched, string.IsNullOrWhiteSpace(surface)
+                            ? $"No {role.ToString().ToLowerInvariant()} ground surface is set, so no profile has that role. Set it in Profile View Tools."
+                            : $"No profile was sampled from the {role.ToString().ToLowerInvariant()} surface \"{surface}\". Check its name in Profile View Tools; the drawing's surfaces may be named differently."));
+
                 List<SheetSnapshot> sheets = ReadSheets(tr, db, wanted, views, viewports);
                 List<LabelSnapshot> labels = ReadLabels(tr, db, viewports);
 
@@ -469,7 +476,9 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         Point3d at = label.LabelLocation;
                         double? ratio = null;
                         if (label is PipeLabel pl) try { ratio = pl.Ratio; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                        RecordedPlacement current = new RecordedPlacement(label.StyleName, label.Dragged, at.X, at.Y, ratio, label.RotationAngle);
+                        // RotationAngle throws on labels that cannot rotate (most network labels): read it only when it exists.
+                        double rotation = label.CanRotate ? label.RotationAngle : 0.0;
+                        RecordedPlacement current = new RecordedPlacement(label.StyleName, label.Dragged, at.X, at.Y, ratio, rotation);
                         BuildTag tag = BuildXData.Decode(label.GetXDataForApplication(BuildTag.XDataApplication));
                         string layout = byTab.FirstOrDefault(v => v.Sees(at))?.Layout ?? "";
                         // A label whose part is gone stays in the scene (Target = default): it is still an obstacle, and a pinned

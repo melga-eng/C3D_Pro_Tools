@@ -16,6 +16,8 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string Internal = "sheets.internal";
         /// <summary>An object the scene reader could not read: left out of the scene, with a warning naming it.</summary>
         public const string SceneReadFailed = "sheets.scene.readFailed";
+        /// <summary>No profile in the drawing has the existing (or proposed) role: the role's surface name is probably not the drawing's.</summary>
+        public const string SceneRoleUnmatched = "sheets.scene.roleUnmatched";
 
         public const string RequestDrawing = "sheets.request.drawing";
         public const string RequestNoSteps = "sheets.request.noSteps";
