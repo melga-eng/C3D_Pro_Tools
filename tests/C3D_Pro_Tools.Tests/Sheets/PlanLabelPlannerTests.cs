@@ -289,6 +289,24 @@ namespace C3DProTools.Tests.Sheets
         }
 
         [Fact]
+        public void AStyleThatCannotBeFingerprinted_SkipsItsRule_SoNoEditCanSlipPastTwoIncompleteReads()
+        {
+            // Two reads, before and after an edit, both incomplete for "MH Name": nothing must be planned (so nothing applied).
+            LabelSnapshot existing = Tool("A30", "ict.plan.manhole", "31", "SW-A", "MH Name", "31");
+            SheetScene incomplete = Scene(new[] { existing }) with
+            {
+                LabelStyles = Scene().LabelStyles.Select(s => s.Name == "MH Name" ? s with { Fingerprint = "" } : s).ToList()
+            };
+            LabelRuleSet rules = Rules(Manholes("MH Name"), Joints("Joint"));
+            PlanLabelsPlan before = PlanLabelPlanner.Plan(incomplete, rules, null);
+            PlanLabelsPlan after = PlanLabelPlanner.Plan(incomplete, rules, null);
+            Assert.DoesNotContain(before.Items.SelectMany(i => i.Changes), c => c.RuleId == "ict.plan.manhole");
+            Assert.DoesNotContain(after.Items.SelectMany(i => i.Changes), c => c.RuleId == "ict.plan.manhole");
+            Assert.Contains(before.Issues, i => i.Code == SheetCodes.FingerprintIncomplete && i.Severity == IssueSeverity.Error && i.Message.Contains("MH Name"));
+            Assert.Contains(before.Items.SelectMany(i => i.Changes), c => c.RuleId == "ict.plan.joint");   // other rules still plan
+        }
+
+        [Fact]
         public void Digest_Changes_WhenALabelledPartMovesWithinItsSheet()
         {
             LabelRuleSet rules = Rules(Manholes("MH Name"));

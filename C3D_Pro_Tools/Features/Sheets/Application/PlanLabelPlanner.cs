@@ -128,6 +128,16 @@ namespace C3DProTools.Features.Sheets.Application
                         $"Rule \"{rule.Id}\": the {styleKind.ToString().ToLowerInvariant()} label style{(missing.Count > 1 ? "s" : "")} {string.Join(", ", missing.Select(m => $"\"{m}\""))} {(missing.Count > 1 ? "are" : "is")} not in this drawing. The rule is skipped and its labels are left as they are."));
                     continue;
                 }
+                // A style that cannot be fingerprinted in full cannot be checked for edits between Preview and Apply, so a rule
+                // using one plans nothing (and leaves its labels as they are), like a missing style.
+                List<string> unknown = rule.LabelStyles.Where(st => scene.LabelStyles.Any(x => x.Kind == styleKind && x.Name.Equals(st.Trim(), StringComparison.Ordinal)
+                    && string.IsNullOrEmpty(x.Fingerprint))).ToList();
+                if (unknown.Count > 0)
+                {
+                    issues.Add(OperationIssue.Error(SheetCodes.FingerprintIncomplete,
+                        $"Rule \"{rule.Id}\": label style{(unknown.Count > 1 ? "s" : "")} {string.Join(", ", unknown.Select(m => $"\"{m}\""))} could not be read in full, so a change to {(unknown.Count > 1 ? "them" : "it")} after the preview could not be detected. The rule is skipped and its labels are left as they are; see the log for why the style could not be read."));
+                    continue;
+                }
                 foreach (string style in rule.LabelStyles) usable.Add((rule, style.Trim()));
             }
             HashSet<string> skippedRules = new HashSet<string>(rules.Rules.Where(r => r != null && r.View == ViewKind.Plan).Select(r => r.Id.Trim())
