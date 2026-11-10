@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -7,24 +8,57 @@ using Autodesk.AutoCAD.Geometry;
 using ErrorStatus = Autodesk.AutoCAD.Runtime.ErrorStatus;
 
 // Content fingerprints for the scene stamp (docs/sheet-production-contract.md, section 10): a style keeps its name and handle
-// when it is edited, so what it contains is hashed instead. DBObject.DwgOut files the object's own data through this filer;
+// when it is edited, so what it contains is hashed instead: the object and the objects it owns. DBObject.DwgOut files each one through this filer;
 // every value written is fed to SHA-256. References to other objects are filed as their handles, so pointing at a different
 // object changes the hash, while a change inside the referenced object changes only that object's own fingerprint.
 namespace C3DProTools.Features.Sheets.Civil3D
 {
     internal static class StyleFingerprint
     {
-        /// <summary>The fingerprint of one object (open for read), as lowercase hex; empty when it cannot be filed out.</summary>
-        public static string Of(DBObject obj)
+        /// <summary>How deep owned objects are followed (style → component → its own parts …).</summary>
+        private const int MaxDepth = 6;
+
+        /// <summary>
+        /// The fingerprint of an object and everything it owns, as lowercase hex; empty when the object cannot be filed out.
+        /// A Civil 3D label style keeps its text, line and block components as separate objects it owns (checked live,
+        /// 2026-11-10: editing a component's text height left the style's own filed data unchanged). So the objects the style
+        /// files as owned are followed, and a label style's components are added explicitly too, in case they are not filed.
+        /// </summary>
+        public static string Of(Transaction tr, DBObject obj)
         {
             if (obj == null) return "";
             using (IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+            {
+                if (!Add(tr, obj, hash, new HashSet<ObjectId>(), 0)) return "";
+                return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            }
+        }
+
+        private static bool Add(Transaction tr, DBObject obj, IncrementalHash hash, HashSet<ObjectId> seen, int depth)
+        {
+            if (!seen.Add(obj.ObjectId)) return true;
+            List<ObjectId> owned;
             using (HashingDwgFiler filer = new HashingDwgFiler(hash))
             {
                 try { obj.DwgOut(filer); }
-                catch (Exception ex) { C3DProLogger.Warn($"Sheet scene: {obj.GetType().Name} {obj.Handle} could not be filed out for its fingerprint", ex); return ""; }
-                return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+                catch (Exception ex) { C3DProLogger.Warn($"Sheet scene: {obj.GetType().Name} {obj.Handle} could not be filed out for its fingerprint", ex); return false; }
+                owned = filer.Owned;
             }
+            if (obj is Autodesk.Civil.DatabaseServices.Styles.LabelStyle style)
+                foreach (Autodesk.Civil.DatabaseServices.Styles.LabelStyleComponentType kind in Enum.GetValues(typeof(Autodesk.Civil.DatabaseServices.Styles.LabelStyleComponentType)))
+                {
+                    try { foreach (ObjectId id in style.GetComponents(kind)) owned.Add(id); }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
+            if (depth >= MaxDepth) return true;
+            foreach (ObjectId id in owned)
+            {
+                if (id.IsNull || id.IsErased || seen.Contains(id)) continue;
+                DBObject child;
+                try { child = tr.GetObject(id, OpenMode.ForRead); } catch (Exception) { continue; }
+                if (!Add(tr, child, hash, seen, depth + 1)) return false;
+            }
+            return true;
         }
     }
 
@@ -36,6 +70,9 @@ namespace C3DProTools.Features.Sheets.Civil3D
         private ErrorStatus _status = ErrorStatus.OK;
 
         public HashingDwgFiler(IncrementalHash hash) { _hash = hash; }
+
+        /// <summary>The objects filed as owned (hard or soft ownership), in filing order: the parts the object is made of.</summary>
+        public List<ObjectId> Owned { get; } = new List<ObjectId>();
 
         private void Add(byte tag, ReadOnlySpan<byte> bytes)
         {
@@ -63,7 +100,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
         public override void WriteBytes(byte[] value) => Add(4, value ?? Array.Empty<byte>());
         public override void WriteDouble(double value) => Add(5, value);
         public override void WriteHandle(Handle handle) => Add(6, handle.Value);
-        public override void WriteHardOwnershipId(ObjectId value) => AddHandle(7, value);
+        public override void WriteHardOwnershipId(ObjectId value) { AddHandle(7, value); if (!value.IsNull) Owned.Add(value); }
         public override void WriteHardPointerId(ObjectId value) => AddHandle(8, value);
         public override void WriteInt16(short value) => Add(9, (long)value);
         public override void WriteInt32(int value) => Add(10, (long)value);
@@ -71,7 +108,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
         public override void WritePoint2d(Point2d value) { Add(12, value.X); Add(12, value.Y); }
         public override void WritePoint3d(Point3d value) { Add(13, value.X); Add(13, value.Y); Add(13, value.Z); }
         public override void WriteScale3d(Scale3d value) { Add(14, value.X); Add(14, value.Y); Add(14, value.Z); }
-        public override void WriteSoftOwnershipId(ObjectId value) => AddHandle(15, value);
+        public override void WriteSoftOwnershipId(ObjectId value) { AddHandle(15, value); if (!value.IsNull) Owned.Add(value); }
         public override void WriteSoftPointerId(ObjectId value) => AddHandle(16, value);
         public override void WriteString(string value) => Add(17, Encoding.UTF8.GetBytes(value ?? ""));
         public override void WriteUInt16(ushort value) => Add(18, (long)value);

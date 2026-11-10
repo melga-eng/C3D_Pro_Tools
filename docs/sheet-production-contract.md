@@ -663,9 +663,11 @@ contains:
   together with the text styles they reference.
 - Handle references are filed as handles, so a reference to a different object changes the hash. A change inside the
   referenced object changes only that object's own fingerprint.
-- `feature/sheet-scene` verifies live that editing a label style component (for example its text height) changes the
-  fingerprint. If some Civil 3D style does not file its components that way, the adapter adds those components' own objects
-  to the covered list.
+- **Checked live (2026-11-10, TEST DRAWING.dwg):** a label style files its own data only. Its text, line and block components are
+  separate objects it owns (owner = the style), so changing a component's text height left the style's own fingerprint
+  unchanged. The fingerprint therefore covers the style **and every object it owns**: the owned IDs the filer sees, followed to
+  six levels, plus each label style's components from `LabelStyle.GetComponents`. Whether that catches the edit is re-checked
+  live after the next install.
 
 **Postcondition (a second safety net).** Before an item commits, every label and DIM it created or moved is measured again:
 - each label's outline must match its planned box to 0.5 mm on paper
