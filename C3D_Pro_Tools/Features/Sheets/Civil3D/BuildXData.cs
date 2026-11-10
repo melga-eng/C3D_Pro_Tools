@@ -65,6 +65,34 @@ namespace C3DProTools.Features.Sheets.Civil3D
             }
         }
 
+        /// <summary>Writes (or replaces) the build record of one sheet and step, in the caller's transaction.</summary>
+        public static void WriteRecord(Transaction tr, Database db, string layout, BuildStep step, string hash)
+        {
+            DBDictionary nod = (DBDictionary)tr.GetObject(db.NamedObjectsDictionaryId, OpenMode.ForRead);
+            DBDictionary dict;
+            if (nod.Contains(RecordsDictionary)) dict = (DBDictionary)tr.GetObject(nod.GetAt(RecordsDictionary), OpenMode.ForWrite);
+            else
+            {
+                nod.UpgradeOpen();
+                dict = new DBDictionary();
+                nod.SetAt(RecordsDictionary, dict);
+                tr.AddNewlyCreatedDBObject(dict, true);
+            }
+            string key = layout + "|" + step;
+            ResultBuffer data = new ResultBuffer(new TypedValue((int)DxfCode.Text, hash ?? ""));
+            if (dict.Contains(key))
+            {
+                Xrecord x = (Xrecord)tr.GetObject(dict.GetAt(key), OpenMode.ForWrite);
+                x.Data = data;
+            }
+            else
+            {
+                Xrecord x = new Xrecord { Data = data };
+                dict.SetAt(key, x);
+                tr.AddNewlyCreatedDBObject(x, true);
+            }
+        }
+
         /// <summary>The build records: one XRecord per "layout|step", holding the step's input hash as its only text value.</summary>
         public static List<BuildRecord> ReadRecords(Transaction tr, Database db)
         {

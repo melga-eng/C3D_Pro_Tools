@@ -273,6 +273,26 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
 - **The command `C3DProPlanLabels`:** Preview, the default, writes the plan to `%TEMP%\C3DProPlanLabels.txt`; Apply writes it.
   Sheet names limit it to those sheets. Rules come from `C3DPro.project.json` beside the drawing.
 
+### The build so far (`BuildSheetsPlanner`, `BuildSheetsCivil3D`, `SheetProductionService`)
+
+- **Steps built:** PlanLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
+- **One item per plan sheet, in one transaction:** that sheet's PlanLabels changes, then **Arrange**, then the build records.
+  - Arrange is the Annotation Studio arranger, with its saved settings. It may move only that sheet's unpinned tool labels,
+    including those just added. Pinned and hand-placed labels are obstacles. Styles of rules with `Leader` are dragged.
+  - After arranging, every movable label's tag is re-recorded, so the tool's own move is never taken for the user's.
+  - Labels with no clear place stay where they are (Warning `sheets.arrange.unresolved`).
+- **The preview's `SceneStamp`** is the PlanLabels digest of the joined items, plus the requested steps, plus the current
+  placement of every label on each sheet being arranged. Apply plans again and writes only when the stamp is equal
+  (otherwise `sheets.preview.stale`).
+- **Rules:** a request without rules uses the project's single rule set from `C3DPro.project.json`.
+- **Apply from the palette** runs in the document's command context, so a build is one UNDO step.
+- **The overview** shows a state for each plan sheet:
+  - PlanLabels: NotBuilt, OutOfDate, Built or NotApplicable, from whether changes are planned and tool labels exist
+  - Arrange: Built when a build recorded it and nothing is planned
+  - other steps and profile sheets: NotApplicable for now
+- **Pin and Release are not built yet:** `PreviewPinAsync` says so.
+- **The command `C3DProBuildSheets`** (Preview, or Apply) runs this service from the command line, for live tests.
+
 ## 5. Build steps and the inventory
 
 Every item on the target sheets maps to one step, one owner and one acceptance check.

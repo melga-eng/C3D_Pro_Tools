@@ -26,23 +26,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
             {
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
-                    EnsureRegApp(tr, db);
-                    foreach (PlannedChange c in item.Changes)
-                    {
-                        if (c.Step != BuildStep.PlanLabels || c.Target != ChangeTarget.Label) continue;
-                        if (c.Kind == ChangeKind.Add)
-                        {
-                            created.Add(Add(tr, db, civil, c));
-                            added++;
-                        }
-                        else if (c.Kind == ChangeKind.Remove)
-                        {
-                            if (!c.Existing.HasValue || !DrawingRefs3D.TryResolve(db, c.Existing.Value, out ObjectId id)) continue;   // gone already
-                            DBObject label = tr.GetObject(id, OpenMode.ForWrite);
-                            label.Erase();
-                            removed++;
-                        }
-                    }
+                    (added, removed) = ApplyChanges(tr, db, civil, item.Changes, created);
                     tr.Commit();
                 }
                 return new BuildItemOutcome(item.ItemKey, ItemStatus.Committed, added, 0, removed, created, null);
@@ -53,6 +37,33 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 return new BuildItemOutcome(item.ItemKey, ItemStatus.RolledBack, 0, 0, 0, null,
                     new[] { OperationIssue.Error(SheetCodes.ApplyPostconditionFailed, $"The labels of this sheet could not be written, so none were: {ex.Message}") with { Layout = item.Layouts.Count > 0 ? item.Layouts[0] : null } });
             }
+        }
+
+        /// <summary>
+        /// The PlanLabels changes of an item, in the caller's transaction (the build joins them with Arrange in one): labels
+        /// added with their tag, labels erased. Throws on the first failure, so the caller's transaction rolls the item back.
+        /// </summary>
+        internal static (int added, int removed) ApplyChanges(Transaction tr, Database db, CivilDocument civil, IEnumerable<PlannedChange> changes, List<DrawingObjectRef> created)
+        {
+            int added = 0, removed = 0;
+            EnsureRegApp(tr, db);
+            foreach (PlannedChange c in changes)
+            {
+                if (c.Step != BuildStep.PlanLabels || c.Target != ChangeTarget.Label) continue;
+                if (c.Kind == ChangeKind.Add)
+                {
+                    created.Add(Add(tr, db, civil, c));
+                    added++;
+                }
+                else if (c.Kind == ChangeKind.Remove)
+                {
+                    if (!c.Existing.HasValue || !DrawingRefs3D.TryResolve(db, c.Existing.Value, out ObjectId id)) continue;   // gone already
+                    DBObject label = tr.GetObject(id, OpenMode.ForWrite);
+                    label.Erase();
+                    removed++;
+                }
+            }
+            return (added, removed);
         }
 
         private static DrawingObjectRef Add(Transaction tr, Database db, CivilDocument civil, PlannedChange c)
@@ -98,7 +109,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
             throw new InvalidOperationException($"Label style \"{name}\" is not in the drawing.");
         }
 
-        private static void EnsureRegApp(Transaction tr, Database db)
+        internal static void EnsureRegApp(Transaction tr, Database db)
         {
             RegAppTable table = (RegAppTable)tr.GetObject(db.RegAppTableId, OpenMode.ForRead);
             if (table.Has(BuildTag.XDataApplication)) return;
