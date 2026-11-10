@@ -71,8 +71,9 @@ SheetScene
   DrawingIdentity Drawing
   IReadOnlyList<SheetSnapshot> Sheets
   IReadOnlyList<NetworkSnapshot> Networks      // network name; pipes (handle, name, type code, start/end, outer width and height); structures (handle, name, insertion, type)
-  IReadOnlyList<AlignmentSnapshot> Alignments  // handle, name, station range, profiles by role (ProfileRoleRules), profile views
-  IReadOnlyList<ProfileViewSnapshot> ProfileViews // handle, alignment, station and elevation range, band set, drawn parts, vertical exaggeration
+  IReadOnlyList<AlignmentSnapshot> Alignments  // handle, name, station range, profiles by role with their station/elevation runs (gaps break runs), profile views
+  IReadOnlyList<ProfileViewSnapshot> ProfileViews // handle, alignment, station and elevation range, band set, vertical exaggeration,
+                                               // drawn parts with their geometry in the view (ViewPart: stations, outside top and bottom)
   IReadOnlyList<CrossingSnapshot> Crossings    // section 3
   IReadOnlyList<LabelSnapshot> Labels          // network, alignment and profile labels; build tag and placement (section 4)
   IReadOnlyList<BuildRecord> BuildRecords      // section 10
@@ -94,6 +95,12 @@ ViewportSnapshot(DrawingObjectRef Ref, double PaperMmPerModelM /* 2.0 at 1:500, 
 `feature/sheet-scene` also changes Sheet Manager so that two features skip profile sheets:
 - the "Write viewport scale on the sheet" button (`FormSheetManager.cs:891`)
 - the title-block/scale-note mismatch fix (`SheetManager.cs:803`)
+
+**Scale on plan sheets.** The title block gives the nominal scale (1:500). The user sometimes sets the viewport to another
+scale on purpose, to fit the parts in it: sheet 102054's viewport is 1:564, turned 59.4°. So:
+- The build never changes a viewport's scale. It reads `PaperMmPerModelM` from the viewport and lays out labels for that scale.
+- `feature/sheet-scene` changes Sheet Manager's "the sheet says X but its viewport is Y" check (`SheetManager.cs:801`) from a
+  problem with an automatic fix to an Info note with no fix.
 
 ## 3. Crossings (Claude, phase 1 reader)
 
@@ -137,7 +144,7 @@ These extend the existing `LabelSet` (Annotation Studio). Rule sets are saved in
 ```
 LabelRuleSet(string Name, int Version, IReadOnlyList<LabelRule> Rules)
 
-LabelRule(string Id, ViewKind View /* Plan | Profile */, TargetSelector Select, string LabelStyle, Anchor At,
+LabelRule(string Id, ViewKind View /* Plan | Profile */, TargetSelector Select, IReadOnlyList<string> LabelStyles, Anchor At,
           Frequency Every, bool Leader, SidePreference Side, int Priority)
 TargetSelector(TargetKind Kind /* Structure | Pipe | Joint | Alignment | AlignmentStations */, string NetworkPattern,
                string TypeCodePattern, bool OtherNetworksOnly)
@@ -146,9 +153,13 @@ Frequency:     PerPart | PerRun | OncePerViewport
 SidePreference: Alternate | Left | Right | AwayFromRoute
 ```
 
-- The label style must exist before anything is added. A missing style is an Error, `sheets.rule.styleMissing`, and the rule is
+- **The user chooses the label styles** for each rule, and how many: each target gets one label per style in `LabelStyles`, in
+  that order. The tool never detects styles from the drawing, because the choice varies from job to job (user, 2026-11-10).
+  The workspace lists the drawing's label styles of the right kind for each rule to pick from.
+- A rule needs at least one style, and no style twice (`sheets.rule.styleEmpty`, `sheets.rule.styleDuplicate`).
+- Every style must exist before anything is added. A missing style is an Error, `sheets.rule.styleMissing`, and the rule is
   skipped.
-- `AlignmentStations` sets the alignment's station labels from a label set named in the rule's `LabelStyle`.
+- `AlignmentStations` sets the alignment's station labels from the label sets named in `LabelStyles`.
 
 ### Pinning
 
@@ -190,7 +201,10 @@ own preview:
 
 ### Starting rule set (from sheets 102054 and 434132)
 
-| Id | View | Target | Content (from the label style) |
+These are the rules and what their labels show on the submitted sheets. The styles that show it are the user's choice, made
+in the workspace for each job.
+
+| Id | View | Target | What the labels show on the submitted sheets |
 |---|---|---|---|
 | `ict.plan.manhole` | Plan | ICT structures | Name, type, cover, E, N, CL, inner dimensions, height |
 | `ict.plan.joint` | Plan | ICT joints | Name, type, size, IL, N, E |
@@ -321,7 +335,7 @@ DimInput
 DimRules
   double MajorGradeChangePct = 2.0
   double MergeWithinM        = 5.0
-  double MinSpacingM         = 15.0
+  double MinSpacingM         = 10.0
   bool   AtStructureFaces    = true
   double MinClearanceM       = 0.30
 
@@ -408,7 +422,21 @@ One per crossing whose station lies inside DuctTop's range. A crossing outside t
 
 **Adapter note (Claude).** Values are true metres. In profile view coordinates the vertical scale is exaggerated 10×. The
 adapter therefore sets each DIM's linear factor to 1 ÷ exaggeration, and checks that the displayed text equals `ValueM` to
-0.01 m.
+0.01 m. The drawing's existing DIMs already work this way. The bridge read of 2026-11-10 found 260 vertical DIMs, all with a
+linear factor of 0.1 and no text override: 198 in `KSIA_For_Profile_Standard_1-100` and 62 in `KSIA_Profile DIM`, on layer
+`Z-Zz_20_10_55-T-Notes`. The style and layer are project settings.
+
+**Building `DimInput` from the scene (application, Claude).** For each profile view, or piece of one:
+
+| Input | Comes from |
+|---|---|
+| `DuctTop` | The runs of the view's `Top` role profile |
+| `DuctBottom` | The view's own-network pipes (`ViewPart`, `IsOwnNetwork`), from their outside bottoms |
+| `ProposedSurface` | The runs of the `Proposed` role profile |
+| `Structures` | The view's own-network structure parts, from their face stations |
+| `Crossings` | The scene's `CrossingSnapshot`s for the view |
+
+So the DIM plan comes from the snapshot alone, and every input is part of the scene stamp.
 
 ## 8. Engine C: continuation notes (Codex)
 
@@ -652,14 +680,16 @@ The **ribbon** gets one panel per stage plus command search. The old command nam
 
 ## Open questions
 
-| # | Question | How it gets answered |
-|---|---|---|
-| Q1 | Are the plan joint labels pipe end labels, or structure labels on null structures? | Claude reads the tile 124 DWG through the bridge, read-only |
-| Q4 | What counts as a *major* grade break (default 2 %), and how close may two cover DIMs be (default 15 m)? | Fit the defaults to the DIMs on sheet 434132 through a bridge read, then the user confirms |
-| Q5 | DIM style name and text format ("1.67m") | Bridge read of an existing DIM |
-| Q7 | Are the station labels (`ict.plan.stations`) an alignment label set, or separate labels? | Bridge read |
+None.
 
-Closed in v0.1: Q2 (cable notes are out of scope), Q3 (below the duct: duct bottom to pipe top), Q6 (450 m rows at 1:750).
+Closed:
+- Q1: label styles are not detected. The user chooses which styles each rule uses, and how many (section 4).
+- Q2: cable-content notes are out of scope.
+- Q3: crossing below the duct, from the duct bottom to the pipe top.
+- Q5: the DIM styles, layer and linear factor (section 7, "Adapter note").
+- Q6: 450 m rows at 1:750, confirmed live: 434132 has one 707 × 560 mm viewport at 1:750, locked.
+- Q7: station labels are alignment station label sets.
+- Q4: a grade break is major at a change of 2 % or more, and two cover DIMs are at least 10 m apart (user, 2026-11-10).
 
 ## Revision 2: answers to review 1
 
@@ -685,3 +715,9 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 3 | medium · Duct and surface polylines can disagree | Section 7: DuctBottom must match DuctTop's range and stay below it (`dims.input.ductInconsistent`). Surface runs may not overlap, and may touch only at one shared elevation (`dims.input.surfaceOverlap`) |
 | 4 | medium · The structure-face rule omits view ends | Section 7: faces at the duct's ends count. A new "Ownership" rule: each piece owns a half-open station range, the earlier piece owns the overlap, and the last piece owns its end. So DIMs are neither lost nor duplicated at splits |
 | 5 | medium · The placement score drops profile-region containment | Section 9: `ScoredLabel.RegionMm`, filled from the case. `OutsideViewport` becomes `OutsideArea` and counts a label outside the viewport margin or outside its region, the same test as the planner's `InArea` |
+
+## Code review of `feature/sheets-contracts`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | medium · Profile snapshots omit the geometry needed for DIM planning and stale detection | `SceneProfile.Runs` (station/elevation runs; gaps break runs) and `ProfileViewSnapshot.DrawnParts` as `ViewPart` (stations, and outside top and bottom in the view). Section 7 maps them to `DimInput`. Both are part of the scene, so the scene stamp covers them |

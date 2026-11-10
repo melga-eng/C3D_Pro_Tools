@@ -47,9 +47,18 @@ namespace C3DProTools.Features.Sheets.Contracts
 
     /// <param name="Id">Stable, unique in its set (ignoring case), e.g. "ict.plan.joint". Build tags carry it.</param>
     /// <param name="LabelStyle">The label style (or, for <see cref="TargetKind.AlignmentStations"/>, the label set) by name.</param>
+    /// <param name="LabelStyles">
+    /// The label styles the user chose for this rule, by name, in order (for <see cref="TargetKind.AlignmentStations"/>: label
+    /// sets). Each target gets one label per style, so the count of styles is the count of labels. Never detected from the
+    /// drawing: the user picks them, as they vary from job to job. At least one; no name twice (ignoring case).
+    /// </param>
     /// <param name="Priority">Placement order: higher first (crowded rules first).</param>
-    internal sealed record LabelRule(string Id, ViewKind View, TargetSelector Select, string LabelStyle, LabelAnchor At,
-        LabelFrequency Every = LabelFrequency.PerPart, bool Leader = true, SidePreference Side = SidePreference.Alternate, int Priority = 0);
+    internal sealed record LabelRule(string Id, ViewKind View, TargetSelector Select, IReadOnlyList<string> LabelStyles, LabelAnchor At,
+        LabelFrequency Every = LabelFrequency.PerPart, bool Leader = true, SidePreference Side = SidePreference.Alternate, int Priority = 0)
+    {
+        private readonly IReadOnlyList<string> _styles = Frozen.List(LabelStyles);
+        public IReadOnlyList<string> LabelStyles { get => _styles; init => _styles = Frozen.List(value); }
+    }
 
     internal sealed record LabelRuleSet(string Name, int Version, IReadOnlyList<LabelRule> Rules)
     {
@@ -106,7 +115,10 @@ namespace C3DProTools.Features.Sheets.Contracts
                     issues.Add(OperationIssue.Error(SheetCodes.RuleEnum, $"{name} has a view, target, anchor, frequency or side that is not known.", where));
                     continue;
                 }
-                if (string.IsNullOrWhiteSpace(r.LabelStyle)) issues.Add(OperationIssue.Error(SheetCodes.RuleStyleEmpty, $"{name} names no label style.", where));
+                if (r.LabelStyles.Count == 0 || r.LabelStyles.Any(string.IsNullOrWhiteSpace))
+                    issues.Add(OperationIssue.Error(SheetCodes.RuleStyleEmpty, $"{name}: choose at least one label style, and leave no style empty.", where));
+                else if (r.LabelStyles.Select(st => st.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() != r.LabelStyles.Count)
+                    issues.Add(OperationIssue.Error(SheetCodes.RuleStyleDuplicate, $"{name} uses the same label style twice.", where));
                 if (!AnchorsFor(r.Select.Kind).Contains(r.At))
                     issues.Add(OperationIssue.Error(SheetCodes.RuleAnchor, $"{name}: a {r.Select.Kind} label cannot be anchored at {r.At}.", where));
                 if (!FrequenciesFor(r.Select.Kind).Contains(r.Every))

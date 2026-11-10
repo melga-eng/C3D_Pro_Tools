@@ -17,7 +17,7 @@ namespace C3DProTools.Features.Sheets.Contracts
     {
         private readonly IReadOnlyList<StationElevation> _top = Frozen.List<StationElevation>(null);
         private readonly IReadOnlyList<StationElevation> _bottom = Frozen.List<StationElevation>(null);
-        private readonly IReadOnlyList<IReadOnlyList<StationElevation>> _surface = Frozen.List<IReadOnlyList<StationElevation>>(null);
+        private readonly IReadOnlyList<IReadOnlyList<StationElevation>> _surface = SceneProfile.FreezeRuns(null);
         private readonly IReadOnlyList<StructureSpan> _structures = Frozen.List<StructureSpan>(null);
         private readonly IReadOnlyList<CrossingPipe> _crossings = Frozen.List<CrossingPipe>(null);
 
@@ -29,7 +29,7 @@ namespace C3DProTools.Features.Sheets.Contracts
         public IReadOnlyList<IReadOnlyList<StationElevation>> ProposedSurface
         {
             get => _surface;
-            init => _surface = Frozen.List(value == null ? null : System.Linq.Enumerable.Select(value, run => Frozen.List(run)));
+            init => _surface = SceneProfile.FreezeRuns(value);
         }
         public IReadOnlyList<StructureSpan> Structures { get => _structures; init => _structures = Frozen.List(value); }
         public IReadOnlyList<CrossingPipe> Crossings { get => _crossings; init => _crossings = Frozen.List(value); }
@@ -42,7 +42,7 @@ namespace C3DProTools.Features.Sheets.Contracts
         public bool OwnsEnd { get; init; } = true;
     }
 
-    /// <summary>The DIM rules. The grade change and spacing defaults are open question Q4 (to be fitted to sheet 434132).</summary>
+    /// <summary>The DIM rules. The 2 % grade change and 10 m spacing are the user's values (2026-11-10).</summary>
     internal sealed record DimRules
     {
         /// <summary>|grade in − grade out| at a break, percent, for it to be major.</summary>
@@ -50,7 +50,7 @@ namespace C3DProTools.Features.Sheets.Contracts
         /// <summary>Vertices within this span of a cluster's first vertex form one break.</summary>
         public double MergeWithinM { get; init; } = 5.0;
         /// <summary>No two cover DIMs closer than this.</summary>
-        public double MinSpacingM { get; init; } = 15.0;
+        public double MinSpacingM { get; init; } = 10.0;
         /// <summary>A cover DIM where the duct leaves each structure face (user decision).</summary>
         public bool AtStructureFaces { get; init; } = true;
         /// <summary>Project rule: a clearance below this keeps its DIM and adds a warning.</summary>

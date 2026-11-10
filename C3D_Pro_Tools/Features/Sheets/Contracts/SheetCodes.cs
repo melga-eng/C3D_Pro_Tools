@@ -26,6 +26,7 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string RuleIdDuplicate = "sheets.rule.idDuplicate";
         public const string RuleStyleEmpty = "sheets.rule.styleEmpty";
         public const string RuleStyleMissing = "sheets.rule.styleMissing";
+        public const string RuleStyleDuplicate = "sheets.rule.styleDuplicate";
         public const string RuleAnchor = "sheets.rule.anchor";
         public const string RuleFrequency = "sheets.rule.frequency";
         public const string RuleEnum = "sheets.rule.enum";

@@ -138,4 +138,4 @@ branch and its own files from the same contract commit. The user merges every br
 | Workspace palette | **WPF**, hosted in a PaletteSet (user, 2026-11-10). The old WinForms forms stay until each is replaced |
 | Profile sheets | Viewports at 1:750, two rows of 450 m each; the title block keeps 1:500 (user, 2026-11-10) |
 | Cable-content notes | Out of scope; the user is removing them from the sheets (user, 2026-11-10) |
-| Cover DIMs | At the manhole faces and at major grade breaks (user, 2026-11-10). The size of a "major" break and the spacing between DIMs are still open: contract, question Q4 |
+| Cover DIMs | At the manhole faces, and at major grade breaks: a slope change of 2 % or more, with cover DIMs at least 10 m apart (user, 2026-11-10) |
