@@ -45,6 +45,8 @@ namespace C3DProTools.Features.Sheets.UI
         private Border _previewCard;
         private StackPanel _previewItemsStack;
         private Button _btnApply;
+        private Border _applyOutcomesCard;
+        private StackPanel _applyOutcomesStack;
         private StackPanel _issuesStack;
         private TextBlock _feedbackText;
 
@@ -65,10 +67,12 @@ namespace C3DProTools.Features.Sheets.UI
             _vm.PropertyChanged += OnViewModelPropertyChanged;
             _vm.Sheets.CollectionChanged += (s, e) => RebuildSheetsList();
             _vm.PreviewItems.CollectionChanged += (s, e) => RebuildPreviewList();
+            _vm.ApplyOutcomes.CollectionChanged += (s, e) => RebuildApplyOutcomesList();
             _vm.FilteredIssues.CollectionChanged += (s, e) => RebuildIssuesList();
 
             RebuildSheetsList();
             RebuildPreviewList();
+            RebuildApplyOutcomesList();
             RebuildIssuesList();
             UpdateStatusBanner();
             UpdateProgressCard();
@@ -116,6 +120,10 @@ namespace C3DProTools.Features.Sheets.UI
             // Preview & Changes Card
             _previewCard = BuildPreviewCard();
             contentStack.Children.Add(_previewCard);
+
+            // Apply Outcomes Card (shows status, counts +N/~N/-N and issues per item)
+            _applyOutcomesCard = BuildApplyOutcomesCard();
+            contentStack.Children.Add(_applyOutcomesCard);
 
             // Issues List Card
             contentStack.Children.Add(BuildIssuesCard());
@@ -772,6 +780,130 @@ namespace C3DProTools.Features.Sheets.UI
             return itemBorder;
         }
 
+        private Border BuildApplyOutcomesCard()
+        {
+            var stack = new StackPanel { Orientation = WpfOrientation.Vertical };
+
+            var title = new TextBlock
+            {
+                Text = "Apply Outcomes (Committed Items)",
+                FontFamily = WpfStyle.Segoe,
+                FontSize = WpfStyle.HeadingFontSize,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = WpfStyle.HeaderBrush,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            stack.Children.Add(title);
+
+            _applyOutcomesStack = new StackPanel { Orientation = WpfOrientation.Vertical };
+            stack.Children.Add(_applyOutcomesStack);
+
+            var border = WpfStyle.CreateCard(stack, new Thickness(0, 0, 0, 10));
+            border.Visibility = Visibility.Collapsed;
+            return border;
+        }
+
+        private void RebuildApplyOutcomesList()
+        {
+            if (_applyOutcomesStack == null || _applyOutcomesCard == null) return;
+            _applyOutcomesStack.Children.Clear();
+
+            if (_vm.ApplyOutcomes.Count == 0)
+            {
+                _applyOutcomesCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            _applyOutcomesCard.Visibility = Visibility.Visible;
+
+            foreach (var outcome in _vm.ApplyOutcomes)
+            {
+                _applyOutcomesStack.Children.Add(CreateOutcomeRow(outcome));
+            }
+        }
+
+        private UIElement CreateOutcomeRow(BuildItemOutcomeViewModel outcome)
+        {
+            var border = new Border
+            {
+                Background = outcome.IsCommitted ? WpfStyle.SurfaceBrush : WpfStyle.DangerSoftBrush,
+                BorderBrush = outcome.IsCommitted ? WpfStyle.BorderBrush : WpfStyle.DangerBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 6, 8, 6),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+
+            var stack = new StackPanel { Orientation = WpfOrientation.Vertical };
+
+            var topGrid = new Grid();
+            topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            topGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            // Item Key
+            var txtKey = new TextBlock
+            {
+                Text = outcome.ItemKey,
+                FontFamily = WpfStyle.Segoe,
+                FontWeight = FontWeights.Bold,
+                FontSize = WpfStyle.BaseFontSize,
+                Foreground = WpfStyle.HeaderBrush,
+                VerticalAlignment = WpfVerticalAlignment.Center
+            };
+            topGrid.Children.Add(txtKey);
+            Grid.SetColumn(txtKey, 0);
+
+            // Status Pill
+            (var sFore, var sBack) = outcome.Status switch
+            {
+                ItemStatus.Committed => (WpfStyle.SuccessBrush, WpfStyle.SuccessSoftBrush),
+                ItemStatus.RolledBack => (WpfStyle.DangerBrush, WpfStyle.DangerSoftBrush),
+                ItemStatus.Rejected => (WpfStyle.DangerBrush, WpfStyle.DangerSoftBrush),
+                ItemStatus.NotAttempted => (WpfStyle.MutedBrush, WpfStyle.BorderBrush),
+                ItemStatus.OutcomeUnknown => (WpfStyle.PurpleBrush, WpfStyle.PurpleSoftBrush),
+                _ => (WpfStyle.MutedBrush, WpfStyle.BorderBrush)
+            };
+            var statusPill = WpfStyle.CreatePill(outcome.Status.ToString().ToUpperInvariant(), sFore, sBack, fontSize: 10);
+            statusPill.VerticalAlignment = WpfVerticalAlignment.Center;
+            statusPill.Margin = new Thickness(8, 0, 8, 0);
+            topGrid.Children.Add(statusPill);
+            Grid.SetColumn(statusPill, 1);
+
+            // Counts Summary (+N / ~N / -N)
+            var txtCounts = new TextBlock
+            {
+                Text = outcome.CountsSummary,
+                FontFamily = WpfStyle.Segoe,
+                FontSize = WpfStyle.SmallFontSize,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = outcome.IsCommitted ? WpfStyle.TextBrush : WpfStyle.MutedBrush,
+                VerticalAlignment = WpfVerticalAlignment.Center
+            };
+            topGrid.Children.Add(txtCounts);
+            Grid.SetColumn(txtCounts, 2);
+
+            stack.Children.Add(topGrid);
+
+            // Item Issues if any
+            if (outcome.HasIssues)
+            {
+                var txtIssues = new TextBlock
+                {
+                    Text = outcome.IssuesSummary,
+                    FontFamily = WpfStyle.Segoe,
+                    FontSize = WpfStyle.SmallFontSize,
+                    Foreground = WpfStyle.DangerBrush,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 4, 0, 0)
+                };
+                stack.Children.Add(txtIssues);
+            }
+
+            border.Child = stack;
+            return border;
+        }
+
         private Border BuildIssuesCard()
         {
             var stack = new StackPanel { Orientation = WpfOrientation.Vertical };
@@ -874,13 +1006,16 @@ namespace C3DProTools.Features.Sheets.UI
 
             // Message & details
             var textStack = new StackPanel { Orientation = WpfOrientation.Vertical, Margin = new Thickness(0, 0, 8, 0) };
+            string locationText = issue.HasLocation ? $" · Sheet {issue.Layout}" : " · (location unknown)";
+            string handleText = !string.IsNullOrEmpty(issue.ObjectHandle) ? $" · Handle {issue.ObjectHandle}" : "";
+
             var txtCode = new TextBlock
             {
-                Text = issue.Code + (!string.IsNullOrEmpty(issue.Layout) ? $" · Sheet {issue.Layout}" : "") + (!string.IsNullOrEmpty(issue.ObjectHandle) ? $" · Handle {issue.ObjectHandle}" : ""),
+                Text = issue.Code + locationText + handleText,
                 FontFamily = WpfStyle.Segoe,
                 FontSize = 10,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = WpfStyle.MutedBrush
+                Foreground = issue.HasLocation ? WpfStyle.MutedBrush : WpfStyle.DangerBrush
             };
             textStack.Children.Add(txtCode);
 
@@ -897,7 +1032,7 @@ namespace C3DProTools.Features.Sheets.UI
             grid.Children.Add(textStack);
             Grid.SetColumn(textStack, 1);
 
-            // Action buttons: Zoom and Fix
+            // Action buttons: Zoom and Fix (disabled when location is unknown - Codex finding 5)
             var btnStack = new StackPanel { Orientation = WpfOrientation.Horizontal, VerticalAlignment = WpfVerticalAlignment.Center };
 
             var btnZoom = WpfStyle.CreateSecondaryButton("Zoom");
@@ -905,6 +1040,8 @@ namespace C3DProTools.Features.Sheets.UI
             btnZoom.FontSize = WpfStyle.SmallFontSize;
             btnZoom.Command = _vm.ZoomIssueCommand;
             btnZoom.CommandParameter = issue;
+            btnZoom.IsEnabled = issue.HasLocation;
+            if (!issue.HasLocation) btnZoom.ToolTip = "Location unknown: cannot zoom to sheet";
             btnZoom.Margin = new Thickness(0, 0, 4, 0);
             btnStack.Children.Add(btnZoom);
 
@@ -913,6 +1050,8 @@ namespace C3DProTools.Features.Sheets.UI
             btnFix.FontSize = WpfStyle.SmallFontSize;
             btnFix.Command = _vm.FixIssueCommand;
             btnFix.CommandParameter = issue;
+            btnFix.IsEnabled = issue.HasLocation;
+            if (!issue.HasLocation) btnFix.ToolTip = "Location unknown: cannot determine which sheet step to build";
             btnStack.Children.Add(btnFix);
 
             grid.Children.Add(btnStack);
@@ -956,6 +1095,10 @@ namespace C3DProTools.Features.Sheets.UI
 
                 case nameof(_vm.LastFeedbackMessage):
                     if (_feedbackText != null) _feedbackText.Text = _vm.LastFeedbackMessage;
+                    break;
+
+                case nameof(_vm.HasApplyOutcomes):
+                    RebuildApplyOutcomesList();
                     break;
             }
         }

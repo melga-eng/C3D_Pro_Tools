@@ -63,12 +63,14 @@ namespace C3DProTools.Features.Sheets.UI
         public ObservableCollection<IssueItemViewModel> AllIssues { get; } = new ObservableCollection<IssueItemViewModel>();
         public ObservableCollection<IssueItemViewModel> FilteredIssues { get; } = new ObservableCollection<IssueItemViewModel>();
         public ObservableCollection<BuildItemViewModel> PreviewItems { get; } = new ObservableCollection<BuildItemViewModel>();
+        public ObservableCollection<BuildItemOutcomeViewModel> ApplyOutcomes { get; } = new ObservableCollection<BuildItemOutcomeViewModel>();
 
         public BuildSheetsPreview LatestPreview { get; private set; }
         public BuildSheetsResult LatestResult { get; private set; }
 
         public bool HasPreview => LatestPreview != null && LatestPreview.Status == OperationStatus.Succeeded && PreviewItems.Count > 0;
         public bool HasResult => LatestResult != null;
+        public bool HasApplyOutcomes => ApplyOutcomes.Count > 0;
 
         public bool IsOperationRunning
         {
@@ -205,11 +207,7 @@ namespace C3DProTools.Features.Sheets.UI
             _service = service ?? throw new ArgumentNullException(nameof(service));
             ActiveDrawing = _service.ActiveDrawing;
 
-            _service.ActiveDrawingChanged += (s, e) =>
-            {
-                ActiveDrawing = _service.ActiveDrawing;
-                _ = LoadOverviewAsync();
-            };
+            _service.ActiveDrawingChanged += (s, e) => OnActiveDrawingChanged();
 
             if (_service is SyntheticSheetProduction syn)
             {
@@ -230,21 +228,63 @@ namespace C3DProTools.Features.Sheets.UI
             DeselectAllSheetsCommand = new RelayCommand(() => SetAllSheetsSelection(false));
             SelectAllPreviewItemsCommand = new RelayCommand(() => SetAllPreviewItemsSelection(true));
             DeselectAllPreviewItemsCommand = new RelayCommand(() => SetAllPreviewItemsSelection(false));
-            ZoomIssueCommand = new RelayCommand(async p => await ZoomIssueAsync(p as IssueItemViewModel));
-            FixIssueCommand = new RelayCommand(async p => await FixIssueAsync(p as IssueItemViewModel), _ => IsIdle);
+            ZoomIssueCommand = new RelayCommand(async p => await ZoomIssueAsync(p as IssueItemViewModel), p => (p as IssueItemViewModel)?.HasLocation == true);
+            FixIssueCommand = new RelayCommand(async p => await FixIssueAsync(p as IssueItemViewModel), p => IsIdle && (p as IssueItemViewModel)?.HasLocation == true);
             SimulatePreviewStatusCommand = new RelayCommand(p => SetSimulatedPreviewStatus(p));
             SimulateApplyStatusCommand = new RelayCommand(p => SetSimulatedApplyStatus(p));
 
-            _ = LoadOverviewAsync();
+            if (ActiveDrawing != null)
+            {
+                _ = LoadOverviewAsync();
+            }
+        }
+
+        private void OnActiveDrawingChanged()
+        {
+            // Cancel running operation for previous drawing
+            _cts?.Cancel();
+
+            ActiveDrawing = _service.ActiveDrawing;
+
+            // Clear everything on active drawing change or close (Codex finding 3)
+            Sheets.Clear();
+            AllIssues.Clear();
+            FilteredIssues.Clear();
+            LatestPreview = null;
+            PreviewItems.Clear();
+            LatestResult = null;
+            ApplyOutcomes.Clear();
+            StatusBannerVisible = false;
+
+            OnPropertyChanged(nameof(LatestPreview));
+            OnPropertyChanged(nameof(HasPreview));
+            OnPropertyChanged(nameof(LatestResult));
+            OnPropertyChanged(nameof(HasResult));
+            OnPropertyChanged(nameof(HasApplyOutcomes));
+
+            if (ActiveDrawing == null)
+            {
+                LastFeedbackMessage = "No drawing open.";
+            }
+            else
+            {
+                LastFeedbackMessage = $"Active drawing: {DrawingTitle}";
+                _ = LoadOverviewAsync();
+            }
         }
 
         public async Task LoadOverviewAsync()
         {
-            if (ActiveDrawing == null) return;
+            var reqDwg = ActiveDrawing;
+            if (reqDwg == null) return;
 
             try
             {
-                var overview = await _service.GetOverviewAsync(ActiveDrawing, CancellationToken.None).ConfigureAwait(true);
+                var overview = await _service.GetOverviewAsync(reqDwg, CancellationToken.None).ConfigureAwait(true);
+
+                // Ignore response if active drawing changed while loading (Codex finding 3)
+                if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
+
                 Sheets.Clear();
                 foreach (var s in overview.Sheets)
                 {
@@ -254,12 +294,12 @@ namespace C3DProTools.Features.Sheets.UI
                 AllIssues.Clear();
                 foreach (var issue in overview.Issues)
                 {
-                    string layout = "";
-                    if (issue.Message.Contains("124-C")) layout = "124-C";
-                    else if (issue.Message.Contains("124-B")) layout = "124-B";
-                    else if (issue.Message.Contains("PROF-2")) layout = "124-PROF-2";
-                    else if (issue.Message.Contains("PROF-1")) layout = "124-PROF-1";
-                    else layout = "124-A";
+                    // Resolve location using object reference / service; do not guess from message text (Codex finding 5)
+                    string layout = null;
+                    if (_service is SyntheticSheetProduction syn && issue.Object.HasValue)
+                    {
+                        syn.TryGetLocation(issue.Object, out layout);
+                    }
 
                     AllIssues.Add(new IssueItemViewModel(issue, layout));
                 }
@@ -271,13 +311,16 @@ namespace C3DProTools.Features.Sheets.UI
             }
             catch (Exception ex)
             {
-                ShowStatusBanner(OperationStatus.Rejected, "Failed to load sheet overview", ex.Message);
+                if (ActiveDrawing != null && reqDwg.Matches(ActiveDrawing))
+                {
+                    ShowStatusBanner(OperationStatus.Rejected, "Failed to load sheet overview", ex.Message);
+                }
             }
         }
 
         public async Task BuildSelectedAsync(IReadOnlyList<string> specificLayouts = null, IReadOnlySet<BuildStep> specificSteps = null)
         {
-            if (IsOperationRunning) return;
+            if (IsOperationRunning || ActiveDrawing == null) return;
 
             var targetLayouts = specificLayouts ?? Sheets.Where(s => s.IsSelected).Select(s => s.Layout).ToList();
             if (targetLayouts.Count == 0)
@@ -311,7 +354,7 @@ namespace C3DProTools.Features.Sheets.UI
 
         public async Task BuildTwiceTestBusyAsync()
         {
-            if (IsOperationRunning) return;
+            if (IsOperationRunning || ActiveDrawing == null) return;
 
             var targetLayouts = Sheets.Select(s => s.Layout).Take(2).ToList();
             var request = new BuildSheetsRequest
@@ -330,6 +373,7 @@ namespace C3DProTools.Features.Sheets.UI
             CanCancel = true;
             StatusBannerVisible = false;
 
+            var reqDwg = ActiveDrawing;
             Task<BuildSheetsPreview> task1 = _service.PreviewAsync(request, progress, _cts.Token);
 
             // Give task 1 50ms to grab the lock
@@ -339,12 +383,12 @@ namespace C3DProTools.Features.Sheets.UI
             Task<BuildSheetsPreview> task2 = _service.PreviewAsync(request, null, CancellationToken.None);
 
             BuildSheetsPreview preview2 = await task2;
-
-            // Wait for task 1 to finish
             BuildSheetsPreview preview1 = await task1;
 
             IsOperationRunning = false;
             CanCancel = false;
+
+            if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
 
             // Verify preview2 returned Rejected with SheetCodes.Busy
             if (preview2.Status == OperationStatus.Rejected && preview2.Issues.Any(i => i.Code == SheetCodes.Busy))
@@ -369,6 +413,7 @@ namespace C3DProTools.Features.Sheets.UI
 
         private async Task ExecutePreviewRequestAsync(BuildSheetsRequest request)
         {
+            var reqDwg = request.Drawing;
             _cts = new CancellationTokenSource();
             IsOperationRunning = true;
             CanCancel = true;
@@ -382,6 +427,10 @@ namespace C3DProTools.Features.Sheets.UI
             try
             {
                 BuildSheetsPreview preview = await _service.PreviewAsync(request, progress, _cts.Token).ConfigureAwait(true);
+
+                // Ignore if drawing changed during preview (Codex finding 3)
+                if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
+
                 HandlePreviewResult(preview);
             }
             finally
@@ -448,8 +497,8 @@ namespace C3DProTools.Features.Sheets.UI
                 case OperationStatus.OutcomeUnknown:
                     ShowStatusBanner(
                         OperationStatus.OutcomeUnknown,
-                        "Outcome Unknown",
-                        "Could not verify preview state against drawing. Please save and reload the drawing."
+                        "Outcome Unknown (Re-read Required)",
+                        "Could not verify preview state against drawing. Re-read the drawing before trying again."
                     );
                     break;
 
@@ -481,6 +530,7 @@ namespace C3DProTools.Features.Sheets.UI
                 ItemKeys = chosenKeys
             };
 
+            var reqDwg = ActiveDrawing;
             _cts = new CancellationTokenSource();
             IsOperationRunning = true;
             CanCancel = true;
@@ -493,6 +543,16 @@ namespace C3DProTools.Features.Sheets.UI
             try
             {
                 BuildSheetsResult result = await _service.ApplyAsync(applyRequest, progress, _cts.Token).ConfigureAwait(true);
+
+                // Ignore if drawing changed during apply (Codex finding 3)
+                if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
+
+                // Clear the preview and its selected items whatever the result (Codex finding 2)
+                LatestPreview = null;
+                PreviewItems.Clear();
+                OnPropertyChanged(nameof(LatestPreview));
+                OnPropertyChanged(nameof(HasPreview));
+
                 HandleApplyResult(result);
             }
             finally
@@ -507,6 +567,17 @@ namespace C3DProTools.Features.Sheets.UI
             LatestResult = result;
             OnPropertyChanged(nameof(LatestResult));
             OnPropertyChanged(nameof(HasResult));
+
+            // Populate per-item outcomes (Codex finding 4)
+            ApplyOutcomes.Clear();
+            if (result?.Items != null)
+            {
+                foreach (var item in result.Items)
+                {
+                    ApplyOutcomes.Add(new BuildItemOutcomeViewModel(item));
+                }
+            }
+            OnPropertyChanged(nameof(HasApplyOutcomes));
 
             if (result == null) return;
 
@@ -527,13 +598,16 @@ namespace C3DProTools.Features.Sheets.UI
                     break;
 
                 case OperationStatus.PartiallySucceeded:
-                    int committed = result.Items.Count(i => i.Status == ItemStatus.Committed);
-                    int rolledBack = result.Items.Count(i => i.Status == ItemStatus.RolledBack);
-                    int notAttempted = result.Items.Count(i => i.Status == ItemStatus.NotAttempted);
+                    // Partial result must show which sheet/item failed (Codex finding 4)
+                    var failedItems = result.Items.Where(i => i.Status != ItemStatus.Committed)
+                        .Select(i => $"{i.ItemKey} ({i.Status})").ToList();
+                    var committedItems = result.Items.Where(i => i.Status == ItemStatus.Committed)
+                        .Select(i => i.ItemKey).ToList();
+                    string detail = $"Partial result: failed on {string.Join(", ", failedItems)}. Committed: {string.Join(", ", committedItems)}.";
                     ShowStatusBanner(
                         OperationStatus.PartiallySucceeded,
-                        "Partially Succeeded",
-                        $"Partial apply: {committed} committed, {rolledBack} rolled back, {notAttempted} not attempted."
+                        "Partially Succeeded (Some Sheets Failed)",
+                        detail
                     );
                     _ = LoadOverviewAsync();
                     break;
@@ -574,10 +648,11 @@ namespace C3DProTools.Features.Sheets.UI
                     break;
 
                 case OperationStatus.OutcomeUnknown:
+                    // After OutcomeUnknown, show "Re-read the drawing before trying again" and only offer Preview again (Codex finding 2)
                     ShowStatusBanner(
                         OperationStatus.OutcomeUnknown,
                         "Outcome Unknown (Action Required)",
-                        "Drawing transaction outcome could not be verified. Please inspect or reload the drawing before retrying."
+                        "Drawing transaction outcome could not be verified. Re-read the drawing before trying again."
                     );
                     break;
 
@@ -593,7 +668,7 @@ namespace C3DProTools.Features.Sheets.UI
 
         public async Task PinLabelsAsync(bool pin)
         {
-            if (IsOperationRunning) return;
+            if (IsOperationRunning || ActiveDrawing == null) return;
 
             string handle = (PinInputHandle ?? "3A12").Trim();
             if (!DrawingObjectRef.TryCreate(handle, out var objRef))
@@ -602,11 +677,15 @@ namespace C3DProTools.Features.Sheets.UI
                 return;
             }
 
+            var reqDwg = ActiveDrawing;
             IsOperationRunning = true;
             CanCancel = true;
             try
             {
-                var preview = await _service.PreviewPinAsync(ActiveDrawing, new[] { objRef }, pin, CancellationToken.None).ConfigureAwait(true);
+                var preview = await _service.PreviewPinAsync(reqDwg, new[] { objRef }, pin, CancellationToken.None).ConfigureAwait(true);
+
+                if (ActiveDrawing == null || !reqDwg.Matches(ActiveDrawing)) return;
+
                 HandlePreviewResult(preview);
 
                 if (preview.Status == OperationStatus.Succeeded)
@@ -623,11 +702,11 @@ namespace C3DProTools.Features.Sheets.UI
 
         public async Task ZoomIssueAsync(IssueItemViewModel issue)
         {
-            if (issue == null) return;
+            if (issue == null || !issue.HasLocation) return;
             try
             {
                 await _service.ZoomToAsync(ActiveDrawing, issue.Layout, issue.ObjectRef, CancellationToken.None).ConfigureAwait(true);
-                LastFeedbackMessage = $"Zoomed to layout '{issue.Layout}'" + (issue.ObjectRef.HasValue ? $" [handle {issue.ObjectHandle}]" : "");
+                LastFeedbackMessage = $"Zoomed to sheet '{issue.Layout}'" + (issue.ObjectRef.HasValue ? $" [handle {issue.ObjectHandle}]" : "");
             }
             catch (Exception ex)
             {
@@ -637,9 +716,9 @@ namespace C3DProTools.Features.Sheets.UI
 
         public async Task FixIssueAsync(IssueItemViewModel issue)
         {
-            if (issue == null || IsOperationRunning) return;
+            if (issue == null || !issue.HasLocation || IsOperationRunning) return;
 
-            string layout = string.IsNullOrEmpty(issue.Layout) ? "124-C" : issue.Layout;
+            string layout = issue.Layout;
             var steps = new HashSet<BuildStep>();
 
             if (issue.Code.StartsWith("dims.", StringComparison.OrdinalIgnoreCase))

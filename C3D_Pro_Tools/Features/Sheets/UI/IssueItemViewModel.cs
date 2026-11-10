@@ -14,10 +14,13 @@ namespace C3DProTools.Features.Sheets.UI
         public DrawingObjectRef? ObjectRef => Issue.Object;
         public string Layout { get; }
 
-        public IssueItemViewModel(OperationIssue issue, string layout = "")
+        /// <summary>True when the issue is associated with a known sheet layout.</summary>
+        public bool HasLocation => !string.IsNullOrWhiteSpace(Layout);
+
+        public IssueItemViewModel(OperationIssue issue, string layout = null)
         {
             Issue = issue ?? throw new ArgumentNullException(nameof(issue));
-            Layout = layout ?? "";
+            Layout = string.IsNullOrWhiteSpace(layout) ? null : layout.Trim();
         }
     }
 }

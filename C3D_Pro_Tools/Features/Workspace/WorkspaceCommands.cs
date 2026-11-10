@@ -1,5 +1,7 @@
 using Autodesk.AutoCAD.Runtime;
 
+[assembly: CommandClass(typeof(C3DProTools.Features.Workspace.WorkspaceCommands))]
+
 namespace C3DProTools.Features.Workspace
 {
     /// <summary>
