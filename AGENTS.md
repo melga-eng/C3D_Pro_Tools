@@ -19,6 +19,7 @@ Three agents work on this repo. Each has one job. None starts another agent's wo
 Rules for all three:
 
 - **One branch per task.** Work on `feature/<short-name>` (or `ui/<short-name>` for Antigravity). Never commit to `main`.
+- **Each agent works in its own folder (git worktree), never in another agent's.** Claude: `C3D_Pro_Tools`. Codex: `C3D_Pro_Tools-codex`. Antigravity: `C3D_Pro_Tools-antigravity`, all beside each other in `sourceepos`. Switch branches only inside your own folder; a `git checkout` in a shared folder moves the other agents' work onto the wrong branch.
 - **Two agents never edit the same files at the same time.** If a task needs another agent's files, stop and tell the user.
 - **Nobody gives their own code the final review.** Codex reviews Claude's and Antigravity's branches. Claude reviews Codex's engine branches.
 - **Leave a handoff note.** When you finish, end with: the branch, what changed (files), how you checked it (build/tests/live Civil 3D), and what is not done. The user pastes this into the next agent.
