@@ -1,5 +1,35 @@
 # Release notes
 
+## 2026-11-10: Redesign phase 1 begins: sheet production foundations
+
+### New
+- **Redesign plan and contract:** `docs/redesign-roadmap.md` and `docs/sheet-production-contract.md` (v0.3). Codex reviewed
+  the contract in three rounds.
+- **Sheet production contracts as code** (`Features/Sheets/Contracts`). The shared contract types moved to
+  `Features/Shared/Contracts`.
+- **Four engines** (Codex, reviewed by Claude): profile sheet packing, DIM stations (2 % / 10 m), continuation notes and
+  placement score.
+- **Scene reader:** one read-only pass over the drawing, covering sheets, viewports, networks, profiles, profile views,
+  crossings, labels and the label styles with their content fingerprints. `C3DProSceneReport` writes what it sees.
+- **Plan labels step:** labels from your rules (`C3DPro.project.json` beside the drawing), one label per chosen style,
+  reconciled with the labels already there. Pinned and hand-placed labels are never touched. Apply writes only the plan you
+  previewed. Command: `C3DProPlanLabels` (Preview, or Apply).
+- **Workspace palette** (Antigravity, reviewed by Codex): WPF, with one tab per stage and a Sheets panel. Command:
+  `C3DProWorkspace`, plus a ribbon button. It runs on sample data until the build is connected.
+- **Sheet Manager:**
+  - a profile sheet's title block scale is never overwritten with the viewport scale
+  - a plan viewport scaled on purpose is a note, not a problem
+  - a scale note is fixed from the title block
+
+### Known limitations
+- **Not yet run live in Civil 3D:** creating labels with `C3DProPlanLabels` Apply, rolling back and UNDO. The scene reader was
+  checked live on TEST DRAWING.dwg, and its two live findings are fixed.
+- **Style edits:** the fingerprint fix (owned components) still needs a live check.
+- **New labels land at their style's default position.** Arranging them is the next step (`feature/build-sheets`).
+- **Not built yet:** alignment and station labels, one label per run, profile labels, profile views, DIMs and sheet data.
+- **Profile View Tools setting:** the existing-ground surface is set to "COMBINED NGL". In this drawing it is
+  "COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED", so no profile gets the existing role until the setting is corrected.
+
 ## 2026-11-09: Generate Conduits page in the Network Editor
 
 ### New
