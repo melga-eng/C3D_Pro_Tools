@@ -1,0 +1,25 @@
+using System;
+using C3DProTools.Features.Shared.Contracts;
+
+namespace C3DProTools.Features.Sheets.UI
+{
+    internal sealed class IssueItemViewModel
+    {
+        public OperationIssue Issue { get; }
+        public string Code => Issue.Code;
+        public IssueSeverity Severity => Issue.Severity;
+        public string Message => Issue.Message;
+        public string Field => Issue.Field ?? "";
+        public string ObjectHandle => Issue.Object.HasValue ? Issue.Object.Value.Handle : "";
+        public DrawingObjectRef? ObjectRef => Issue.Object;
+        public string Layout => string.IsNullOrWhiteSpace(Issue.Layout) ? null : Issue.Layout.Trim();
+
+        /// <summary>True when the issue is associated with a known sheet layout.</summary>
+        public bool HasLocation => !string.IsNullOrWhiteSpace(Layout);
+
+        public IssueItemViewModel(OperationIssue issue)
+        {
+            Issue = issue ?? throw new ArgumentNullException(nameof(issue));
+        }
+    }
+}

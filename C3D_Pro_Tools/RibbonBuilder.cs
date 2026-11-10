@@ -63,6 +63,19 @@ namespace C3DProTools
             RibbonPanel panel = new RibbonPanel { Source = panelSource };
             customTab.Panels.Add(panel);
 
+            // --- 0. Workspace Palette Button ---
+            RibbonButton workspaceButton = new RibbonButton
+            {
+                Text = "Workspace\nPalette",
+                ShowText = true,
+                Size = RibbonItemSize.Large,
+                Orientation = System.Windows.Controls.Orientation.Vertical,
+                CommandParameter = "C3DProWorkspace ",
+                CommandHandler = new RibbonCommandHandler()
+            };
+            panelSource.Items.Add(workspaceButton);
+            panelSource.Items.Add(new RibbonSeparator());
+
             // --- 1. Style Manager Button ---
             RibbonButton styleManagerButton = new RibbonButton
             {
