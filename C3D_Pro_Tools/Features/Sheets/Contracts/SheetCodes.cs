@@ -18,6 +18,8 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string SceneReadFailed = "sheets.scene.readFailed";
         /// <summary>No profile in the drawing has the existing (or proposed) role: the role's surface name is probably not the drawing's.</summary>
         public const string SceneRoleUnmatched = "sheets.scene.roleUnmatched";
+        /// <summary>A style the plan uses could not be fingerprinted in full: an edit to it is caught only by the apply postcondition.</summary>
+        public const string FingerprintIncomplete = "sheets.scene.fingerprintIncomplete";
 
         public const string RequestDrawing = "sheets.request.drawing";
         public const string RequestNoSteps = "sheets.request.noSteps";

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -19,7 +20,9 @@ namespace C3DProTools.Features.Sheets.Civil3D
         private const int MaxDepth = 6;
 
         /// <summary>
-        /// The fingerprint of an object and everything it owns, as lowercase hex; empty when the object cannot be filed out.
+        /// The fingerprint of an object and everything it owns, as lowercase hex. Empty means <b>incomplete</b>: the object or
+        /// one of its parts could not be filed out or opened (the log says which). The build treats an empty fingerprint as
+        /// unknown, never as unchanged: it reports <c>sheets.scene.fingerprintIncomplete</c> and relies on its postcondition.
         /// A Civil 3D label style keeps its text, line and block components as separate objects it owns (checked live,
         /// 2026-11-10: editing a component's text height left the style's own filed data unchanged). So the objects the style
         /// files as owned are followed, and a label style's components are added explicitly too, in case they are not filed.
@@ -50,12 +53,25 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     try { foreach (ObjectId id in style.GetComponents(kind)) owned.Add(id); }
                     catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
-            if (depth >= MaxDepth) return true;
-            foreach (ObjectId id in owned)
+            List<ObjectId> children = owned.Where(id => !id.IsNull && !id.IsErased && !seen.Contains(id)).ToList();
+            if (children.Count == 0) return true;
+            // Never a partial hash: an owned part that is too deep or cannot be opened makes the fingerprint incomplete, so an
+            // edit to that part could not slip past the stale check unnoticed.
+            if (depth >= MaxDepth)
             {
-                if (id.IsNull || id.IsErased || seen.Contains(id)) continue;
+                C3DProLogger.Warn($"Sheet scene: {obj.GetType().Name} {obj.Handle} owns parts deeper than {MaxDepth} levels; its fingerprint is incomplete");
+                return false;
+            }
+            foreach (ObjectId id in children)
+            {
+                if (seen.Contains(id)) continue;
                 DBObject child;
-                try { child = tr.GetObject(id, OpenMode.ForRead); } catch (Exception) { continue; }
+                try { child = tr.GetObject(id, OpenMode.ForRead); }
+                catch (Exception ex)
+                {
+                    C3DProLogger.Warn($"Sheet scene: part {id.Handle} of {obj.GetType().Name} {obj.Handle} could not be opened; its fingerprint is incomplete", ex);
+                    return false;
+                }
                 if (!Add(tr, child, hash, seen, depth + 1)) return false;
             }
             return true;

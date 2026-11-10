@@ -86,7 +86,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     if (id.IsNull || id.IsErased) return;
                     DBObject o = tr.GetObject(id, OpenMode.ForRead);
                     string name = (o as Autodesk.Civil.DatabaseServices.Styles.StyleBase)?.Name ?? (o as SymbolTableRecord)?.Name ?? o.GetType().Name;
-                    lines.Add($"{kind}  {name}  {StyleFingerprint.Of(tr, o)}");
+                    lines.Add($"{kind}  {name}  {(StyleFingerprint.Of(tr, o) is string f && f.Length > 0 ? f : "(incomplete: see the log)")}");
                 }
                 try { foreach (ObjectId id in civil.Styles.LabelStyles.PipeLabelStyles.PlanProfileLabelStyles) Add("pipe label", id); } catch (System.Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 try { foreach (ObjectId id in civil.Styles.LabelStyles.StructureLabelStyles.LabelStyles) Add("structure label", id); } catch (System.Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
