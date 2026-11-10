@@ -9,8 +9,8 @@ Applies to new and refactored features. Existing features migrate one operation 
 | Presentation | Forms, control binding, layout, previews, user messages | Antigravity |
 | Application | Request validation, operation orchestration, progress and result contracts | Claude |
 | Civil 3D integration | Drawing reads/writes, document binding, locks, transactions, API adapters | Claude |
-| Engines | Geometry, calculations, planning and engineering rules using plain data | Claude |
-| Verification | Independent review of the integrated diff and checks | Codex |
+| Engines | Geometry, calculations, planning and engineering rules using plain data | Claude; Codex for the engines the user assigns to it |
+| Verification | Independent review of the integrated diff and checks | Codex; Claude for Codex-built engines |
 
 UI calls application operations. Application operations coordinate engines and Civil 3D adapters. Engines and contracts do not reference forms or the Autodesk API. Autodesk objects stay inside the integration boundary. UI selection and host command entry points delegate drawing access to that boundary.
 
@@ -65,7 +65,7 @@ Expected failures become structured issues at the application boundary. Unexpect
 2. Claude defines the operation contract; Codex reviews it; the user authorizes the implementation scope.
 3. When the user assigns concurrent work, use separate worktrees and branches from the same contract commit. Never edit the same file concurrently, including different partial classes stored in that file. During extraction, reserve the existing form for Claude; UI redesign begins after that boundary is integrated.
 4. Each handoff identifies the base commit, changed files, contract version, checks and limitations. Contract mismatches or ownership conflicts go back to the user before dependent edits.
-5. Build and test each contribution and the combined result. Codex reviews the combined diff. The user decides integration and release; a passing offline suite does not replace drawing integration tests.
+5. Build and test each contribution and the combined result. Codex reviews the combined diff, and Claude reviews each Codex engine branch before it is combined. The user decides integration and release; a passing offline suite does not replace drawing integration tests.
 
 ## First implementation: Network Editor split
 
