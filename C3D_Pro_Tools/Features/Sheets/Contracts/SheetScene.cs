@@ -182,6 +182,12 @@ namespace C3DProTools.Features.Sheets.Contracts
         public bool IsPinned => Tag != null && Tag.IsPinned(Current);
     }
 
+    /// <summary>Which kind of part a label style is for.</summary>
+    internal enum LabelStyleKind { Pipe = 0, Structure = 1 }
+
+    /// <summary>A label style of the drawing, with its content fingerprint (empty when incomplete; section 10).</summary>
+    internal sealed record SceneLabelStyle(LabelStyleKind Kind, string Name, DrawingObjectRef Ref, string Fingerprint);
+
     /// <summary>What one build step last built on one sheet (an XRecord under <c>C3DPRO_BUILD</c>; section 10).</summary>
     internal sealed record BuildRecord(string Layout, BuildStep Step, string InputHash);
 
@@ -204,6 +210,9 @@ namespace C3DProTools.Features.Sheets.Contracts
         public IReadOnlyList<CrossingSnapshot> Crossings { get => _crossings; init => _crossings = Frozen.List(value); }
         public IReadOnlyList<LabelSnapshot> Labels { get => _labels; init => _labels = Frozen.List(value); }
         public IReadOnlyList<BuildRecord> BuildRecords { get => _records; init => _records = Frozen.List(value); }
+        private readonly IReadOnlyList<SceneLabelStyle> _labelStyles = Frozen.List<SceneLabelStyle>(null);
+        /// <summary>The drawing's pipe and structure label styles, so rules can be checked without the drawing.</summary>
+        public IReadOnlyList<SceneLabelStyle> LabelStyles { get => _labelStyles; init => _labelStyles = Frozen.List(value); }
         public IReadOnlyList<OperationIssue> Issues { get => _issues; init => _issues = Frozen.List(value); }
     }
 

@@ -64,7 +64,15 @@ namespace C3DProTools.Features.Sheets.Contracts
     /// <param name="Existing">The object changed or removed; null for an Add.</param>
     /// <param name="Description">One plain line for the preview list ("Add joint label IC-124-IC3A-06").</param>
     internal sealed record PlannedChange(string ChangeId, BuildStep Step, ChangeKind Kind, ChangeTarget Target, string Layout,
-        string RuleId, string SourceKey, DrawingObjectRef? Existing, string Description);
+        string RuleId, string SourceKey, DrawingObjectRef? Existing, string Description)
+    {
+        /// <summary>For a label: the rule style it is made with (its <see cref="BuildTag.StyleSlot"/>); null otherwise.</summary>
+        public string StyleSlot { get; init; }
+        /// <summary>For a label added to a part: the part it labels; null otherwise.</summary>
+        public DrawingObjectRef? Part { get; init; }
+        /// <summary>For a pipe label: where along the pipe (0 = start, 1 = end); null otherwise.</summary>
+        public double? Ratio { get; init; }
+    }
 
     /// <summary>One atomic unit of a build: it commits whole or rolls back whole.</summary>
     internal sealed record BuildItem(string ItemKey, BuildItemKind Kind, IReadOnlyList<string> Layouts, IReadOnlyList<PlannedChange> Changes)

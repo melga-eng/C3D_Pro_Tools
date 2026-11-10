@@ -39,6 +39,8 @@
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Sheets\Contracts\**\*.cs" Link="Contracts\Sheets\%(RecursiveDir)%(Filename)%(Extension)" />
 		<!-- Sheet engines: plain data in and out (docs/sheet-production-contract.md, sections 6 to 9). -->
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Sheets\Engines\**\*.cs" Link="Engines\Sheets\%(RecursiveDir)%(Filename)%(Extension)" />
+		<!-- Sheet application layer: plain data too (planners, project settings). -->
+		<Compile Include="..\..\C3D_Pro_Tools\Features\Sheets\Application\**\*.cs" Link="Application\Sheets\%(RecursiveDir)%(Filename)%(Extension)" />
 		<!-- Application layer: also free of Autodesk types (it reaches the drawing only through ISplitDrawingAccess). -->
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Networks\Application\**\*.cs" Link="Application\Networks\%(RecursiveDir)%(Filename)%(Extension)" />
 		<Compile Include="..\..\Shared\NavisLinkProtocol.cs" Link="Engine\NavisLinkProtocol.cs" />

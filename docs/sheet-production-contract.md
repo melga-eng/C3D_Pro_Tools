@@ -252,6 +252,27 @@ in the workspace for each job.
 
 Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinned and hand-placed labels as obstacles.
 
+### The PlanLabels step (`PlanLabelPlanner`, `PlanLabelsCivil3D`)
+
+- **Targets:** structures by their type name, pipes and joints by the pipe's type code; network and type patterns as in
+  `TargetSelector`.
+- **A joint label is one per pipe, at its start** (pipe label at ratio 0): the label names the pipe that begins there, as on
+  sheet 102054.
+- **Desired labels** are rule × target × selected style, each with its identity (rule, source, sheet, slot).
+- Compared with the tool labels already tagged on the sheets being built:
+  - missing labels are **added**
+  - unpinned tool labels no rule asks for any more (including orphans) are **removed**
+  - pinned ones are kept, with `sheets.label.orphanPinned`
+  - labels placed by hand and other sheets are never touched
+- **Running again changes nothing.** Moving labels is the Arrange step's job.
+- **A rule whose style is missing** (from the drawing, or of the wrong kind) is skipped whole, and its existing labels are left
+  as they are (`sheets.rule.styleMissing`).
+- **Not built yet:** alignment and station labels, and one label per run (pipes are labelled one by one, with an Info).
+- **Writing:** one transaction per sheet. Each new label gets its build tag, recorded from the label as created, so it is never
+  mistaken for a user's edit, and is checked before commit. A sheet that fails rolls back whole.
+- **The command `C3DProPlanLabels`:** Preview, the default, writes the plan to `%TEMP%\C3DProPlanLabels.txt`; Apply writes it.
+  Sheet names limit it to those sheets. Rules come from `C3DPro.project.json` beside the drawing.
+
 ## 5. Build steps and the inventory
 
 Every item on the target sheets maps to one step, one owner and one acceptance check.
@@ -775,3 +796,13 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 4 | low · The nominal-scale mismatch remains an ordinary issue | `SheetIssue.IsNote`: shown, never fixed, and not counted in the sheet list or the status line |
 | 5 | medium · Orphan labels disappear from the scene | Labels whose part is gone are kept, with `Target = default` (`LabelSnapshot.IsOrphan`), their tag and placement. They stay obstacles, and a pinned one gives a Warning `sheets.label.orphanPinned` |
 | 6 | medium · Unreadable owned objects are silently skipped | An owned part that cannot be opened, or lies deeper than six levels, makes the fingerprint incomplete (empty), with the reason logged. The build treats an empty fingerprint as unknown: Warning `sheets.scene.fingerprintIncomplete`, and the apply postcondition guards that style |
+
+## Code review of `feature/label-rules`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | high · Selected sheets change label ownership | Ownership is decided over every plan sheet, and only the chosen sheets' changes are kept. The command reads every sheet. A tool label on the wrong sheet is removed there |
+| 2 | high · Incomplete scene reads can cause destructive removals | A scene with any Error or `sheets.scene.readFailed` plans nothing: Error `sheets.scene.incomplete`, with the read problems listed. The command also reports the scene's warnings |
+| 3 | high · Apply writes a newly generated, unreviewed plan | Apply plans again and writes only when the plan's digest (`PlanLabelPlanner.Digest`: contract version, every rule field, every change, the geometry of every labelled part, the placement of every removed label, the fingerprints of the styles used, and every plan viewport outline) equals the last preview's for that drawing, rule set and sheets. Otherwise nothing is written, and the new plan becomes the preview to review (`sheets.preview.planChanged`) |
+| 4 | medium · Multiple rule sets silently select the first | With several rule sets, the command asks for one by name. An unknown name plans nothing (`sheets.rules.ambiguous`) |
+| 5 | medium · Incomplete fingerprints compare as unchanged | A rule that uses a style whose fingerprint is incomplete plans nothing, and its labels are left as they are (Error `sheets.scene.fingerprintIncomplete`, naming the style), just as for a missing style. So two incomplete reads around an edit can never let Apply through |
