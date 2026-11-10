@@ -20,6 +20,12 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string SceneRoleUnmatched = "sheets.scene.roleUnmatched";
         /// <summary>A style the plan uses could not be fingerprinted in full: an edit to it is caught only by the apply postcondition.</summary>
         public const string FingerprintIncomplete = "sheets.scene.fingerprintIncomplete";
+        /// <summary>The scene has read errors, so nothing is planned (a part or label that was not read would be mishandled).</summary>
+        public const string SceneIncomplete = "sheets.scene.incomplete";
+        /// <summary>The plan worked out at Apply differs from the one previewed: nothing is written, review the new preview.</summary>
+        public const string PlanChanged = "sheets.preview.planChanged";
+        /// <summary>Several label rule sets and none chosen.</summary>
+        public const string RulesAmbiguous = "sheets.rules.ambiguous";
 
         public const string RequestDrawing = "sheets.request.drawing";
         public const string RequestNoSteps = "sheets.request.noSteps";

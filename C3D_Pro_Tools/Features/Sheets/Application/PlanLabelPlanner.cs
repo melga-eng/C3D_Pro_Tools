@@ -21,6 +21,22 @@ namespace C3DProTools.Features.Sheets.Application
 
     internal static class PlanLabelPlanner
     {
+        /// <summary>
+        /// A digest of what a plan would write: every change with its sheet, rule, source, slot, kind, part, ratio and the label
+        /// it removes. Apply plans again and writes only when the new digest equals the one the user previewed, so a rule edit
+        /// or drawing change after the preview can never be written unseen.
+        /// </summary>
+        public static string Digest(PlanLabelsPlan plan)
+        {
+            System.Text.StringBuilder b = new System.Text.StringBuilder();
+            foreach (BuildItem item in plan.Items)
+                foreach (PlannedChange c in item.Changes)
+                    b.Append(string.Join("\u001F", item.ItemKey, c.ChangeId, c.Kind, c.Layout, c.RuleId, c.SourceKey, c.StyleSlot,
+                        c.Part?.Handle, c.Ratio?.ToString("R", CultureInfo.InvariantCulture), c.Existing?.Handle)).Append('\u001E');
+            using System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(b.ToString()))).ToLowerInvariant();
+        }
+
         /// <summary>The source key of a joint label: the pipe whose start it labels.</summary>
         public static string JointKey(DrawingObjectRef pipe) => pipe.Handle + ":start";
 
@@ -31,9 +47,23 @@ namespace C3DProTools.Features.Sheets.Application
         public static PlanLabelsPlan Plan(SheetScene scene, LabelRuleSet rules, IReadOnlyCollection<string> layouts)
         {
             List<OperationIssue> issues = new List<OperationIssue>();
+
+            // An incomplete scene plans nothing: a part that could not be read would look absent, so its labels would be removed,
+            // and a label that could not be read would look missing, so it would be added twice.
+            List<OperationIssue> blocking = scene.Issues.Where(i => i.Severity == IssueSeverity.Error || i.Code == SheetCodes.SceneReadFailed).ToList();
+            if (blocking.Count > 0)
+            {
+                issues.AddRange(blocking);
+                issues.Add(OperationIssue.Error(SheetCodes.SceneIncomplete,
+                    $"{blocking.Count} problem(s) reading the drawing (listed above), so no labels are planned: a part or label that could not be read would be wrongly removed or added twice. Fix them and plan again."));
+                return new PlanLabelsPlan(null, issues);
+            }
+
             HashSet<string> wanted = new HashSet<string>(layouts ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            List<SheetSnapshot> sheets = scene.Sheets.Where(s => s.Kind == SheetKind.Plan && (wanted.Count == 0 || wanted.Contains(s.Layout)))
-                .OrderBy(s => s.TabOrder).ToList();
+            // Which sheet owns a part is decided over every plan sheet, then only the chosen sheets change: building sheet A alone
+            // must not hand A a pipe that mostly shows on B.
+            List<SheetSnapshot> allPlan = scene.Sheets.Where(s => s.Kind == SheetKind.Plan).OrderBy(s => s.TabOrder).ToList();
+            List<SheetSnapshot> sheets = allPlan.Where(s => wanted.Count == 0 || wanted.Contains(s.Layout)).ToList();
             HashSet<string> inScope = new HashSet<string>(sheets.Select(s => s.Layout), StringComparer.OrdinalIgnoreCase);
             foreach (string w in wanted.Where(w => !scene.Sheets.Any(s => s.Kind == SheetKind.Plan && s.Layout.Equals(w, StringComparison.OrdinalIgnoreCase))))
                 issues.Add(OperationIssue.Info(SheetCodes.RequestLayout, $"\"{w}\" is not a plan sheet; it gets no plan labels.") with { Layout = w });
@@ -67,8 +97,9 @@ namespace C3DProTools.Features.Sheets.Application
             // Every desired label: identity → what to create.
             Dictionary<string, PlannedChange> desired = new Dictionary<string, PlannedChange>(StringComparer.Ordinal);
             foreach ((LabelRule rule, string slot) in usable)
-                foreach ((string source, DrawingObjectRef part, double? ratio, string layout, string what) in Targets(scene, sheets, rule))
+                foreach ((string source, DrawingObjectRef part, double? ratio, string layout, string what) in Targets(scene, allPlan, rule))
                 {
+                    if (!inScope.Contains(layout)) continue;
                     BuildTag key = new BuildTag(rule.Id, source, layout, slot, PinState.Auto, null);
                     if (desired.ContainsKey(key.IdentityKey)) continue;
                     desired[key.IdentityKey] = new PlannedChange("", BuildStep.PlanLabels, ChangeKind.Add, ChangeTarget.Label, layout, rule.Id, source, null,

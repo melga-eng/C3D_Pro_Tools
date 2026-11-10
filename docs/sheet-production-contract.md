@@ -796,3 +796,12 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 4 | low · The nominal-scale mismatch remains an ordinary issue | `SheetIssue.IsNote`: shown, never fixed, and not counted in the sheet list or the status line |
 | 5 | medium · Orphan labels disappear from the scene | Labels whose part is gone are kept, with `Target = default` (`LabelSnapshot.IsOrphan`), their tag and placement. They stay obstacles, and a pinned one gives a Warning `sheets.label.orphanPinned` |
 | 6 | medium · Unreadable owned objects are silently skipped | An owned part that cannot be opened, or lies deeper than six levels, makes the fingerprint incomplete (empty), with the reason logged. The build treats an empty fingerprint as unknown: Warning `sheets.scene.fingerprintIncomplete`, and the apply postcondition guards that style |
+
+## Code review of `feature/label-rules`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | high · Selected sheets change label ownership | Ownership is decided over every plan sheet, and only the chosen sheets' changes are kept. The command reads every sheet. A tool label on the wrong sheet is removed there |
+| 2 | high · Incomplete scene reads can cause destructive removals | A scene with any Error or `sheets.scene.readFailed` plans nothing: Error `sheets.scene.incomplete`, with the read problems listed. The command also reports the scene's warnings |
+| 3 | high · Apply writes a newly generated, unreviewed plan | Apply plans again and writes only when the plan's digest (`PlanLabelPlanner.Digest`: every change, part, slot, ratio and removed label) equals the last preview's for that drawing, rule set and sheets. Otherwise nothing is written, and the new plan becomes the preview to review (`sheets.preview.planChanged`) |
+| 4 | medium · Multiple rule sets silently select the first | With several rule sets, the command asks for one by name. An unknown name plans nothing (`sheets.rules.ambiguous`) |

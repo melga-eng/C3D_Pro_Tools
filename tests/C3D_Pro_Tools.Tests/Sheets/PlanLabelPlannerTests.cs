@@ -230,6 +230,52 @@ namespace C3DProTools.Tests.Sheets
             Assert.Equal("SW-A#1", a.Items[0].Changes[0].ChangeId);
         }
 
+        // ---- Codex review of feature/label-rules ---------------------------------------------------------------------------
+
+        [Fact]
+        public void Ownership_IsDecidedOverEveryPlanSheet_EvenWhenBuildingOne()
+        {
+            // IC-2 shows 40 m on A and 70 m on B: B owns it. Building A alone must neither give it to A nor keep A's copy.
+            LabelSnapshot wrongSheet = Tool("A20", "ict.plan.pipe", "22", "SW-A", "Name", "22");
+            PlanLabelsPlan plan = PlanLabelPlanner.Plan(Scene(new[] { wrongSheet }), Rules(Pipes("Name")), new[] { "SW-A" });
+            List<PlannedChange> changes = All(plan);
+            Assert.DoesNotContain(changes, c => c.Kind == ChangeKind.Add && c.SourceKey == "22");
+            Assert.Contains(changes, c => c.Kind == ChangeKind.Remove && c.Existing?.Handle == "A20");
+            Assert.All(changes, c => Assert.Equal("SW-A", c.Layout));
+        }
+
+        [Fact]
+        public void AnIncompleteScene_PlansNothing()
+        {
+            SheetScene scene = Scene(new[] { Tool("A21", "ict.plan.manhole", "31", "SW-A", "MH Name", "31") }) with
+            {
+                Issues = new[] { OperationIssue.Warning(SheetCodes.SceneReadFailed, "Pipe IC-9 could not be read.", obj: DrawingObjectRef.Of("29")) }
+            };
+            PlanLabelsPlan plan = PlanLabelPlanner.Plan(scene, Rules(Pipes("Name")), null);
+            Assert.Empty(plan.Items);
+            Assert.Contains(plan.Issues, i => i.Code == SheetCodes.SceneIncomplete && i.Severity == IssueSeverity.Error);
+            Assert.Contains(plan.Issues, i => i.Code == SheetCodes.SceneReadFailed);
+
+            SheetScene wrongUnits = Scene() with { Issues = new[] { OperationIssue.Error(SheetCodes.UnitsNotMetres, "Not metres.") } };
+            Assert.Empty(PlanLabelPlanner.Plan(wrongUnits, Rules(Manholes("MH Name")), null).Items);
+
+            SheetScene onlyWarnings = Scene() with { Issues = new[] { OperationIssue.Warning(SheetCodes.SceneRoleUnmatched, "No existing ground.") } };
+            Assert.NotEmpty(PlanLabelPlanner.Plan(onlyWarnings, Rules(Manholes("MH Name")), null).Items);
+        }
+
+        [Fact]
+        public void Digest_IsTheSameForTheSamePlan_AndChangesWithAnyChange()
+        {
+            string a = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Name")), null));
+            string again = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Name")), null));
+            string otherStyle = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(), Rules(Manholes("MH Data")), null));
+            string withRemoval = PlanLabelPlanner.Digest(PlanLabelPlanner.Plan(Scene(new[] { Tool("A22", "ict.plan.gone", "31", "SW-A", "MH Name", "31") }), Rules(Manholes("MH Name")), null));
+            Assert.Equal(a, again);
+            Assert.NotEqual(a, otherStyle);
+            Assert.NotEqual(a, withRemoval);
+            Assert.NotEqual(a, PlanLabelPlanner.Digest(new PlanLabelsPlan(null, null)));
+        }
+
         // ---- Geometry ------------------------------------------------------------------------------------------------
 
         [Fact]

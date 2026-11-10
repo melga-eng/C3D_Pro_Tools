@@ -70,10 +70,26 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 List<string> layouts = (sr.StringResult ?? "").Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
 
                 Application.ProjectSettings settings = Application.ProjectSettings.Load(doc.Name, out string problem);
-                LabelRuleSet rules = settings.RuleSet(null) ?? settings.LabelRules.FirstOrDefault();
                 StringBuilder b = new StringBuilder();
                 b.AppendLine($"Plan labels for {doc.Name} ({(apply ? "apply" : "preview")}), rules from {Application.ProjectSettings.PathFor(doc.Name)}");
                 if (problem != null) b.AppendLine("Problem: " + problem);
+
+                // Several rule sets: the user names one; never a silent first pick.
+                LabelRuleSet rules = settings.RuleSet(null);
+                if (rules == null && settings.LabelRules.Count > 1)
+                {
+                    string names = string.Join(", ", settings.LabelRules.Select(r => $"\"{r?.Name}\""));
+                    var rp = new Autodesk.AutoCAD.EditorInput.PromptStringOptions($"\nRule set ({names}): ") { AllowSpaces = true };
+                    var rr = ed.GetString(rp);
+                    if (rr.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.OK) return;
+                    rules = settings.RuleSet(rr.StringResult);
+                    if (rules == null)
+                    {
+                        b.AppendLine($"{SheetCodes.RulesAmbiguous}: \"{rr.StringResult}\" is not one of {names}. Nothing planned.");
+                        Finish(doc, b, "C3DProPlanLabels.txt");
+                        return;
+                    }
+                }
                 IReadOnlyList<OperationIssue> ruleIssues = LabelRuleValidation.Validate(rules);
                 if (rules == null || ruleIssues.Count > 0)
                 {
@@ -83,8 +99,15 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     return;
                 }
 
-                SheetScene scene = new SheetSceneCivil3D().Read(new SheetSceneRequest { Drawing = DrawingRefs3D.Identity(doc), Layouts = layouts }, CancellationToken.None);
+                // Every sheet is read, so which sheet owns a part is decided over all of them; the plan then changes only the
+                // chosen sheets.
+                DrawingIdentity identity = DrawingRefs3D.Identity(doc);
+                SheetScene scene = new SheetSceneCivil3D().Read(new SheetSceneRequest { Drawing = identity }, CancellationToken.None);
+                int sceneWarnings = scene.Issues.Count(i => i.Severity == IssueSeverity.Warning);
+                if (sceneWarnings > 0) b.AppendLine($"Reading the drawing gave {sceneWarnings} warning(s); run C3DProSceneReport for the list.");
                 Application.PlanLabelsPlan plan = Application.PlanLabelPlanner.Plan(scene, rules, layouts);
+                string digest = Application.PlanLabelPlanner.Digest(plan);
+                string previewKey = $"{identity.SessionKey}|{rules.Name}|{string.Join(",", layouts.Select(l => l.ToUpperInvariant()).OrderBy(l => l))}";
                 b.AppendLine($"Rule set \"{rules.Name}\" v{rules.Version}: {plan.Items.Count} sheet(s) to change, "
                     + $"{plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Add))} label(s) to add, {plan.Items.Sum(i => i.Changes.Count(c => c.Kind == ChangeKind.Remove))} to remove.");
                 foreach (OperationIssue i in plan.Issues) b.AppendLine($"  {i.Severity} {i.Code} {i.Layout} {i.Object}: {i.Message}");
@@ -94,10 +117,22 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     foreach (PlannedChange c in item.Changes.Take(200)) b.AppendLine($"  {c.ChangeId}  {c.Kind}  {c.RuleId}  {c.SourceKey}  {c.Description}");
                 }
 
-                if (apply && plan.Items.Count > 0)
+                // Apply writes only the plan the user reviewed: the same changes as the last preview for this drawing, rule set
+                // and sheets. Anything else becomes the new preview, to be reviewed first.
+                bool reviewed = PreviewedPlans.TryGetValue(previewKey, out string previewed) && previewed == digest;
+                if (!apply || !reviewed)
                 {
+                    if (apply)
+                        b.AppendLine($"{SheetCodes.PlanChanged}: nothing written. "
+                            + (PreviewedPlans.ContainsKey(previewKey) ? "The plan is not the one you previewed (the rules or the drawing changed)." : "There is no preview of this plan yet.")
+                            + " The plan above is the new preview: review it, then run Apply again.");
+                    PreviewedPlans[previewKey] = digest;
+                }
+                else if (plan.Items.Count > 0)
+                {
+                    PreviewedPlans.Remove(previewKey);
                     b.AppendLine();
-                    b.AppendLine("Apply:");
+                    b.AppendLine("Apply (the previewed plan):");
                     using (doc.LockDocument())
                         foreach (BuildItem item in plan.Items)
                         {
@@ -114,6 +149,9 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 ed.WriteMessage($"\nPlan labels failed: {ex.Message}\n");
             }
         }
+
+        /// <summary>The digest of the last previewed plan, by drawing session, rule set and sheets (this Civil 3D session only).</summary>
+        private static readonly Dictionary<string, string> PreviewedPlans = new Dictionary<string, string>(StringComparer.Ordinal);
 
         private static void Finish(Document doc, StringBuilder b, string fileName)
         {
