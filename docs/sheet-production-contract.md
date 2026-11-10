@@ -611,6 +611,10 @@ interface ISheetProductionService
 }
 ```
 
+**Where an issue is.** `OperationIssue.Layout` names the sheet an issue is about (null for drawing-wide issues). The service sets
+it on every sheet-specific issue in `SheetOverview`, previews and results. The UI uses it for Zoom and Fix, and disables both
+when it is null. It never works the location out from the message or the object.
+
 ### Threading
 
 - The service runs all drawing work on the AutoCAD main thread, through the document's command context. The UI never touches

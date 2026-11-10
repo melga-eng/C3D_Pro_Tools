@@ -59,6 +59,12 @@ namespace C3DProTools.Features.Shared.Contracts
     /// <param name="Object">The object it is about, in the operation's drawing; null when none.</param>
     internal sealed record OperationIssue(string Code, IssueSeverity Severity, string Message, string Field = null, DrawingObjectRef? Object = null)
     {
+        /// <summary>
+        /// The sheet (layout name) the issue is about, so the UI can zoom to it and offer its fix there; null when the issue is
+        /// about no one sheet (a drawing-wide problem). Set it with <c>with { Layout = … }</c>; the UI never guesses it.
+        /// </summary>
+        public string Layout { get; init; }
+
         public static OperationIssue Error(string code, string message, string field = null, DrawingObjectRef? obj = null) => new OperationIssue(code, IssueSeverity.Error, message, field, obj);
         public static OperationIssue Warning(string code, string message, string field = null, DrawingObjectRef? obj = null) => new OperationIssue(code, IssueSeverity.Warning, message, field, obj);
         public static OperationIssue Info(string code, string message, string field = null, DrawingObjectRef? obj = null) => new OperationIssue(code, IssueSeverity.Info, message, field, obj);
