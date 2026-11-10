@@ -767,3 +767,4 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 2 | medium · Profile-label targets are not resolved to model parts | `ModelTarget` turns a `ProfileViewPart` / `ProfileViewPressurePart` into its `ModelPartId`; labels with no target are left out |
 | 3 | medium · The mismatch fix still writes profile-sheet scale notes | The title-block/scale-note fix is offered for tile parts only, and `SyncNoteToTitle` refuses other sheets itself. The note's first scale only is replaced, so "H 1:500 V 1:50" keeps its V |
 | 4 | low · The nominal-scale mismatch remains an ordinary issue | `SheetIssue.IsNote`: shown, never fixed, and not counted in the sheet list or the status line |
+| 5 | medium · Orphan labels disappear from the scene | Labels whose part is gone are kept, with `Target = default` (`LabelSnapshot.IsOrphan`), their tag and placement. They stay obstacles, and a pinned one gives a Warning `sheets.label.orphanPinned` |

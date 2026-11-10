@@ -472,9 +472,14 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         RecordedPlacement current = new RecordedPlacement(label.StyleName, label.Dragged, at.X, at.Y, ratio, label.RotationAngle);
                         BuildTag tag = BuildXData.Decode(label.GetXDataForApplication(BuildTag.XDataApplication));
                         string layout = byTab.FirstOrDefault(v => v.Sees(at))?.Layout ?? "";
+                        // A label whose part is gone stays in the scene (Target = default): it is still an obstacle, and a pinned
+                        // one must be reported, not dropped (section 4, sheets.label.orphanPinned).
                         ObjectId target = ModelTarget(tr, label.FeatureId);
-                        if (target.IsNull) continue;    // labels nothing (a label left over from an erased part)
-                        labels.Add(new LabelSnapshot(DrawingRefs3D.Ref(id), DrawingRefs3D.Ref(target), layout, tag, current));
+                        LabelSnapshot snap = new LabelSnapshot(DrawingRefs3D.Ref(id), target.IsNull ? default : DrawingRefs3D.Ref(target), layout, tag, current);
+                        labels.Add(snap);
+                        if (target.IsNull && snap.IsPinned)
+                            _issues.Add(OperationIssue.Warning(SheetCodes.LabelOrphanPinned,
+                                "A pinned label's part no longer exists. The label is kept; delete or release it if it is not needed.", obj: snap.Ref));
                     }
                     catch (Exception ex) { Warn("A label could not be read.", ex, label); }
                 }
