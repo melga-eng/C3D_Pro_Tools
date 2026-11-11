@@ -10,7 +10,7 @@ namespace C3DProTools.Tests
             new MergePart { Id = id, Name = id, Network = net, IsPipe = true, A = (x0, 0, 100), B = (x1, 0, 99.5), Family = family, Size = size, Uses = uses, InTarget = inTarget };
 
         private static MergePart Structure(string id, string net, double x, string size = "MH-1200", int uses = 0, bool inTarget = false, string family = "Manhole") =>
-            new MergePart { Id = id, Name = id, Network = net, IsPipe = false, A = (x, 0, 98), Family = family, Size = size, Uses = uses, InTarget = inTarget };
+            new MergePart { Id = id, Name = id, Network = net, IsPipe = false, A = (x, 0, 98), RimElevation = 100, SumpElevation = 98, Family = family, Size = size, Uses = uses, InTarget = inTarget };
 
         [Fact]
         public void FourAndSixPipesSharingThree_GiveSevenPipes()
@@ -34,7 +34,47 @@ namespace C3DProTools.Tests
             Assert.True(NetworkMerge.SamePlace(Pipe("a", "A", 0, 10), new MergePart { IsPipe = true, A = (10, 0, 99.5), B = (0, 0, 100) }));
             // A pipe at another level in the same plan place is a different pipe.
             Assert.False(NetworkMerge.SamePlace(Pipe("a", "A", 0, 10), new MergePart { IsPipe = true, A = (0, 0, 99), B = (10, 0, 98.5) }));
-            Assert.True(NetworkMerge.SamePlace(Structure("m", "A", 5), new MergePart { IsPipe = false, A = (5.0004, 0, 90) }));
+            Assert.True(NetworkMerge.SamePlace(Structure("m", "A", 5), Structure("copy", "B", 5.0004)));
+        }
+
+        [Theory]
+        [InlineData(0.006, 0.0, false)]
+        [InlineData(0.0, 0.006, false)]
+        [InlineData(0.0, 0.0, true)]
+        [InlineData(0.004, -0.004, true)]
+        public void StructuresAtSameXY_MustAgreeInRimAndSump(double rimOffset, double sumpOffset, bool duplicate)
+        {
+            MergePart a = Structure("a", "A", 5, inTarget: true), b = Structure("b", "B", 5);
+            b.RimElevation += rimOffset;
+            b.SumpElevation += sumpOffset;
+            Assert.Equal(duplicate, NetworkMerge.SamePlace(a, b));
+            MergeRow row = NetworkMerge.Plan(new[] { a, b }).Single(r => r.Part == b);
+            Assert.Equal(duplicate ? MergeAction.DeleteCopy : MergeAction.Move, row.Action);
+            Assert.Equal(duplicate, NetworkMerge.CopiesByNetwork(new[] { a, b }).ContainsKey("B"));
+            Assert.True(NetworkMerge.SamePlace(a, b, zTol: 0.01));
+        }
+
+        [Fact]
+        public void StructuresWithUnknownLevels_AreNotDuplicates()
+        {
+            MergePart a = Structure("a", "A", 5), b = Structure("b", "B", 5);
+            b.SumpElevation = double.NaN;
+            Assert.DoesNotContain(NetworkMerge.Plan(new[] { a, b }), r => r.Action == MergeAction.DeleteCopy);
+        }
+
+        [Theory]
+        [InlineData(true, false)]
+        [InlineData(false, false)]
+        [InlineData(true, true)]
+        [InlineData(false, true)]
+        public void PipesWithSamePlanEnds_DifferentEndLevel_IsNotDuplicate(bool changeStart, bool reversed)
+        {
+            MergePart a = Pipe("a", "A", 0, 10), b = Pipe("b", "B", 0, 10);
+            if (changeStart) b.A = (b.A.X, b.A.Y, b.A.Z + 0.006);
+            else b.B = (b.B.X, b.B.Y, b.B.Z + 0.006);
+            if (reversed) (b.A, b.B) = (b.B, b.A);
+            Assert.False(NetworkMerge.SamePlace(a, b));
+            Assert.DoesNotContain(NetworkMerge.Plan(new[] { a, b }), r => r.Action == MergeAction.DeleteCopy);
         }
 
         [Fact]
