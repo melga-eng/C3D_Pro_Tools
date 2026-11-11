@@ -14,6 +14,8 @@ namespace C3DProTools
         public bool IsPipe;
         /// <summary>A pipe's two ends, or a structure's location (in A).</summary>
         public (double X, double Y, double Z) A, B;
+        /// <summary>A structure's rim and sump levels. Unknown levels never match another structure.</summary>
+        public double RimElevation = double.NaN, SumpElevation = double.NaN;
         /// <summary>The part family and size, to tell a true copy from a different part in the same place. Empty: unknown.</summary>
         public string Family = "", Size = "";
         /// <summary>A pipe's bulge from A to B (0: straight), so a curved pipe is never taken for a straight one between the same ends.</summary>
@@ -50,13 +52,15 @@ namespace C3DProTools
         /// <summary>
         /// True when two parts are the same part in the same place: pipes with both ends together (either way round) within
         /// <paramref name="tol"/> in plan and <paramref name="zTol"/> in level and the same curve (their arcs' mid points within
-        /// <paramref name="tol"/>); structures at the same plan location.
+        /// <paramref name="tol"/>); structures at the same plan location with rim and sump within <paramref name="zTol"/>.
         /// </summary>
         public static bool SamePlace(MergePart a, MergePart b, double tol = 0.001, double zTol = 0.005)
         {
             if (a.IsPipe != b.IsPipe) return false;
             bool Near((double X, double Y, double Z) p, (double X, double Y, double Z) q, bool level) => Plan2(p, q) <= tol && (!level || Math.Abs(p.Z - q.Z) <= zTol);
-            if (!a.IsPipe) return Near(a.A, b.A, false);
+            if (!a.IsPipe) return Near(a.A, b.A, false)
+                && Math.Abs(a.RimElevation - b.RimElevation) <= zTol
+                && Math.Abs(a.SumpElevation - b.SumpElevation) <= zTol;
             // The arc's rise at its mid point is bulge × chord / 2; a reversed pipe's bulge has the other sign.
             double chord = Plan2(a.A, a.B);
             if (Near(a.A, b.A, true) && Near(a.B, b.B, true)) return Math.Abs(a.Bulge - b.Bulge) * chord / 2 <= tol;
