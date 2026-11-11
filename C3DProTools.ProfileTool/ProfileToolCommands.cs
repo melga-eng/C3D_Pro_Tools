@@ -29,5 +29,16 @@ namespace C3DProTools.ProfileTool
             using var form = new ProfileViewManagerForm(doc, civil);
             AcApp.ShowModalDialog(form);
         }
+
+        /// <summary>Label style editor: batch-set any label style value, for styles picked by category or from selected labels.</summary>
+        [CommandMethod("C3DPRO", "STYLEMGR", CommandFlags.Modal)]
+        public void StyleManager()
+        {
+            var doc = AcApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            var civil = CivilDocument.GetCivilDocument(doc.Database);
+            using var form = new StyleEditorForm(doc, civil);
+            AcApp.ShowModalDialog(form);
+        }
     }
 }
