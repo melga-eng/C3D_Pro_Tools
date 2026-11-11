@@ -21,7 +21,11 @@ namespace C3DProTools.Features.Sheets.Application
         /// The preview of a build. <paramref name="rules"/> is the rule set to use (the service resolves it: the request's, or
         /// the project's). The preview's SceneStamp is the digest Apply must match.
         /// </summary>
-        public static BuildSheetsPreview Preview(SheetScene scene, BuildSheetsRequest request, LabelRuleSet rules)
+        /// <param name="arrangeContext">
+        /// What Arrange depends on that the scene does not hold, as the adapter fingerprints it: the saved arrange settings and
+        /// the text and leaders it keeps clear of on the sheets. Part of the stamp whenever a sheet is arranged.
+        /// </param>
+        public static BuildSheetsPreview Preview(SheetScene scene, BuildSheetsRequest request, LabelRuleSet rules, string arrangeContext = "")
         {
             BuildSheetsRequest effective = request with { Rules = rules };
             List<OperationIssue> issues = new List<OperationIssue>(BuildValidation.ValidateRequest(effective));
@@ -46,6 +50,13 @@ namespace C3DProTools.Features.Sheets.Application
                 if (arrange)
                 {
                     int movable = Movable(scene, sheet.Layout).Count + changes.Count(c => c.Kind == ChangeKind.Add);
+                    IReadOnlyList<string> unknown = UnknownArrangeStyles(scene, sheet.Layout);
+                    if (movable > 0 && unknown.Count > 0)
+                    {
+                        issues.Add(OperationIssue.Error(SheetCodes.FingerprintIncomplete,
+                            $"This sheet is not arranged: label style{(unknown.Count > 1 ? "s" : "")} {string.Join(", ", unknown.Select(u => $"\"{u}\""))} could not be read in full, so a change after the preview could not be detected.") with { Layout = sheet.Layout });
+                        movable = 0;
+                    }
                     if (movable > 0)
                         changes.Add(new PlannedChange("", BuildStep.Arrange, ChangeKind.Update, ChangeTarget.Label, sheet.Layout, null, ArrangeSource, null,
                             $"Arrange {movable} tool label(s) clear of each other; pinned and hand-placed labels stay where they are"));
@@ -55,32 +66,76 @@ namespace C3DProTools.Features.Sheets.Application
                 items.Add(new BuildItem("plan:" + sheet.Layout, BuildItemKind.PlanSheet, new[] { sheet.Layout }, numbered));
             }
 
-            string digest = Digest(scene, effective, rules, items);
+            string digest = Digest(scene, effective, rules, items, arrangeContext);
             return new BuildSheetsPreview(items.Count > 0 ? OperationStatus.Succeeded : OperationStatus.NoChange, Guid.NewGuid().ToString("N"),
                 request.Drawing, digest, effective, items, issues);
         }
 
-        /// <summary>The unpinned tool labels on a sheet: what Arrange may move.</summary>
+        /// <summary>
+        /// The unpinned tool labels on a sheet: what Arrange may move. A copied tag counts once: of the labels sharing an
+        /// identity, only the lowest handle is the tool's; the copies count as placed by hand (section 4), so they stay put.
+        /// </summary>
         public static List<LabelSnapshot> Movable(SheetScene scene, string layout) =>
-            scene.Labels.Where(l => l.IsToolLabel && !l.IsPinned && string.Equals(l.Tag.Layout, layout, StringComparison.OrdinalIgnoreCase)).ToList();
+            scene.Labels.Where(l => l.IsToolLabel && string.Equals(l.Tag.Layout, layout, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(l => l.Tag.IdentityKey, StringComparer.Ordinal)
+                .Select(g => g.OrderBy(l => HandleValue(l.Ref)).First())
+                .Where(l => !l.IsPinned).ToList();
+
+        private static ulong HandleValue(DrawingObjectRef r) =>
+            ulong.TryParse(r.Handle, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out ulong v) ? v : ulong.MaxValue;
 
         /// <summary>
         /// Everything the build depends on (section 10): the PlanLabels digest of the joined items (rules, changes, part
-        /// geometry, style fingerprints, viewports), plus the requested steps and, for each sheet that is arranged, the current
-        /// placement of every label there (tool, pinned and hand-placed alike: they are what Arrange works around).
+        /// geometry, style fingerprints, viewports), plus the requested steps and, for each sheet that is arranged, everything
+        /// Arrange reads: every label there (placement and rotation; tool, pinned and hand-placed alike) with the fingerprint of
+        /// its style, every network part the sheet shows (the outlines labels keep clear of), and the adapter's context (saved
+        /// arrange settings, model text and leaders).
         /// </summary>
-        public static string Digest(SheetScene scene, BuildSheetsRequest request, LabelRuleSet rules, IReadOnlyList<BuildItem> items)
+        public static string Digest(SheetScene scene, BuildSheetsRequest request, LabelRuleSet rules, IReadOnlyList<BuildItem> items, string arrangeContext = "")
         {
             string R(double v) => v.ToString("R", CultureInfo.InvariantCulture);
             System.Text.StringBuilder b = new System.Text.StringBuilder();
             b.Append(PlanLabelPlanner.Digest(new PlanLabelsPlan(items, null), scene, rules)).Append('\u001E');
             b.Append("steps\u001F").Append(string.Join(",", request.Steps.OrderBy(s => s))).Append('\u001E');
-            foreach (string layout in items.Where(i => i.Changes.Any(c => c.Step == BuildStep.Arrange)).SelectMany(i => i.Layouts).OrderBy(l => l, StringComparer.OrdinalIgnoreCase))
+            List<string> arranged = items.Where(i => i.Changes.Any(c => c.Step == BuildStep.Arrange)).SelectMany(i => i.Layouts)
+                .OrderBy(l => l, StringComparer.OrdinalIgnoreCase).ToList();
+            if (arranged.Count > 0) b.Append("arrangeContext\u001F").Append(arrangeContext ?? "").Append('\u001E');
+            foreach (string layout in arranged)
+            {
+                HashSet<string> styles = new HashSet<string>(StringComparer.Ordinal);
                 foreach (LabelSnapshot l in scene.Labels.Where(l => string.Equals(l.Layout, layout, StringComparison.OrdinalIgnoreCase)).OrderBy(l => l.Ref.Handle, StringComparer.Ordinal))
-                    b.Append(string.Join("\u001F", "arrangeInput", layout, l.Ref.Handle, l.Current?.StyleName, l.Current?.Dragged,
-                        R(l.Current?.TextXM ?? 0), R(l.Current?.TextYM ?? 0), l.Current?.AnchorRatio.HasValue == true ? R(l.Current.AnchorRatio.Value) : "", l.IsToolLabel, l.IsPinned)).Append('\u001E');
+                {
+                    b.Append(string.Join("\u001F", "arrangeInput", layout, l.Ref.Handle, l.Target.Handle, l.Current?.StyleName, l.Current?.Dragged,
+                        R(l.Current?.TextXM ?? 0), R(l.Current?.TextYM ?? 0), l.Current?.AnchorRatio.HasValue == true ? R(l.Current.AnchorRatio.Value) : "",
+                        R(l.Current?.RotationRad ?? 0), l.IsToolLabel, l.IsPinned)).Append('\u001E');
+                    if (l.Current?.StyleName != null) styles.Add(l.Current.StyleName);
+                }
+                foreach (SceneLabelStyle st in scene.LabelStyles.Where(s => styles.Contains(s.Name)).OrderBy(s => s.Kind).ThenBy(s => s.Name, StringComparer.Ordinal))
+                    b.Append(string.Join("\u001F", "arrangeStyle", layout, st.Kind, st.Name, string.IsNullOrEmpty(st.Fingerprint) ? "unknown" : st.Fingerprint)).Append('\u001E');
+                SheetSnapshot sheet = scene.Sheets.FirstOrDefault(s => string.Equals(s.Layout, layout, StringComparison.OrdinalIgnoreCase));
+                if (sheet == null) continue;
+                bool Shown(double x, double y) => sheet.Viewports.Any(v => Geometry2.Contains(v.ModelBoundary, new Point2(x, y)));
+                foreach (NetworkSnapshot n in scene.Networks)
+                {
+                    foreach (ScenePipe p in n.Pipes.Where(p => Shown(p.Start.X, p.Start.Y) || Shown(p.End.X, p.End.Y)))
+                        b.Append(string.Join("\u001F", "arrangePipe", layout, p.Ref.Handle, R(p.Start.X), R(p.Start.Y), R(p.End.X), R(p.End.Y), R(p.OuterWidthM))).Append('\u001E');
+                    foreach (SceneStructure s in n.Structures.Where(s => Shown(s.Insertion.X, s.Insertion.Y)))
+                        b.Append(string.Join("\u001F", "arrangeStructure", layout, s.Ref.Handle, R(s.Insertion.X), R(s.Insertion.Y), s.TypeName)).Append('\u001E');
+                }
+            }
             using System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create();
             return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(b.ToString()))).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// True when a style used by labels on the sheets being arranged could not be fingerprinted: Arrange could then work
+        /// with a style edited after the preview unseen, so such a sheet is not arranged (the service reports it).
+        /// </summary>
+        public static IReadOnlyList<string> UnknownArrangeStyles(SheetScene scene, string layout)
+        {
+            HashSet<string> names = new HashSet<string>(scene.Labels.Where(l => string.Equals(l.Layout, layout, StringComparison.OrdinalIgnoreCase) && l.Current?.StyleName != null)
+                .Select(l => l.Current.StyleName), StringComparer.Ordinal);
+            return scene.LabelStyles.Where(s => names.Contains(s.Name) && string.IsNullOrEmpty(s.Fingerprint)).Select(s => s.Name).Distinct().ToList();
         }
 
         /// <summary>

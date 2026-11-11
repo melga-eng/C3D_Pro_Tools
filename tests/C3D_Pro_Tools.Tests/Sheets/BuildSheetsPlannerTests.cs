@@ -152,5 +152,55 @@ namespace C3DProTools.Tests.Sheets
             Assert.Equal(1, a.IssueCount);
             Assert.Equal(0, o.Sheets.Single(s => s.Layout == "SW-B").IssueCount);
         }
+
+        // ---- Codex review of feature/build-sheets ------------------------------------------------------------------------
+
+        [Fact]
+        public void Movable_CountsACopiedTagOnce_TheLowestHandle()
+        {
+            SheetScene scene = Scene(new[] { Tool("AB3", "31", "SW-A"), Tool("AB2", "31", "SW-A"), Tool("AB4", "32", "SW-A") });
+            List<LabelSnapshot> movable = BuildSheetsPlanner.Movable(scene, "SW-A");
+            Assert.Equal(new[] { "AB2", "AB4" }, movable.Select(l => l.Ref.Handle).OrderBy(h => h));
+        }
+
+        [Fact]
+        public void TheStamp_CoversEverythingArrangeReads()
+        {
+            LabelSnapshot[] labels = { Tool("AB1", "31", "SW-A"), ByHand("CD1", "SW-A", 20) };
+            BuildSheetsRequest arrange = Request(BuildStep.Arrange);
+            string stamp = BuildSheetsPlanner.Preview(Scene(labels), arrange, Rules, "ctx-1").SceneStamp;
+
+            // The adapter's context: saved arrange settings, model text and leaders.
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(Scene(labels), arrange, Rules, "ctx-2").SceneStamp);
+
+            // A label style used on the sheet, edited under the same name, though no change names it.
+            SheetScene edited = Scene(labels) with { LabelStyles = new[] { new SceneLabelStyle(LabelStyleKind.Structure, "MH Name", DrawingObjectRef.Of("54"), "f4-edited") } };
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(edited, arrange, Rules, "ctx-1").SceneStamp);
+
+            // A label's rotation.
+            LabelSnapshot[] turned = { labels[0], new LabelSnapshot(DrawingObjectRef.Of("CD1"), DrawingObjectRef.Of("99"), "SW-A", null, At with { TextXM = 20, RotationRad = 0.5 }) };
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(Scene(turned), arrange, Rules, "ctx-1").SceneStamp);
+
+            // A part the sheet shows (an obstacle) moved.
+            SheetScene moved = Scene(labels) with
+            {
+                Networks = Scene().Networks.Select(n => n with { Structures = n.Structures.Select(s => s.Ref.Handle == "31" ? s with { Insertion = new Point3(12, 50, 613) } : s).ToList() }).ToList()
+            };
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(moved, arrange, Rules, "ctx-1").SceneStamp);
+
+            Assert.Equal(stamp, BuildSheetsPlanner.Preview(Scene(labels), arrange, Rules, "ctx-1").SceneStamp);
+        }
+
+        [Fact]
+        public void ASheetWhoseLabelStyleCannotBeFingerprinted_IsNotArranged()
+        {
+            SheetScene scene = Scene(new[] { Tool("AB1", "31", "SW-A") }) with
+            {
+                LabelStyles = new[] { new SceneLabelStyle(LabelStyleKind.Structure, "MH Name", DrawingObjectRef.Of("54"), "") }
+            };
+            BuildSheetsPreview p = BuildSheetsPlanner.Preview(scene, Request(BuildStep.Arrange), Rules, "ctx");
+            Assert.Empty(p.Items);
+            Assert.Contains(p.Issues, i => i.Code == SheetCodes.FingerprintIncomplete && i.Layout == "SW-A");
+        }
     }
 }

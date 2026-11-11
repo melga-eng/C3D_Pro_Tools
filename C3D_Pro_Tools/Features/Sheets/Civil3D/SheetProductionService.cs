@@ -90,11 +90,16 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 if (rules == null) return BuildSheetsPreview.Empty(OperationStatus.Rejected, request.Drawing, request, issues);
                 progress?.Report(new BuildProgress(BuildPhase.Reading, 0, 2, null));
                 SheetScene scene;
+                string arrangeContext = "";
                 // Every sheet is read: which sheet owns a part is decided over all of them.
-                using (doc.LockDocument()) scene = _scene.Read(new SheetSceneRequest { Drawing = request.Drawing }, ct);
+                using (doc.LockDocument())
+                {
+                    scene = _scene.Read(new SheetSceneRequest { Drawing = request.Drawing }, ct);
+                    if (request.Steps.Contains(BuildStep.Arrange)) arrangeContext = ArrangeContext(doc, scene, request.Layouts);
+                }
                 if (ct.IsCancellationRequested) return BuildSheetsPreview.Empty(OperationStatus.Cancelled, request.Drawing, request);
                 progress?.Report(new BuildProgress(BuildPhase.Planning, 1, 2, null));
-                BuildSheetsPreview preview = BuildSheetsPlanner.Preview(scene, request, rules);
+                BuildSheetsPreview preview = BuildSheetsPlanner.Preview(scene, request, rules, arrangeContext);
                 progress?.Report(new BuildProgress(BuildPhase.Planning, 2, 2, null));
                 return preview with { Issues = issues.Concat(preview.Issues).ToList() };
             }
@@ -114,47 +119,14 @@ namespace C3DProTools.Features.Sheets.Civil3D
             if (!Enter()) return new BuildSheetsResult(OperationStatus.Rejected, operation, request.Preview.PreviewId, null, new[] { Busy() });
             try
             {
-                Document doc = DrawingRefs3D.Find(request.Preview.Drawing);
-                if (doc == null)
-                    return new BuildSheetsResult(OperationStatus.Rejected, operation, request.Preview.PreviewId, null,
-                        new[] { OperationIssue.Error(SheetCodes.PreviewWrongDrawing, "The previewed drawing is not open any more; preview again.") });
-
-                // Plan again: only the exact plan the user previewed is written.
-                BuildSheetsPreview again = Plan(request.Preview.Request, null, ct);
-                if (again.Status != OperationStatus.Succeeded || again.SceneStamp != request.Preview.SceneStamp)
-                    return new BuildSheetsResult(OperationStatus.Rejected, operation, request.Preview.PreviewId, null,
-                        new[] { OperationIssue.Error(SheetCodes.PreviewStale, "The drawing, the rules or a style changed after the preview, so nothing was written. Preview again.") });
-
-                HashSet<string> chosen = new HashSet<string>(request.ItemKeys, StringComparer.Ordinal);
-                List<BuildItem> items = again.Items.Where(i => chosen.Count == 0 || chosen.Contains(i.ItemKey)).ToList();
-                LabelRuleSet rules = again.Request.Rules;
-                List<BuildItemOutcome> outcomes = new List<BuildItemOutcome>();
-                bool cancelled = false;
-
-                void Run()
-                {
-                    using (doc.LockDocument())
-                        for (int i = 0; i < items.Count; i++)
-                        {
-                            if (ct.IsCancellationRequested)
-                            {
-                                cancelled = true;
-                                outcomes.AddRange(items.Skip(i).Select(it => new BuildItemOutcome(it.ItemKey, ItemStatus.NotAttempted, 0, 0, 0, null, null)));
-                                break;
-                            }
-                            progress?.Report(new BuildProgress(BuildPhase.Applying, i, items.Count, items[i].ItemKey));
-                            outcomes.Add(BuildSheetsCivil3D.Apply(doc, items[i], rules, again.SceneStamp));
-                        }
-                }
-
-                // From the palette (application context) the build runs as a command, so it is one UNDO step.
+                // From the palette (application context) the whole apply runs as a command: one UNDO step, and the check that
+                // nothing changed happens inside it, under the lock, right before writing.
+                BuildSheetsResult result = null;
                 if (AcadApp.DocumentManager.IsApplicationContext)
-                    await AcadApp.DocumentManager.ExecuteInCommandContextAsync(_ => { Run(); return Task.CompletedTask; }, null);
-                else Run();
-
-                progress?.Report(new BuildProgress(BuildPhase.Applying, items.Count, items.Count, null));
-                OperationStatus status = OperationOutcome.Summarize(outcomes.Select(o => o.Status).ToList(), cancelled);
-                return new BuildSheetsResult(status, operation, request.Preview.PreviewId, outcomes, null);
+                    await AcadApp.DocumentManager.ExecuteInCommandContextAsync(_ => { result = ApplyNow(request, operation, progress, ct); return Task.CompletedTask; }, null);
+                else result = ApplyNow(request, operation, progress, ct);
+                return result ?? new BuildSheetsResult(OperationStatus.OutcomeUnknown, operation, request.Preview.PreviewId, null,
+                    new[] { OperationIssue.Error(SheetCodes.Internal, "The build did not report back; read the drawing again before trying again.") });
             }
             catch (Exception ex)
             {
@@ -163,6 +135,79 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     new[] { OperationIssue.Error(SheetCodes.Internal, "The build stopped unexpectedly; read the drawing again before trying again: " + ex.Message) });
             }
             finally { Leave(); }
+        }
+
+        /// <summary>
+        /// The apply itself, in command context or a command: check the active drawing is the previewed one, take the lock,
+        /// plan again and compare the stamp, then write the items one by one (cancellation between items only).
+        /// </summary>
+        private BuildSheetsResult ApplyNow(BuildSheetsApplyRequest request, string operation, IProgress<BuildProgress> progress, CancellationToken ct)
+        {
+            string previewId = request.Preview.PreviewId;
+            Document doc = DrawingRefs3D.Find(request.Preview.Drawing);
+            if (doc == null || !ReferenceEquals(doc, AcadApp.DocumentManager.MdiActiveDocument))
+                return new BuildSheetsResult(OperationStatus.Rejected, operation, previewId, null,
+                    new[] { OperationIssue.Error(SheetCodes.PreviewWrongDrawing, "The previewed drawing is not the active drawing; activate it and preview again.") });
+            using (doc.LockDocument())
+            {
+                // Plan again: only the exact plan the user previewed is written.
+                BuildSheetsPreview again = Plan(request.Preview.Request, null, ct);
+                if (again.Status == OperationStatus.Cancelled || ct.IsCancellationRequested)
+                    return new BuildSheetsResult(OperationStatus.Cancelled, operation, previewId, null,
+                        new[] { OperationIssue.Info(SheetCodes.Busy, "Cancelled before anything was written.") });
+                if (again.Status != OperationStatus.Succeeded || again.SceneStamp != request.Preview.SceneStamp)
+                    return new BuildSheetsResult(OperationStatus.Rejected, operation, previewId, null,
+                        new[] { OperationIssue.Error(SheetCodes.PreviewStale, "The drawing, the rules or a style changed after the preview, so nothing was written. Preview again.") });
+
+                HashSet<string> chosen = new HashSet<string>(request.ItemKeys, StringComparer.Ordinal);
+                List<BuildItem> items = again.Items.Where(i => chosen.Count == 0 || chosen.Contains(i.ItemKey)).ToList();
+                LabelRuleSet rules = again.Request.Rules;
+                List<BuildItemOutcome> outcomes = new List<BuildItemOutcome>();
+                bool cancelled = false;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        cancelled = true;
+                        outcomes.AddRange(items.Skip(i).Select(it => new BuildItemOutcome(it.ItemKey, ItemStatus.NotAttempted, 0, 0, 0, null, null)));
+                        break;
+                    }
+                    progress?.Report(new BuildProgress(BuildPhase.Applying, i, items.Count, items[i].ItemKey));
+                    outcomes.Add(BuildSheetsCivil3D.Apply(doc, items[i], rules, again.SceneStamp));
+                }
+                progress?.Report(new BuildProgress(BuildPhase.Applying, items.Count, items.Count, null));
+                OperationStatus status = OperationOutcome.Summarize(outcomes.Select(o => o.Status).ToList(), cancelled);
+                return new BuildSheetsResult(status, operation, previewId, outcomes, null);
+            }
+        }
+
+        /// <summary>
+        /// What Arrange reads that the scene does not hold, as one fingerprint: the saved arrange settings, and the model text,
+        /// multileaders and leaders it keeps clear of inside the viewports of the plan sheets in scope.
+        /// </summary>
+        private static string ArrangeContext(Document doc, SheetScene scene, IReadOnlyCollection<string> layouts)
+        {
+            string R(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            AnnotationSettings s = AnnotationSettings.Load();
+            System.Text.StringBuilder b = new System.Text.StringBuilder();
+            b.Append(string.Join("\u001F", "settings", R(s.MaxDistance), R(s.Gap), R(s.Margin), s.SlideNormalLabels, s.AvoidModelText,
+                string.Join("|", (s.KeepClearNetworks ?? new List<string>()).OrderBy(x => x)), string.Join("|", (s.SlideStyles ?? new List<string>()).OrderBy(x => x)),
+                string.Join("|", (s.DraggedStyles ?? new List<string>()).OrderBy(x => x)))).Append('\u001E');
+            HashSet<string> wanted = new HashSet<string>(layouts ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            List<IReadOnlyList<Point2>> areas = scene.Sheets.Where(sh => sh.Kind != SheetKind.Other && (wanted.Count == 0 || wanted.Contains(sh.Layout)))
+                .SelectMany(sh => sh.Viewports).Select(v => v.ModelBoundary).ToList();
+            bool Inside(Autodesk.AutoCAD.Geometry.Point3d p) => areas.Any(a => Geometry2.Contains(a, new Point2(p.X, p.Y)));
+            using (Autodesk.AutoCAD.DatabaseServices.Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+            {
+                AnnotScene obstacles = AnnotScene.Read(tr, doc.Database, Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(doc.Database), true, false);
+                foreach (var outline in obstacles.Texts.Where(t => t.Any(Inside)))
+                    b.Append("text\u001F").Append(string.Join(";", outline.Select(p => R(p.X) + "," + R(p.Y)))).Append('\u001E');
+                foreach (var (a, c) in obstacles.LeaderLines.Where(l => Inside(l.a) || Inside(l.b)))
+                    b.Append("leader\u001F").Append($"{R(a.X)},{R(a.Y)};{R(c.X)},{R(c.Y)}").Append('\u001E');
+                tr.Commit();
+            }
+            byte[] h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(b.ToString()));
+            return Convert.ToHexString(h).ToLowerInvariant();
         }
 
         public Task<BuildSheetsPreview> PreviewPinAsync(DrawingIdentity drawing, IReadOnlyList<DrawingObjectRef> labels, bool pin, CancellationToken ct) =>
