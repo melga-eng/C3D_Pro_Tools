@@ -56,16 +56,19 @@ namespace C3DProTools.Features.Sheets.Civil3D
             if (sheet == null) throw new InvalidOperationException($"Sheet {layout} is not in the drawing any more.");
             List<LabelInfo> labels = AnnotLabels.Scan(tr, db);
 
-            // Only this sheet's unpinned tool labels may move.
-            Dictionary<ObjectId, BuildTag> movable = new Dictionary<ObjectId, BuildTag>();
+            // Only this sheet's unpinned tool labels may move. A copied tag counts once, as in the planner: of the labels sharing
+            // an identity, the lowest handle is the tool's; the copies count as placed by hand and stay put as obstacles.
+            Dictionary<string, (ObjectId id, BuildTag tag, bool pinned)> owners = new Dictionary<string, (ObjectId, BuildTag, bool)>(StringComparer.Ordinal);
             foreach (LabelInfo l in labels)
             {
                 if (!(tr.GetObject(l.Id, OpenMode.ForRead) is CivilLabel label)) continue;
                 BuildTag tag = BuildXData.Decode(label.GetXDataForApplication(BuildTag.XDataApplication));
                 if (tag == null || !string.Equals(tag.Layout, layout, StringComparison.OrdinalIgnoreCase)) continue;
-                if (tag.IsPinned(PlanLabelsCivil3D.PlacementOf(label))) continue;
-                movable[l.Id] = tag;
+                bool pinned = tag.IsPinned(PlanLabelsCivil3D.PlacementOf(label));
+                if (!owners.TryGetValue(tag.IdentityKey, out var held) || l.Id.Handle.Value < held.id.Handle.Value)
+                    owners[tag.IdentityKey] = (l.Id, tag, pinned);
             }
+            Dictionary<ObjectId, BuildTag> movable = owners.Values.Where(o => !o.pinned).ToDictionary(o => o.id, o => o.tag);
             if (movable.Count == 0) return 0;
             Dictionary<ObjectId, (double X, double Y)> before = movable.Keys.ToDictionary(id => id, id =>
             {

@@ -78,8 +78,12 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 nod.SetAt(RecordsDictionary, dict);
                 tr.AddNewlyCreatedDBObject(dict, true);
             }
-            string key = layout + "|" + step;
-            ResultBuffer data = new ResultBuffer(new TypedValue((int)DxfCode.Text, hash ?? ""));
+            string key = RecordKey(layout, step);
+            // The sheet and step are stored in the record itself: a layout name may hold characters a dictionary key may not.
+            ResultBuffer data = new ResultBuffer(
+                new TypedValue((int)DxfCode.Text, hash ?? ""),
+                new TypedValue((int)DxfCode.Text, layout ?? ""),
+                new TypedValue((int)DxfCode.Text, step.ToString()));
             if (dict.Contains(key))
             {
                 Xrecord x = (Xrecord)tr.GetObject(dict.GetAt(key), OpenMode.ForWrite);
@@ -93,7 +97,17 @@ namespace C3DProTools.Features.Sheets.Civil3D
             }
         }
 
-        /// <summary>The build records: one XRecord per "layout|step", holding the step's input hash as its only text value.</summary>
+        /// <summary>
+        /// The dictionary key of a sheet's step record: the step and a hex digest of the layout name (ignoring case). Dictionary
+        /// keys may not hold &lt;&gt;/\":;?*|,=` (Autodesk), and layout names can; the name itself is in the record's data.
+        /// </summary>
+        public static string RecordKey(string layout, BuildStep step)
+        {
+            byte[] h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes((layout ?? "").ToUpperInvariant()));
+            return $"{step}_{Convert.ToHexString(h, 0, 12)}";
+        }
+
+        /// <summary>The build records: one XRecord per sheet and step, holding the step's input hash, the layout and the step.</summary>
         public static List<BuildRecord> ReadRecords(Transaction tr, Database db)
         {
             List<BuildRecord> records = new List<BuildRecord>();
@@ -101,11 +115,11 @@ namespace C3DProTools.Features.Sheets.Civil3D
             if (!nod.Contains(RecordsDictionary) || !(tr.GetObject(nod.GetAt(RecordsDictionary), OpenMode.ForRead) is DBDictionary dict)) return records;
             foreach (DBDictionaryEntry e in dict)
             {
-                int bar = e.Key.LastIndexOf('|');
-                if (bar <= 0 || !Enum.TryParse(e.Key.Substring(bar + 1), out BuildStep step)) continue;
                 if (!(tr.GetObject(e.Value, OpenMode.ForRead) is Xrecord x) || x.Data == null) continue;
                 TypedValue[] data = x.Data.AsArray();
-                if (data.Length > 0 && data[0].Value is string hash) records.Add(new BuildRecord(e.Key.Substring(0, bar), step, hash));
+                if (data.Length >= 3 && data[0].Value is string hash && data[1].Value is string layout && data[2].Value is string stepName
+                    && Enum.TryParse(stepName, out BuildStep step))
+                    records.Add(new BuildRecord(layout, step, hash));
             }
             return records;
         }
