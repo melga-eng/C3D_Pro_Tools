@@ -676,6 +676,17 @@ namespace C3DProTools
             Database db = doc.Database;
             CivilDocument cdoc = CivilApplication.ActiveDocument;
             MatchOptions o = Options();
+            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+            {
+                List<string> lacking = ProfileViewMatch.MissingStyles(tr, cdoc, recipe, o);
+                tr.Commit();
+                if (lacking.Count > 0)
+                {
+                    MessageBox.Show(this, "This drawing lacks styles the source uses, so bands or labels would be replaced with an incomplete set. Nothing was changed.\n\n"
+                        + string.Join("\n", lacking.Take(15)), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
 
             // A first dry run counts what is missing and extra, for the questions asked before anything changes.
             List<MatchChange> changes = new List<MatchChange>();

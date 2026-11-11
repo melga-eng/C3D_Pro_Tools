@@ -46,6 +46,8 @@ namespace C3DProTools.ProfileTool
         /// <summary>Match: a Profile View Tools template name, or the name of a finished view in the drawing to copy from.</summary>
         public string MatchTemplate { get; set; } = "";
         public string MatchSourceView { get; set; } = "";
+        /// <summary>Profiles in a view with no role: Hide (default), Leave, or Delete (only when both surfaces are found).</summary>
+        public string MatchOthers { get; set; } = "Hide";
 
         /// <summary>Role rules with this preset's surface names over the saved ones; null when the preset names none.</summary>
         public ProfileRoleRules RoleRules()
@@ -146,7 +148,7 @@ namespace C3DProTools.ProfileTool
                 log.AppendLine($"C3DPROPV failed: {ex.Message}");
             }
 
-            string file = Path.Combine(Path.GetTempPath(), "C3DPROPV.txt");
+            string file = Path.Combine(Path.GetTempPath(), $"C3DPROPV-{mode}.txt");
             try { File.WriteAllText(file, log.ToString()); } catch (IOException) { file = null; }
             // The command line gets the summary (unindented lines); the per-alignment detail is in the report file.
             string[] summary = log.ToString().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0 && l[0] != ' ').ToArray();
@@ -227,7 +229,7 @@ namespace C3DProTools.ProfileTool
             {
                 ViewStyle = saved.MatchViewStyle, Bands = saved.MatchBands, ProfileStyles = saved.MatchProfileStyles, ProfileLabels = saved.MatchProfileLabels,
                 Elevation = saved.MatchElevation, StylesInView = saved.StylesInView, BandRolesByName = saved.BandRolesByName, CreateMissing = saved.CreateMissing,
-                Others = saved.Others, Margin = saved.Margin, DatumIncrement = saved.DatumIncrement, TopPrefix = saved.TopPrefix,
+                Others = Enum.TryParse(s.MatchOthers, true, out OtherProfileAction others) ? others : OtherProfileAction.Hide, Margin = saved.Margin, DatumIncrement = saved.DatumIncrement, TopPrefix = saved.TopPrefix,
             };
             var changes = new List<MatchChange>();
             var problems = new List<string>();
@@ -269,6 +271,23 @@ namespace C3DProTools.ProfileTool
                     if (surface != null && surfaces.IdOf(surface).IsNull)
                         problems.Add($"the {ProfileViewMatch.RoleName(role).ToLowerInvariant()} surface \"{surface}\" is not in the drawing, so bands meant for that profile keep what they show");
                 }
+
+                // Deleting "other" profiles is only safe when the ground roles are known; otherwise a real ground profile could
+                // count as other and be erased.
+                if (o.Others == OtherProfileAction.Delete && problems.Count > 0)
+                {
+                    o.Others = OtherProfileAction.Hide;
+                    problems.Add("matchOthers is Delete, but a surface is missing, so other profiles are hidden instead of deleted");
+                }
+                List<string> missingStyles = ProfileViewMatch.MissingStyles(tr, civil, recipe, o);
+                if (write && missingStyles.Count > 0)
+                {
+                    tr.Abort();
+                    log.AppendLine($"Match not applied: this drawing lacks {missingStyles.Count} style(s) the template uses, and bands or labels " +
+                                   $"would be replaced with an incomplete set: {string.Join("; ", missingStyles.Take(10))}.");
+                    return;
+                }
+                foreach (string m in missingStyles.Take(10)) problems.Add($"missing {m}; Apply will refuse");
 
                 var targets = views.Where(v => v.id != sourceId && s.Includes(v.alignment)).ToList();
                 var log2 = new List<string>();
