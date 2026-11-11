@@ -126,6 +126,9 @@ namespace C3DProTools.ProfileTool
                            (File.Exists(ProjectSettings.PathFor(doc.Name)) ? ProjectSettings.PathFor(doc.Name) : "defaults (no project file)"));
             try
             {
+                // Offsets, spacings and clearances are metres; a drawing in other units would be fitted with wrong tolerances.
+                if (Features.Networks.Civil3D.ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
+                    throw new InvalidOperationException($"the drawing units are {doc.Database.Insunits}; C3DPROPV works in metre drawings only. Nothing was changed.");
                 CivilDocument civil = CivilDocument.GetCivilDocument(doc.Database);
                 bool doTop = mode == "Top" || mode == "All", doDims = mode == "Dims" || mode == "All";
                 TopStep(doc, civil, s, doTop, log);
@@ -215,7 +218,8 @@ namespace C3DProTools.ProfileTool
         {
             ProfileDimSettings ds = s.Dims ?? new ProfileDimSettings();
             ProfileRoleRules rules = s.RoleRules() ?? ProfileViewToolsSettings.Load().Rules ?? new ProfileRoleRules();
-            log.AppendLine($"Surfaces in the drawing: {string.Join(", ", SurfaceNames(doc))}");
+            List<string> surfaces = SurfaceNames(doc);
+            log.AppendLine($"Surfaces in the drawing: {string.Join(", ", surfaces)}");
             log.AppendLine($"Surfaces used: existing \"{rules.ExistingSurface}\", proposed \"{rules.ProposedSurface}\"" +
                            " (set existingSurface / proposedSurface in the profileViews settings to change them)");
             List<ViewDims> views = ProfileDimsCivil3D.Plan(doc, ds, out var issues, rules)
@@ -228,6 +232,14 @@ namespace C3DProTools.ProfileTool
             foreach (ViewDims v in views.Where(v => v.Plan.Dims.Count > 0).Take(40))
                 log.AppendLine($"  {v.AlignmentName,-28} view {v.ViewId.Handle}: {v.Plan.Dims.Count} DIMs");
             if (!write) return;
+            // Write replaces every earlier tool DIM of the views. Without the proposed surface no cover DIM can be planned, so
+            // writing would erase good cover DIMs and draw none: refuse instead.
+            if (ds.Cover && !surfaces.Any(n => string.Equals(n, rules.ProposedSurface, StringComparison.OrdinalIgnoreCase)))
+            {
+                log.AppendLine($"DIMs not drawn: the proposed surface \"{rules.ProposedSurface}\" is not in the drawing, so cover DIMs cannot be planned " +
+                               "and the earlier tool DIMs would be lost. Set proposedSurface in the profileViews settings, or set dims.cover to false.");
+                return;
+            }
             DimWriteResult r = ProfileDimsCivil3D.Write(doc, views, ds);
             log.AppendLine($"DIMs: drew {r.Created}, replaced {r.Removed}, skipped {r.SkippedNearHand} next to hand DIMs.");
             foreach (string p in r.Problems.Take(15)) log.AppendLine($"  {p}");
