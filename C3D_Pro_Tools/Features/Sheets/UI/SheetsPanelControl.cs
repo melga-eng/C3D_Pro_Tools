@@ -438,12 +438,12 @@ namespace C3DProTools.Features.Sheets.UI
             // 6 Build Steps Pills
             var stepsWrap = new WrapPanel { Orientation = WpfOrientation.Horizontal, VerticalAlignment = WpfVerticalAlignment.Center };
 
-            stepsWrap.Children.Add(CreateStepPill("Labels", sheet.PlanLabelsState));
-            stepsWrap.Children.Add(CreateStepPill("P.Views", sheet.ProfileViewsState));
-            stepsWrap.Children.Add(CreateStepPill("P.Labels", sheet.ProfileLabelsState));
-            stepsWrap.Children.Add(CreateStepPill("Dims", sheet.DimsState));
-            stepsWrap.Children.Add(CreateStepPill("Data", sheet.SheetDataState));
-            stepsWrap.Children.Add(CreateStepPill("Arrange", sheet.ArrangeState));
+            stepsWrap.Children.Add(CreateStepPill("Labels", BuildStep.PlanLabels, sheet.PlanLabelsState));
+            stepsWrap.Children.Add(CreateStepPill("P.Views", BuildStep.ProfileViews, sheet.ProfileViewsState));
+            stepsWrap.Children.Add(CreateStepPill("P.Labels", BuildStep.ProfileLabels, sheet.ProfileLabelsState));
+            stepsWrap.Children.Add(CreateStepPill("Dims", BuildStep.Dims, sheet.DimsState));
+            stepsWrap.Children.Add(CreateStepPill("Data", BuildStep.SheetData, sheet.SheetDataState));
+            stepsWrap.Children.Add(CreateStepPill("Arrange", BuildStep.Arrange, sheet.ArrangeState));
 
             grid.Children.Add(stepsWrap);
             Grid.SetColumn(stepsWrap, 2);
@@ -467,18 +467,35 @@ namespace C3DProTools.Features.Sheets.UI
             return border;
         }
 
-        private Border CreateStepPill(string label, StepState state)
+        private Border CreateStepPill(string label, BuildStep step, StepState state)
         {
-            (var fore, var back) = WpfStyle.GetStepStateBrushes(state);
-            string stateText = state switch
+            string stateText;
+            SolidColorBrush fore, back;
+
+            if (!_vm.IsSyntheticService && step != BuildStep.PlanLabels && step != BuildStep.Arrange)
             {
-                StepState.Built => "Built",
-                StepState.OutOfDate => "Out of date",
-                StepState.HasIssues => "Issues",
-                StepState.NotBuilt => "Not built",
-                StepState.NotApplicable => "—",
-                _ => state.ToString()
-            };
+                stateText = "not built yet";
+                fore = WpfStyle.MutedBrush;
+                back = WpfStyle.PanelBrush;
+            }
+            else
+            {
+                (fore, back) = WpfStyle.GetStepStateBrushes(state);
+                stateText = state switch
+                {
+                    StepState.Built => "Built",
+                    StepState.OutOfDate => "Out of date",
+                    StepState.HasIssues => "Issues",
+                    StepState.NotBuilt => "Not built",
+                    StepState.NotApplicable => (_vm.IsSyntheticService ? "—" : "not built yet"),
+                    _ => state.ToString()
+                };
+                if (state == StepState.NotApplicable && !_vm.IsSyntheticService)
+                {
+                    fore = WpfStyle.MutedBrush;
+                    back = WpfStyle.PanelBrush;
+                }
+            }
 
             return WpfStyle.CreatePill($"{label}: {stateText}", fore, back, fontSize: 10);
         }

@@ -326,20 +326,15 @@ namespace C3DProTools.Features.Sheets.UI
             var steps = specificSteps ?? new HashSet<BuildStep>
             {
                 BuildStep.PlanLabels,
-                BuildStep.ProfileViews,
-                BuildStep.ProfileLabels,
-                BuildStep.Dims,
-                BuildStep.SheetData,
                 BuildStep.Arrange
             };
 
-            var ruleSet = new LabelRuleSet("SyntheticRules", 1, new List<LabelRule>());
             var request = new BuildSheetsRequest
             {
                 Drawing = ActiveDrawing,
                 Layouts = targetLayouts,
                 Steps = steps,
-                Rules = ruleSet,
+                Rules = null,
                 Settings = BuildSettings.Default
             };
 
@@ -355,8 +350,8 @@ namespace C3DProTools.Features.Sheets.UI
             {
                 Drawing = ActiveDrawing,
                 Layouts = targetLayouts,
-                Steps = new HashSet<BuildStep> { BuildStep.PlanLabels },
-                Rules = new LabelRuleSet("TestRules", 1, new List<LabelRule>()),
+                Steps = new HashSet<BuildStep> { BuildStep.PlanLabels, BuildStep.Arrange },
+                Rules = null,
                 Settings = BuildSettings.Default
             };
 
@@ -737,21 +732,26 @@ namespace C3DProTools.Features.Sheets.UI
             if (issue == null || !issue.HasLocation || IsOperationRunning) return;
 
             string layout = issue.Layout;
-            var steps = new HashSet<BuildStep>();
 
             if (issue.Code.StartsWith("dims.", StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(BuildStep.Dims);
+                LastFeedbackMessage = "The Dims step is not built yet.";
+                ShowStatusBanner(OperationStatus.Rejected, "Step Not Built", "The Dims step is not built yet; it cannot be fixed automatically.");
+                return;
             }
-            else if (issue.Code.StartsWith("continuation.", StringComparison.OrdinalIgnoreCase))
+
+            if (issue.Code.StartsWith("continuation.", StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(BuildStep.SheetData);
+                LastFeedbackMessage = "The SheetData step is not built yet.";
+                ShowStatusBanner(OperationStatus.Rejected, "Step Not Built", "The SheetData step is not built yet; it cannot be fixed automatically.");
+                return;
             }
-            else
+
+            var steps = new HashSet<BuildStep>
             {
-                steps.Add(BuildStep.PlanLabels);
-                steps.Add(BuildStep.Arrange);
-            }
+                BuildStep.PlanLabels,
+                BuildStep.Arrange
+            };
 
             LastFeedbackMessage = $"Fixing issue '{issue.Code}' on sheet {layout}...";
             await BuildSelectedAsync(new[] { layout }, steps);
