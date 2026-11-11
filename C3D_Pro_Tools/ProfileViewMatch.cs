@@ -536,11 +536,14 @@ namespace C3DProTools
                     ProfileViewBandItem h = have[i];
                     BandRecipe w = want[i];
                     string label = $"{where} {i + 1} \"{w.Style}\"";
-                    SetIf(label + " gap", h.Gap, w.Gap, v => h.Gap = v);
-                    SetIf(label + " weeding", h.Weeding, w.Weeding, v => h.Weeding = v);
-                    SetIf(label + " major interval", h.MajorInterval, w.MajorInterval, v => h.MajorInterval = v);
-                    SetIf(label + " minor interval", h.MinorInterval, w.MinorInterval, v => h.MinorInterval = v);
-                    if (h.ShowLabels != w.ShowLabels) { change(label + " labels", h.ShowLabels ? "on" : "off", w.ShowLabels ? "on" : "off"); if (write) h.ShowLabels = w.ShowLabels; }
+                    // Each value on its own: a band type without the value (station intervals on some bands) throws on reading
+                    // it, and that must not stop the band's profiles from being set.
+                    SetIf(label + " gap", () => h.Gap, w.Gap, v => h.Gap = v);
+                    SetIf(label + " weeding", () => h.Weeding, w.Weeding, v => h.Weeding = v);
+                    SetIf(label + " major interval", () => h.MajorInterval, w.MajorInterval, v => h.MajorInterval = v);
+                    SetIf(label + " minor interval", () => h.MinorInterval, w.MinorInterval, v => h.MinorInterval = v);
+                    try { if (h.ShowLabels != w.ShowLabels) { change(label + " labels", h.ShowLabels ? "on" : "off", w.ShowLabels ? "on" : "off"); if (write) h.ShowLabels = w.ShowLabels; } }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     try
                     {
                         if (h.LabelAtStartStation != w.LabelAtStart) { change(label + " label at start", h.LabelAtStartStation ? "on" : "off", w.LabelAtStart ? "on" : "off"); if (write) h.LabelAtStartStation = w.LabelAtStart; }
@@ -560,8 +563,10 @@ namespace C3DProTools
                 }
             }
 
-            void SetIf(string what, double now, double want, Action<double> set)
+            void SetIf(string what, Func<double> get, double want, Action<double> set)
             {
+                double now;
+                try { now = get(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return; }
                 if (Math.Abs(now - want) < 1e-6) return;
                 change(what, ToolUi.Format(now), ToolUi.Format(want));
                 if (write) try { set(want); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
