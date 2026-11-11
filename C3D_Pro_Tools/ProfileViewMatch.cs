@@ -24,6 +24,8 @@ namespace C3DProTools
         /// <summary>The one profile used for its role in this view (others of the same role are duplicates).</summary>
         public bool Chosen;
         public bool InBands, Reference, Drawn = true, SurfaceProfile;
+        /// <summary>The profile has no geometry (a surface profile sampled outside its surface, or a layout never drawn).</summary>
+        public bool Empty;
         public override string ToString() => Name;
     }
 
@@ -81,7 +83,7 @@ namespace C3DProTools
         internal sealed class Surfaces
         {
             public readonly List<(string name, ObjectId id, Surface s)> All = new List<(string, ObjectId, Surface)>();
-            private readonly Dictionary<ObjectId, string> _sourceOf = new Dictionary<ObjectId, string>();
+            private readonly Dictionary<ObjectId, List<string>> _sourcesOf = new Dictionary<ObjectId, List<string>>();
             private readonly Transaction _tr;
             private readonly CivilDocument _doc;
             private ViewPartIndex _parts;
@@ -102,13 +104,33 @@ namespace C3DProTools
             public ObjectId IdOf(string name) => All.FirstOrDefault(x => x.name.Equals(name ?? "", StringComparison.OrdinalIgnoreCase)).id;
 
             /// <summary>
-            /// The surface a profile was sampled from: the one its elevations match at most stations (the name of the profile
-            /// plays no part), else the longest surface name inside the profile's name. Empty when neither.
+            /// The surface a profile was sampled from: the one its elevations match at most stations (on a tie, the one named
+            /// in the profile's name), else the longest surface name inside the profile's name. Empty when neither.
             /// </summary>
-            public string SourceOf(Profile p, Alignment al)
+            public string SourceOf(Profile p, Alignment al) => SourcesOf(p, al).FirstOrDefault() ?? "";
+
+            /// <summary>
+            /// The existing / proposed role of a surface profile. Surfaces that are the same along the alignment (a copy, a
+            /// referenced one, a contour surface built from it) all match, so the rule's surface counts when it is any of them,
+            /// not only when it happens to come first in the drawing.
+            /// </summary>
+            public ProfileRole RoleOf(Profile p, Alignment al, ProfileRoleRules rules)
             {
-                if (_sourceOf.TryGetValue(p.ObjectId, out string known)) return known;
-                string best = "";
+                List<string> c = SourcesOf(p, al);
+                bool Is(string n, string rule) => !string.IsNullOrEmpty(rule) && n.Equals(rule, StringComparison.OrdinalIgnoreCase);
+                if (c.Count == 0) return ProfileRole.None;
+                if (Is(c[0], rules.ExistingSurface)) return ProfileRole.Existing;
+                if (Is(c[0], rules.ProposedSurface)) return ProfileRole.Proposed;
+                if (c.Any(n => Is(n, rules.ExistingSurface))) return ProfileRole.Existing;
+                if (c.Any(n => Is(n, rules.ProposedSurface))) return ProfileRole.Proposed;
+                return ProfileRole.None;
+            }
+
+            /// <summary>Every surface the profile's elevations match (best first), or the one named in it when none match.</summary>
+            public List<string> SourcesOf(Profile p, Alignment al)
+            {
+                if (_sourcesOf.TryGetValue(p.ObjectId, out List<string> known)) return known;
+                List<(string name, int hits)> matched = new List<(string, int)>();
                 double s0, s1;
                 try { s0 = Math.Max(p.StartingStation, al.StartingStation); s1 = Math.Min(p.EndingStation, al.EndingStation); }
                 catch (Exception) { s0 = s1 = 0; }
@@ -126,7 +148,6 @@ namespace C3DProTools
                         }
                         catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     }
-                    int bestHits = 1;
                     foreach ((string name, ObjectId _, Surface s) in All)
                     {
                         int hits = 0, valid = 0;
@@ -137,13 +158,18 @@ namespace C3DProTools
                             valid++;
                             if (Math.Abs(g - z) <= SurfaceTolerance) hits++;
                         }
-                        if (valid > 0 && hits * 10 >= valid * 6 && hits > bestHits) { bestHits = hits; best = name; }
+                        if (valid > 0 && hits >= 2 && hits * 10 >= valid * 6) matched.Add((name, hits));
                     }
                 }
-                if (best.Length == 0)
-                    best = All.Select(x => x.name).Where(n => p.Name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0).OrderByDescending(n => n.Length).FirstOrDefault() ?? "";
-                _sourceOf[p.ObjectId] = best;
-                return best;
+                int NamedIn(string n) => p.Name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0 ? n.Length : 0;
+                List<string> result = matched.OrderByDescending(m => m.hits).ThenByDescending(m => NamedIn(m.name)).Select(m => m.name).ToList();
+                if (result.Count == 0)
+                {
+                    string named = All.Select(x => x.name).Where(n => NamedIn(n) > 0).OrderByDescending(n => n.Length).FirstOrDefault();
+                    if (named != null) result.Add(named);
+                }
+                _sourcesOf[p.ObjectId] = result;
+                return result;
             }
         }
 
@@ -182,20 +208,23 @@ namespace C3DProTools
                 try { vp.Reference = p.IsReferenceObject; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 ProfileType type = ProfileType.FG;
                 try { type = p.ProfileType; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                try { vp.Empty = p.Entities.Count == 0; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 vp.SurfaceProfile = type == ProfileType.EG;
                 if (vp.SurfaceProfile)
                 {
                     vp.Surface = surfaces.SourceOf(p, al);
-                    if (vp.Surface.Length > 0 && vp.Surface.Equals(rules.ExistingSurface, StringComparison.OrdinalIgnoreCase)) vp.Role = ProfileRole.Existing;
-                    else if (vp.Surface.Length > 0 && vp.Surface.Equals(rules.ProposedSurface, StringComparison.OrdinalIgnoreCase)) vp.Role = ProfileRole.Proposed;
+                    vp.Role = surfaces.RoleOf(p, al, rules);
+                    if (vp.Role == ProfileRole.Existing) vp.Surface = rules.ExistingSurface;
+                    else if (vp.Role == ProfileRole.Proposed) vp.Surface = rules.ProposedSurface;
                 }
                 else if (IsTopName(p.Name, rules)) vp.Role = ProfileRole.Top;
                 list.Add(vp);
             }
             foreach (ProfileRole r in Roles)
             {
+                // An empty profile (nothing sampled, no geometry) never wins its role over one that draws something.
                 ViewProfile chosen = list.Where(x => x.Role == r)
-                    .OrderByDescending(x => x.InBands).ThenBy(x => Regex.IsMatch(x.Name, @"\(\d+\)\s*$")).ThenByDescending(x => x.Drawn).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x.Empty).ThenByDescending(x => x.InBands).ThenBy(x => Regex.IsMatch(x.Name, @"\(\d+\)\s*$")).ThenByDescending(x => x.Drawn).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
                     .FirstOrDefault();
                 if (chosen != null) chosen.Chosen = true;
             }
@@ -848,9 +877,7 @@ namespace C3DProTools
             try { type = p.ProfileType; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             if (type != ProfileType.EG) return IsTopName(p.Name, rules) ? ProfileRole.Top : ProfileRole.None;
             if (!(tr.GetObject(p.AlignmentId, OpenMode.ForRead) is Alignment al)) return ProfileRole.None;
-            string s = surfaces.SourceOf(p, al);
-            return s.Equals(rules.ExistingSurface, StringComparison.OrdinalIgnoreCase) ? ProfileRole.Existing
-                 : s.Equals(rules.ProposedSurface, StringComparison.OrdinalIgnoreCase) ? ProfileRole.Proposed : ProfileRole.None;
+            return surfaces.RoleOf(p, al, rules);
         }
 
         private static void SetBandProfile(Transaction tr, ObjectId viewId, bool top, int index, int which, ObjectId profileId)
