@@ -88,8 +88,8 @@ namespace C3DProTools.Features.Sheets.Application
         /// Everything the build depends on (section 10): the PlanLabels digest of the joined items (rules, changes, part
         /// geometry, style fingerprints, viewports), plus the requested steps and, for each sheet that is arranged, everything
         /// Arrange reads: every label there (placement and rotation; tool, pinned and hand-placed alike) with the fingerprint of
-        /// its style, every network part the sheet shows (the outlines labels keep clear of), and the adapter's context (saved
-        /// arrange settings, model text and leaders).
+        /// its style, every network part in the drawing (the outlines labels keep clear of; not filtered by viewport, see below),
+        /// and the adapter's context (saved arrange settings and every obstacle as Arrange reads it).
         /// </summary>
         public static string Digest(SheetScene scene, BuildSheetsRequest request, LabelRuleSet rules, IReadOnlyList<BuildItem> items, string arrangeContext = "")
         {
@@ -112,17 +112,18 @@ namespace C3DProTools.Features.Sheets.Application
                 }
                 foreach (SceneLabelStyle st in scene.LabelStyles.Where(s => styles.Contains(s.Name)).OrderBy(s => s.Kind).ThenBy(s => s.Name, StringComparer.Ordinal))
                     b.Append(string.Join("\u001F", "arrangeStyle", layout, st.Kind, st.Name, string.IsNullOrEmpty(st.Fingerprint) ? "unknown" : st.Fingerprint)).Append('\u001E');
-                SheetSnapshot sheet = scene.Sheets.FirstOrDefault(s => string.Equals(s.Layout, layout, StringComparison.OrdinalIgnoreCase));
-                if (sheet == null) continue;
-                bool Shown(double x, double y) => sheet.Viewports.Any(v => Geometry2.Contains(v.ModelBoundary, new Point2(x, y)));
+            }
+            // Every network part, unfiltered: Arrange keeps clear of whatever reaches into a viewport and its margin, and a part
+            // can do so with both ends outside (a pipe crossing the viewport). The adapter's context fingerprints the outlines
+            // exactly as Arrange reads them; this covers the scene's own copy.
+            if (arranged.Count > 0)
                 foreach (NetworkSnapshot n in scene.Networks)
                 {
-                    foreach (ScenePipe p in n.Pipes.Where(p => Shown(p.Start.X, p.Start.Y) || Shown(p.End.X, p.End.Y)))
-                        b.Append(string.Join("\u001F", "arrangePipe", layout, p.Ref.Handle, R(p.Start.X), R(p.Start.Y), R(p.End.X), R(p.End.Y), R(p.OuterWidthM))).Append('\u001E');
-                    foreach (SceneStructure s in n.Structures.Where(s => Shown(s.Insertion.X, s.Insertion.Y)))
-                        b.Append(string.Join("\u001F", "arrangeStructure", layout, s.Ref.Handle, R(s.Insertion.X), R(s.Insertion.Y), s.TypeName)).Append('\u001E');
+                    foreach (ScenePipe p in n.Pipes)
+                        b.Append(string.Join("\u001F", "arrangePipe", p.Ref.Handle, R(p.Start.X), R(p.Start.Y), R(p.Start.Z), R(p.End.X), R(p.End.Y), R(p.End.Z), R(p.OuterWidthM), R(p.OuterHeightM))).Append('\u001E');
+                    foreach (SceneStructure s in n.Structures)
+                        b.Append(string.Join("\u001F", "arrangeStructure", s.Ref.Handle, R(s.Insertion.X), R(s.Insertion.Y), R(s.Insertion.Z), s.TypeName)).Append('\u001E');
                 }
-            }
             using System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create();
             return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(b.ToString()))).ToLowerInvariant();
         }
