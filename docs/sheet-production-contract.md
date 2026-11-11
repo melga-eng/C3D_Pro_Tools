@@ -863,3 +863,12 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 3 | high · Stale validation happens before the command context and the lock | Apply runs whole inside the command context (`ApplyNow`). It checks that the previewed drawing is the active one, takes the lock, plans again and compares the stamp, and only then writes |
 | 4 | medium · Arrange reselects duplicate-tag labels | Arrange and `BuildSheetsPlanner.Movable` keep only the lowest handle of each identity. Copies stay put as obstacles |
 | 5 | medium · Cancellation during revalidation is reported as stale | A cancelled re-plan gives a `Cancelled` result, with nothing written |
+
+### Re-review
+
+The re-review found items 1, 3, 4 and 5 resolved and item 2 partly resolved. It added one finding:
+
+| # | Finding | Change |
+|---|---|---|
+| 2 | high · Crossing obstacles can evade stale detection | Nothing that reaches the stamp is filtered by viewport anymore. The planner hashes every network part in the drawing (plan position and elevations of both ends, outer width and height; structures with elevation). The adapter's arrange context fingerprints every obstacle exactly as Arrange's own reader (`AnnotScene.Read`, profiles included) returns it: part outlines (curved pipes sampled, structure footprints), model text, tables, framed callouts, multileaders, leaders, the other Civil 3D labels' extents, and each profile view's box, band area and drawn parts. Trade-off: editing any obstacle anywhere between Preview and Apply makes the preview stale. That is the safe side |
+| 6 | high · Apply does not reload project-sourced rules | The preview keeps the caller's request as sent (`Rules` empty means the project's rules). Apply's re-plan loads `C3DPro.project.json` again, and the rules are part of the stamp, so an edit after Preview gives `sheets.preview.stale`. Apply writes with the rules it has just loaded |
