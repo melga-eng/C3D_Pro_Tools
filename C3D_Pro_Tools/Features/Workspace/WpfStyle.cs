@@ -27,7 +27,7 @@ namespace C3DProTools.Features.Workspace
         public static readonly Color PanelColor = Colors.White;                        // #FFFFFF (Clean drafting card & grid background)
         public static readonly Color BorderColor = Color.FromRgb(217, 209, 195);       // #D9D1C3 (Drafting rule buff borders & grid lines)
         public static readonly Color TextColor = Color.FromRgb(23, 28, 36);            // #171C24 (Drafting ink black)
-        public static readonly Color MutedColor = Color.FromRgb(105, 100, 88);         // #696458 (Pencil lead sepia notes)
+        public static readonly Color MutedColor = Color.FromRgb(87, 83, 74);           // #57534A (pencil lead sepia; 4.5:1 or more on every vellum fill)
         public static readonly Color AccentColor = Color.FromRgb(27, 88, 156);         // #1B589C (Prussian cobalt blueprint ink)
         public static readonly Color AccentHoverColor = Color.FromRgb(20, 67, 119);    // #144377 (Deep cobalt hover)
         public static readonly Color AccentSoftColor = Color.FromRgb(228, 237, 247);   // #E4EDF7 (Blueprint wash row selection)

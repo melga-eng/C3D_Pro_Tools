@@ -18,7 +18,7 @@ namespace C3DProTools
         public static readonly Color Panel = Color.White;                         // #FFFFFF (Clean drafting card & grid background)
         public static readonly Color Border = Color.FromArgb(217, 209, 195);     // #D9D1C3 (Drafting rule buff borders & grid lines)
         public static readonly Color Text = Color.FromArgb(23, 28, 36);          // #171C24 (Drafting ink black)
-        public static readonly Color Muted = Color.FromArgb(105, 100, 88);       // #696458 (Pencil lead sepia notes)
+        public static readonly Color Muted = Color.FromArgb(87, 83, 74);        // #57534A (pencil lead sepia; 4.5:1 or more on every vellum fill)
         public static readonly Color Accent = Color.FromArgb(27, 88, 156);       // #1B589C (Prussian cobalt blueprint ink)
         public static readonly Color AccentSoft = Color.FromArgb(228, 237, 247); // #E4EDF7 (Blueprint wash row selection)
         public static readonly Color Danger = Color.FromArgb(185, 28, 28);       // #B91C1C (Red correction pen alert)
@@ -80,7 +80,7 @@ namespace C3DProTools
                 case "Protected": case "Solid":
                     return (Color.FromArgb(87, 83, 74), Color.FromArgb(234, 229, 220));  // #57534A, #EAE5DC (Pencil sepia slate)
                 case "Skip": case "Already imported":
-                    return (Color.FromArgb(105, 100, 88), Color.FromArgb(234, 229, 220)); // #696458, #EAE5DC (Muted sepia on soft vellum)
+                    return (Color.FromArgb(87, 83, 74), Color.FromArgb(234, 229, 220)); // #57534A, #EAE5DC (Muted sepia on soft vellum)
                 default:
                     return (Muted, Border);
             }
