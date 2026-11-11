@@ -126,14 +126,19 @@ namespace C3DProTools.Features.Sheets.Application
                 foreach (ProfileViewSnapshot v in scene.ProfileViews.Where(v => mapped.Contains(v.Ref.Handle)).OrderBy(v => v.Ref.Handle, StringComparer.Ordinal))
                 {
                     Rect2? box = v.ModelBox;
-                    b.Append(string.Join("\u001F", "view", v.Ref.Handle, v.Alignment.Handle, R(v.StartStationM), R(v.EndStationM), R(v.ElevationMinM), R(v.ElevationMaxM),
+                    b.Append(string.Join("\u001F", "view", v.Ref.Handle, v.Name, v.Alignment.Handle, R(v.StartStationM), R(v.EndStationM), R(v.ElevationMinM), R(v.ElevationMaxM),
+                        v.BandSetName, R(v.VerticalExaggeration),
                         box.HasValue ? $"{R(box.Value.MinX)},{R(box.Value.MinY)},{R(box.Value.MaxX)},{R(box.Value.MaxY)}" : "")).Append('\u001E');
+                    // Every drawn part with its outside top and bottom at both ends: a rim or invert change moves the label
+                    // and the obstacle Arrange keeps clear of, though the stations stay.
                     foreach (ViewPart p in v.DrawnParts.OrderBy(p => p.Part.Handle, StringComparer.Ordinal))
-                        b.Append(string.Join("\u001F", "viewPart", v.Ref.Handle, p.Part.Handle, p.Kind, p.IsOwnNetwork, R(p.StartStationM), R(p.EndStationM))).Append('\u001E');
+                        b.Append(string.Join("\u001F", "viewPart", v.Ref.Handle, p.Part.Handle, p.Kind, p.IsOwnNetwork, R(p.StartStationM), R(p.EndStationM),
+                            R(p.StartTopM), R(p.StartBottomM), R(p.EndTopM), R(p.EndBottomM))).Append('\u001E');
                 }
                 foreach (CrossingSnapshot c in scene.Crossings.Where(c => mapped.Contains(c.ProfileView.Handle))
-                             .OrderBy(c => c.ProfileView.Handle, StringComparer.Ordinal).ThenBy(c => c.CrossingPipe.Handle, StringComparer.Ordinal))
-                    b.Append(string.Join("\u001F", "crossing", c.ProfileView.Handle, c.CrossingPipe.Handle, R(c.StationM), c.ShownInView)).Append('\u001E');
+                             .OrderBy(c => c.ProfileView.Handle, StringComparer.Ordinal).ThenBy(c => c.CrossingPipe.Handle, StringComparer.Ordinal).ThenBy(c => c.StationM))
+                    b.Append(string.Join("\u001F", "crossing", c.ProfileView.Handle, c.CrossingPipe.Handle, c.CrossingNetwork, c.Name, R(c.StationM),
+                        R(c.CrossingTopM), R(c.CrossingBottomM), c.ShownInView)).Append('\u001E');
             }
             List<string> arranged = items.Where(i => i.Changes.Any(c => c.Step == BuildStep.Arrange)).SelectMany(i => i.Layouts)
                 .OrderBy(l => l, StringComparer.OrdinalIgnoreCase).ToList();

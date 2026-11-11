@@ -99,6 +99,44 @@ namespace C3DProTools.Tests.Sheets
             Assert.Equal(stamp, BuildSheetsPlanner.Preview(Scene(new[] { View("B1", 100, 400) }), Request(BuildStep.ProfileLabels), Rules).SceneStamp);
         }
 
+        // ---- Codex review of feature/profile-labels ----------------------------------------------------------------------
+
+        [Fact]
+        public void TheStamp_CoversProfileElevations()
+        {
+            ProfileViewSnapshot view = View("B1", 100, 400);
+            ProfileViewSnapshot rimRaised = view with
+            {
+                DrawnParts = view.DrawnParts.Select(p => p.Kind == ViewPartKind.Structure ? p with { StartTopM = 613.5, EndTopM = 613.5 } : p).ToList()
+            };
+            string stamp = BuildSheetsPlanner.Preview(Scene(new[] { view }), Request(BuildStep.ProfileLabels), Rules).SceneStamp;
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(Scene(new[] { rimRaised }), Request(BuildStep.ProfileLabels), Rules).SceneStamp);
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(Scene(new[] { view with { VerticalExaggeration = 5 } }), Request(BuildStep.ProfileLabels), Rules).SceneStamp);
+        }
+
+        [Fact]
+        public void AViewMovedToAnotherSheet_LosesItsOldLabels_AndGetsNewOnes()
+        {
+            // B1 was built on SW-P1 and now shows on SW-P2.
+            ProfileViewSnapshot moved = View("B1", 1100, 1400);
+            string seg = ProfileLabelPlanner.SourceKey(R("21"), R("B1")), mh = ProfileLabelPlanner.SourceKey(R("31"), R("B1"));
+            RecordedPlacement at = new RecordedPlacement("Segment", false, 0, 0, 0.5, 0);
+            LabelSnapshot Old(string h, string rule, string source, string style, PinState pin = PinState.Auto) =>
+                new LabelSnapshot(R(h), R(source.Split(':')[0]), "", new BuildTag(rule, source, "SW-P1", style, pin, at), at);
+            LabelSnapshot[] labels = { Old("AA1", "ict.profile.segment", seg, "Segment"), Old("AA2", "ict.profile.manhole", mh, "MH Profile", PinState.Pinned) };
+
+            foreach (string[] layouts in new[] { Array.Empty<string>(), new[] { "SW-P1" }, new[] { "SW-P2" } })
+            {
+                BuildSheetsRequest req = Request(BuildStep.ProfileLabels) with { Layouts = layouts };
+                BuildSheetsPreview p = BuildSheetsPlanner.Preview(Scene(new[] { moved }, labels), req, Rules);
+                List<PlannedChange> all = p.Items.SelectMany(i => i.Changes).ToList();
+                PlannedChange removal = Assert.Single(all, c => c.Kind == ChangeKind.Remove);
+                Assert.Equal(R("AA1"), removal.Existing);
+                Assert.Contains(p.Issues, i => i.Code == SheetCodes.LabelOrphanPinned && i.Object == R("AA2"));
+                Assert.Equal(layouts.Contains("SW-P1") ? 0 : 2, all.Count(c => c.Kind == ChangeKind.Add));
+            }
+        }
+
         [Fact]
         public void Overview_ShowsTheProfileLabelsState_OfProfileSheets()
         {
