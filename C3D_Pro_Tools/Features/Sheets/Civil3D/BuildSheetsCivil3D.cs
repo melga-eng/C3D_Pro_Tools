@@ -29,8 +29,10 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
                     (added, removed) = PlanLabelsCivil3D.ApplyChanges(tr, db, civil, item.Changes, created);
+                    (int pAdded, int pRemoved) = ProfileLabelsCivil3D.ApplyChanges(tr, db, civil, item.Changes, rules, created);
+                    added += pAdded; removed += pRemoved;
                     if (item.Changes.Any(c => c.Step == BuildStep.Arrange))
-                        moved = Arrange(tr, db, civil, layout, rules, issues);
+                        moved = Arrange(tr, db, civil, layout, item.Kind == BuildItemKind.ProfileSheetSet, rules, issues);
                     foreach (BuildStep step in item.Changes.Select(c => c.Step).Distinct())
                         BuildXData.WriteRecord(tr, db, layout, step, stamp);
                     tr.Commit();
@@ -50,7 +52,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
         /// records each one's new placement in its tag, so the next build does not mistake the move for the user's. Returns how
         /// many labels it moved.
         /// </summary>
-        private static int Arrange(Transaction tr, Database db, CivilDocument civil, string layout, LabelRuleSet rules, List<OperationIssue> issues)
+        private static int Arrange(Transaction tr, Database db, CivilDocument civil, string layout, bool profileSheet, LabelRuleSet rules, List<OperationIssue> issues)
         {
             SheetInfo sheet = AnnotSheets.Read(tr, db).FirstOrDefault(s => s.Layout.Equals(layout, StringComparison.OrdinalIgnoreCase));
             if (sheet == null) throw new InvalidOperationException($"Sheet {layout} is not in the drawing any more.");
@@ -80,15 +82,18 @@ namespace C3DProTools.Features.Sheets.Civil3D
             ArrangeOptions o = new ArrangeOptions
             {
                 MaxDistance = s.MaxDistance, Gap = s.Gap, Margin = s.Margin, RearrangeAll = true, SlideOnPipe = s.SlideNormalLabels,
-                AvoidModelText = s.AvoidModelText, Only = new HashSet<ObjectId>(movable.Keys), Plan = true, Profile = false,
+                AvoidModelText = s.AvoidModelText, Only = new HashSet<ObjectId>(movable.Keys), Plan = !profileSheet, Profile = profileSheet,
                 KeepClearNetworks = new HashSet<string>(s.KeepClearNetworks ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
                 SlideStyles = new HashSet<string>(s.SlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
                 DraggedStyles = new HashSet<string>(s.DraggedStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
             };
             // A rule with a leader drags its labels out to clear space, like the boxed labels on the shop drawings.
-            foreach (LabelRule r in rules.Rules.Where(r => r != null && r.View == ViewKind.Plan && r.Leader))
+            ViewKind view = profileSheet ? ViewKind.Profile : ViewKind.Plan;
+            foreach (LabelRule r in rules.Rules.Where(r => r != null && r.View == view && r.Leader))
             {
-                LabelKind kind = r.Select.Kind == TargetKind.Structure ? LabelKind.PlanStructure : LabelKind.PlanPipe;
+                LabelKind kind = r.Select.Kind == TargetKind.Structure
+                    ? (profileSheet ? LabelKind.ProfileStructure : LabelKind.PlanStructure)
+                    : (profileSheet ? LabelKind.ProfilePipe : LabelKind.PlanPipe);
                 foreach (string style in r.LabelStyles) o.DraggedStyles.Add(FormAnnotationStudio.StyleKey(kind, style.Trim()));
             }
 

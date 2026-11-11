@@ -275,7 +275,7 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
 
 ### The build so far (`BuildSheetsPlanner`, `BuildSheetsCivil3D`, `SheetProductionService`)
 
-- **Steps built:** PlanLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
+- **Steps built:** PlanLabels, ProfileLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
 - **One item per plan sheet, in one transaction:** that sheet's PlanLabels changes, then **Arrange**, then the build records.
   - Arrange is the Annotation Studio arranger, with its saved settings. It may move only that sheet's unpinned tool labels,
     including those just added. Pinned and hand-placed labels are obstacles. Styles of rules with `Leader` are dragged.
@@ -299,6 +299,26 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
   - other steps and profile sheets: NotApplicable for now
 - **Pin and Release are not built yet:** `PreviewPinAsync` says so.
 - **The command `C3DProBuildSheets`** (Preview, or Apply) runs this service from the command line, for live tests.
+
+### The ProfileLabels step (`ProfileLabelPlanner` by Codex, `ProfileViewSheets`, `ProfileLabelsCivil3D`)
+
+- **Which sheet shows a view:** the first profile sheet (by tab order) whose viewport contains the centre of the view's box
+  (`ProfileViewSnapshot.ModelBox`, read from the view's extents). A view on no profile sheet gets no labels.
+- **Planning:** Codex's planner works per view. Each label's source key names its view (`part:view:handle`). Overlapping views
+  of one alignment label a part in the earlier view. Crossing pipes are labelled only when drawn in the view.
+- **Crossing pipe rules** (a pipe rule with `OtherNetworksOnly`) use crossing pipe profile label styles
+  (`LabelStyleKind.CrossingPipe`, from `CrossProfileLabelStyles`). Other pipe and joint rules use pipe label styles, and
+  structure rules use structure label styles.
+- **In the build:** one item per profile sheet (`profile:<layout>`, `ProfileSheetSet`), holding its ProfileLabels changes and
+  then Arrange in profile mode. Rules with `Leader` drag their profile labels.
+- **The stamp** also covers the profile sheets' viewports, and every mapped view's stations, box, drawn parts and crossings.
+- **Writing:**
+  - each label goes on the part's profile representation, in the view its key names:
+    - `PipeProfileLabel` at its ratio, for pipes and joints
+    - `StructureProfileLabel`, for structures
+    - `CrossingPipeProfileLabel`, for crossings; extra crossing labels Civil 3D makes are erased again
+  - each label gets its tag, checked before commit
+- **Not yet:** crossing labels are not moved by Arrange, because Annotation Studio's arranger does not scan them.
 
 ## 5. Build steps and the inventory
 

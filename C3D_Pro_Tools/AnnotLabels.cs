@@ -515,7 +515,7 @@ namespace C3DProTools
         /// Each part's profile representation: one model space entity per part, shared by every profile view that draws it
         /// (labels take it together with the view).
         /// </summary>
-        private static Dictionary<ObjectId, ObjectId> ViewParts(Transaction tr, Database db)
+        internal static Dictionary<ObjectId, ObjectId> ViewParts(Transaction tr, Database db)
         {
             Dictionary<ObjectId, ObjectId> map = new Dictionary<ObjectId, ObjectId>();
             Autodesk.AutoCAD.Runtime.RXClass partClass = Autodesk.AutoCAD.Runtime.RXObject.GetClass(typeof(ProfileViewPart));

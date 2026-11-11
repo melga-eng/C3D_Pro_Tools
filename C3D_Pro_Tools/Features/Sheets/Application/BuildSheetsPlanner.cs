@@ -114,6 +114,27 @@ namespace C3DProTools.Features.Sheets.Application
             System.Text.StringBuilder b = new System.Text.StringBuilder();
             b.Append(PlanLabelPlanner.Digest(new PlanLabelsPlan(items, null), scene, rules)).Append('\u001E');
             b.Append("steps\u001F").Append(string.Join(",", request.Steps.OrderBy(s => s))).Append('\u001E');
+            // Profile sheets: their viewports (which view a sheet shows), and every mapped view's stations, drawn parts and
+            // crossings (where and whether a profile label goes).
+            HashSet<string> profileSheets = new HashSet<string>(items.Where(i => i.Kind == BuildItemKind.ProfileSheetSet).SelectMany(i => i.Layouts), StringComparer.OrdinalIgnoreCase);
+            if (profileSheets.Count > 0)
+            {
+                foreach (SheetSnapshot s in scene.Sheets.Where(s => s.Kind == SheetKind.Profile).OrderBy(s => s.Layout, StringComparer.OrdinalIgnoreCase))
+                    foreach (ViewportSnapshot v in s.Viewports)
+                        b.Append(string.Join("\u001F", "profileViewport", s.Layout, v.Ref.Handle, string.Join(";", v.ModelBoundary.Select(p => R(p.X) + "," + R(p.Y))))).Append('\u001E');
+                HashSet<string> mapped = new HashSet<string>(ProfileViews(scene).Select(m => m.View.Handle), StringComparer.Ordinal);
+                foreach (ProfileViewSnapshot v in scene.ProfileViews.Where(v => mapped.Contains(v.Ref.Handle)).OrderBy(v => v.Ref.Handle, StringComparer.Ordinal))
+                {
+                    Rect2? box = v.ModelBox;
+                    b.Append(string.Join("\u001F", "view", v.Ref.Handle, v.Alignment.Handle, R(v.StartStationM), R(v.EndStationM), R(v.ElevationMinM), R(v.ElevationMaxM),
+                        box.HasValue ? $"{R(box.Value.MinX)},{R(box.Value.MinY)},{R(box.Value.MaxX)},{R(box.Value.MaxY)}" : "")).Append('\u001E');
+                    foreach (ViewPart p in v.DrawnParts.OrderBy(p => p.Part.Handle, StringComparer.Ordinal))
+                        b.Append(string.Join("\u001F", "viewPart", v.Ref.Handle, p.Part.Handle, p.Kind, p.IsOwnNetwork, R(p.StartStationM), R(p.EndStationM))).Append('\u001E');
+                }
+                foreach (CrossingSnapshot c in scene.Crossings.Where(c => mapped.Contains(c.ProfileView.Handle))
+                             .OrderBy(c => c.ProfileView.Handle, StringComparer.Ordinal).ThenBy(c => c.CrossingPipe.Handle, StringComparer.Ordinal))
+                    b.Append(string.Join("\u001F", "crossing", c.ProfileView.Handle, c.CrossingPipe.Handle, R(c.StationM), c.ShownInView)).Append('\u001E');
+            }
             List<string> arranged = items.Where(i => i.Changes.Any(c => c.Step == BuildStep.Arrange)).SelectMany(i => i.Layouts)
                 .OrderBy(l => l, StringComparer.OrdinalIgnoreCase).ToList();
             if (arranged.Count > 0) b.Append("arrangeContext\u001F").Append(arrangeContext ?? "").Append('\u001E');
@@ -167,17 +188,23 @@ namespace C3DProTools.Features.Sheets.Application
             if (extraIssues != null) issues.AddRange(extraIssues);
             PlanLabelsPlan plan = rules == null ? new PlanLabelsPlan(null, null) : PlanLabelPlanner.Plan(scene, rules, null);
             issues.AddRange(plan.Issues.Where(i => !scene.Issues.Contains(i)));
+            ProfileLabelsPlan profiles = rules == null ? new ProfileLabelsPlan(null, null) : ProfileLabelPlanner.Plan(scene, rules, ProfileViews(scene), null);
+            issues.AddRange(profiles.Issues.Where(i => !issues.Contains(i)));
             HashSet<string> recorded = new HashSet<string>(scene.BuildRecords.Select(r => r.Layout + "|" + r.Step), StringComparer.OrdinalIgnoreCase);
 
             List<SheetStatus> sheets = new List<SheetStatus>();
             foreach (SheetSnapshot s in scene.Sheets.Where(s => s.Kind != SheetKind.Other).OrderBy(s => s.TabOrder))
             {
                 Dictionary<BuildStep, StepState> steps = Enum.GetValues(typeof(BuildStep)).Cast<BuildStep>().ToDictionary(st => st, _ => StepState.NotApplicable);
-                if (s.Kind == SheetKind.Plan && rules != null)
+                if (rules != null)
                 {
-                    bool changes = plan.Items.Any(i => i.Layouts.Contains(s.Layout, StringComparer.OrdinalIgnoreCase));
+                    bool isPlan = s.Kind == SheetKind.Plan;
+                    bool changes = isPlan
+                        ? plan.Items.Any(i => i.Layouts.Contains(s.Layout, StringComparer.OrdinalIgnoreCase))
+                        : profiles.Views.Any(v => string.Equals(v.Layout, s.Layout, StringComparison.OrdinalIgnoreCase));
                     bool hasToolLabels = scene.Labels.Any(l => l.IsToolLabel && string.Equals(l.Tag.Layout, s.Layout, StringComparison.OrdinalIgnoreCase));
-                    steps[BuildStep.PlanLabels] = changes ? (hasToolLabels ? StepState.OutOfDate : StepState.NotBuilt) : hasToolLabels ? StepState.Built : StepState.NotApplicable;
+                    steps[isPlan ? BuildStep.PlanLabels : BuildStep.ProfileLabels] = changes ? (hasToolLabels ? StepState.OutOfDate : StepState.NotBuilt)
+                        : hasToolLabels ? StepState.Built : StepState.NotApplicable;
                     steps[BuildStep.Arrange] = !hasToolLabels && !changes ? StepState.NotApplicable
                         : recorded.Contains(s.Layout + "|" + BuildStep.Arrange) && !changes ? StepState.Built : StepState.NotBuilt;
                 }
