@@ -77,8 +77,17 @@ namespace C3DProTools.Features.Sheets.Civil3D
             finally { Leave(); }
         }
 
-        private BuildSheetsPreview Plan(BuildSheetsRequest request, IProgress<BuildProgress> progress, CancellationToken ct)
+        private BuildSheetsPreview Plan(BuildSheetsRequest request, IProgress<BuildProgress> progress, CancellationToken ct) =>
+            Plan(request, progress, ct, out _);
+
+        /// <summary>
+        /// Reads and plans. The preview keeps the caller's request as sent: when its rules are empty, they come from the project
+        /// file, and a re-plan (Apply) loads that file again, so an edit made after the preview changes the stamp.
+        /// <paramref name="rules"/> is the rule set this plan used.
+        /// </summary>
+        private BuildSheetsPreview Plan(BuildSheetsRequest request, IProgress<BuildProgress> progress, CancellationToken ct, out LabelRuleSet rules)
         {
+            rules = null;
             Document doc = DrawingRefs3D.Find(request?.Drawing);
             if (doc == null)
                 return BuildSheetsPreview.Empty(OperationStatus.Rejected, request?.Drawing, request, new[] { OperationIssue.Error(SheetCodes.PreviewWrongDrawing, "That drawing is not open.") });
@@ -86,7 +95,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
             try
             {
                 List<OperationIssue> issues = new List<OperationIssue>();
-                LabelRuleSet rules = RulesFor(doc, request.Rules, issues);
+                rules = RulesFor(doc, request.Rules, issues);
                 if (rules == null) return BuildSheetsPreview.Empty(OperationStatus.Rejected, request.Drawing, request, issues);
                 progress?.Report(new BuildProgress(BuildPhase.Reading, 0, 2, null));
                 SheetScene scene;
@@ -95,13 +104,13 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 using (doc.LockDocument())
                 {
                     scene = _scene.Read(new SheetSceneRequest { Drawing = request.Drawing }, ct);
-                    if (request.Steps.Contains(BuildStep.Arrange)) arrangeContext = ArrangeContext(doc, scene, request.Layouts);
+                    if (request.Steps.Contains(BuildStep.Arrange)) arrangeContext = ArrangeContext(doc);
                 }
                 if (ct.IsCancellationRequested) return BuildSheetsPreview.Empty(OperationStatus.Cancelled, request.Drawing, request);
                 progress?.Report(new BuildProgress(BuildPhase.Planning, 1, 2, null));
                 BuildSheetsPreview preview = BuildSheetsPlanner.Preview(scene, request, rules, arrangeContext);
                 progress?.Report(new BuildProgress(BuildPhase.Planning, 2, 2, null));
-                return preview with { Issues = issues.Concat(preview.Issues).ToList() };
+                return preview with { Request = request, Issues = issues.Concat(preview.Issues).ToList() };
             }
             catch (OperationCanceledException) { return BuildSheetsPreview.Empty(OperationStatus.Cancelled, request.Drawing, request); }
             catch (Exception ex)
@@ -151,7 +160,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
             using (doc.LockDocument())
             {
                 // Plan again: only the exact plan the user previewed is written.
-                BuildSheetsPreview again = Plan(request.Preview.Request, null, ct);
+                BuildSheetsPreview again = Plan(request.Preview.Request, null, ct, out LabelRuleSet rules);
                 if (again.Status == OperationStatus.Cancelled || ct.IsCancellationRequested)
                     return new BuildSheetsResult(OperationStatus.Cancelled, operation, previewId, null,
                         new[] { OperationIssue.Info(SheetCodes.Busy, "Cancelled before anything was written.") });
@@ -161,7 +170,6 @@ namespace C3DProTools.Features.Sheets.Civil3D
 
                 HashSet<string> chosen = new HashSet<string>(request.ItemKeys, StringComparer.Ordinal);
                 List<BuildItem> items = again.Items.Where(i => chosen.Count == 0 || chosen.Contains(i.ItemKey)).ToList();
-                LabelRuleSet rules = again.Request.Rules;
                 List<BuildItemOutcome> outcomes = new List<BuildItemOutcome>();
                 bool cancelled = false;
                 for (int i = 0; i < items.Count; i++)
@@ -182,28 +190,55 @@ namespace C3DProTools.Features.Sheets.Civil3D
         }
 
         /// <summary>
-        /// What Arrange reads that the scene does not hold, as one fingerprint: the saved arrange settings, and the model text,
-        /// multileaders and leaders it keeps clear of inside the viewports of the plan sheets in scope.
+        /// What Arrange reads, as one fingerprint: the saved arrange settings, and every obstacle exactly as Arrange's own reader
+        /// sees it: each network part's outline (curved pipes sampled, outer width, structure footprints), the model text,
+        /// tables, framed callouts, multileaders and leaders, the other Civil 3D labels' extents, and each profile view's box,
+        /// band area and drawn parts (with their elevations). Nothing is filtered by viewport: Arrange keeps clear of what
+        /// reaches into a viewport and its margin, which a point test cannot tell (a pipe can cross a viewport with both ends
+        /// outside it), so any change to an obstacle anywhere makes the preview stale. That errs on the safe side.
         /// </summary>
-        private static string ArrangeContext(Document doc, SheetScene scene, IReadOnlyCollection<string> layouts)
+        private static string ArrangeContext(Document doc)
         {
             string R(double v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            string Pts(IEnumerable<Autodesk.AutoCAD.Geometry.Point3d> pts) => string.Join(";", pts.Select(p => R(p.X) + "," + R(p.Y)));
             AnnotationSettings s = AnnotationSettings.Load();
             System.Text.StringBuilder b = new System.Text.StringBuilder();
             b.Append(string.Join("\u001F", "settings", R(s.MaxDistance), R(s.Gap), R(s.Margin), s.SlideNormalLabels, s.AvoidModelText,
                 string.Join("|", (s.KeepClearNetworks ?? new List<string>()).OrderBy(x => x)), string.Join("|", (s.SlideStyles ?? new List<string>()).OrderBy(x => x)),
                 string.Join("|", (s.DraggedStyles ?? new List<string>()).OrderBy(x => x)))).Append('\u001E');
-            HashSet<string> wanted = new HashSet<string>(layouts ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            List<IReadOnlyList<Point2>> areas = scene.Sheets.Where(sh => sh.Kind != SheetKind.Other && (wanted.Count == 0 || wanted.Contains(sh.Layout)))
-                .SelectMany(sh => sh.Viewports).Select(v => v.ModelBoundary).ToList();
-            bool Inside(Autodesk.AutoCAD.Geometry.Point3d p) => areas.Any(a => Geometry2.Contains(a, new Point2(p.X, p.Y)));
             using (Autodesk.AutoCAD.DatabaseServices.Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
             {
-                AnnotScene obstacles = AnnotScene.Read(tr, doc.Database, Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(doc.Database), true, false);
-                foreach (var outline in obstacles.Texts.Where(t => t.Any(Inside)))
-                    b.Append("text\u001F").Append(string.Join(";", outline.Select(p => R(p.X) + "," + R(p.Y)))).Append('\u001E');
-                foreach (var (a, c) in obstacles.LeaderLines.Where(l => Inside(l.a) || Inside(l.b)))
-                    b.Append("leader\u001F").Append($"{R(a.X)},{R(a.Y)};{R(c.X)},{R(c.Y)}").Append('\u001E');
+                AnnotScene obstacles = AnnotScene.Read(tr, doc.Database, Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(doc.Database), true, true);
+                foreach (var (outline, part, network) in obstacles.Parts)
+                    b.Append("part\u001F").Append(part.Handle).Append('\u001F').Append(network.Handle).Append('\u001F').Append(Pts(outline)).Append('\u001E');
+                foreach (var outline in obstacles.Texts)
+                    b.Append("text\u001F").Append(Pts(outline)).Append('\u001E');
+                foreach (var (a, c) in obstacles.LeaderLines)
+                    b.Append("leader\u001F").Append(Pts(new[] { a, c })).Append('\u001E');
+                foreach (Autodesk.AutoCAD.DatabaseServices.ObjectId id in obstacles.OtherLabels)
+                {
+                    string extents = "";
+                    try
+                    {
+                        if (tr.GetObject(id, Autodesk.AutoCAD.DatabaseServices.OpenMode.ForRead) is Autodesk.AutoCAD.DatabaseServices.Entity e)
+                        {
+                            Autodesk.AutoCAD.DatabaseServices.Extents3d x = e.GeometricExtents;
+                            extents = Pts(new[] { x.MinPoint, x.MaxPoint });
+                        }
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { extents = "unreadable"; }
+                    b.Append("otherLabel\u001F").Append(id.Handle).Append('\u001F').Append(extents).Append('\u001E');
+                }
+                foreach (var kv in obstacles.Profiles.OrderBy(kv => kv.Key.Handle.Value))
+                {
+                    b.Append("profileArea\u001F").Append(kv.Key.Handle).Append('\u001F');
+                    if (kv.Value != null)
+                    {
+                        b.Append(Pts(kv.Value.View)).Append('\u001F').Append(kv.Value.Bands == null ? "" : Pts(kv.Value.Bands));
+                        foreach (var (outline, part) in kv.Value.Parts) b.Append('\u001F').Append(part.Handle).Append(':').Append(Pts(outline));
+                    }
+                    b.Append('\u001E');
+                }
                 tr.Commit();
             }
             byte[] h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(b.ToString()));

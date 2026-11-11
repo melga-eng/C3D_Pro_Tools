@@ -191,6 +191,25 @@ namespace C3DProTools.Tests.Sheets
             Assert.Equal(stamp, BuildSheetsPlanner.Preview(Scene(labels), arrange, Rules, "ctx-1").SceneStamp);
         }
 
+        // ---- Codex re-review of feature/build-sheets ---------------------------------------------------------------------
+
+        [Fact]
+        public void TheStamp_CoversAPipeCrossingTheViewport_WithBothEndsOutside()
+        {
+            LabelSnapshot[] labels = { Tool("AB1", "31", "SW-A") };
+            SheetScene WithPipe(double x) => Scene(labels) with
+            {
+                Networks = Scene().Networks.Select(n => n with
+                {
+                    Pipes = new[] { new ScenePipe(DrawingObjectRef.Of("21"), "IC-1", "ICT", "IC-3A", new Point3(x, -50, 610), new Point3(x, 150, 610), 0.79, 1.11) }
+                }).ToList()
+            };
+            BuildSheetsRequest arrange = Request(BuildStep.Arrange);
+            string stamp = BuildSheetsPlanner.Preview(WithPipe(50), arrange, Rules, "ctx").SceneStamp;
+            Assert.NotEqual(stamp, BuildSheetsPlanner.Preview(WithPipe(55), arrange, Rules, "ctx").SceneStamp);
+            Assert.Equal(stamp, BuildSheetsPlanner.Preview(WithPipe(50), arrange, Rules, "ctx").SceneStamp);
+        }
+
         [Fact]
         public void ASheetWhoseLabelStyleCannotBeFingerprinted_IsNotArranged()
         {
