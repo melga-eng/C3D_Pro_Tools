@@ -115,7 +115,7 @@ namespace C3DProTools.Features.Sheets.Application
                         $"Rule '{rule.Id}' is not a per-part pipe, structure or joint rule; it is skipped."));
                     skipped.Add(rule.Id.Trim()); continue;
                 }
-                LabelStyleKind kind = rule.Select.Kind == TargetKind.Structure ? LabelStyleKind.Structure : LabelStyleKind.Pipe;
+                LabelStyleKind kind = StyleKindOf(rule);
                 bool missing = rule.LabelStyles.Any(slot => !scene.LabelStyles.Any(s => s.Kind == kind && s.Name == slot.Trim()));
                 bool incomplete = rule.LabelStyles.Any(slot => scene.LabelStyles.Any(s => s.Kind == kind && s.Name == slot.Trim() && string.IsNullOrEmpty(s.Fingerprint)));
                 if (missing || incomplete)
@@ -170,9 +170,18 @@ namespace C3DProTools.Features.Sheets.Application
                 }
             }
 
+            // Existing tool labels, by where they are: a profile label sits in its view, so when the view moved to another
+            // sheet (or off every sheet) since the build, its labels went with it. Such a label is reconciled when the sheet it
+            // was tagged for or the sheet now showing its view is in scope; its tag names the old sheet, so it never matches a
+            // desired label and is removed (or, pinned, kept and reported).
             var existing = new Dictionary<string, LabelSnapshot>(StringComparer.Ordinal);
-            foreach (var group in scene.Labels.Where(l => l.IsToolLabel && ContextOf(l.Tag, contexts) is Context c
-                    && scopeViews.Contains(c.View.Ref.Handle)).GroupBy(l => l.Tag.IdentityKey, StringComparer.Ordinal))
+            var located = new Dictionary<LabelSnapshot, Context>(ReferenceEqualityComparer.Instance);
+            foreach (LabelSnapshot l in scene.Labels.Where(l => l.IsToolLabel))
+            {
+                Context c = ContextOf(l.Tag, contexts, scene, wanted, scopeViews);
+                if (c != null) located[l] = c;
+            }
+            foreach (var group in located.Keys.GroupBy(l => l.Tag.IdentityKey, StringComparer.Ordinal))
             {
                 var copies = group.OrderBy(l => Handle(l.Ref)).ToList(); existing[group.Key] = copies[0];
                 foreach (LabelSnapshot copy in copies.Skip(1))
@@ -188,11 +197,11 @@ namespace C3DProTools.Features.Sheets.Application
                     issues.Add(OperationIssue.Warning(SheetCodes.LabelOrphanPinned, "A pinned profile label is no longer requested; it is kept.", obj: label.Ref) with { Layout = label.Tag.Layout });
                     continue;
                 }
-                changes.Add((ContextOf(label.Tag, contexts), new PlannedChange("", BuildStep.ProfileLabels, ChangeKind.Remove, ChangeTarget.Label,
+                changes.Add((located[label], new PlannedChange("", BuildStep.ProfileLabels, ChangeKind.Remove, ChangeTarget.Label,
                     label.Tag.Layout, label.Tag.RuleId, label.Tag.SourceKey, label.Ref, "Remove profile label no rule requests") { StyleSlot = label.Tag.StyleSlot }));
             }
             var results = new List<ProfileLabelViewPlan>();
-            foreach (Context context in scope.OrderBy(c => c.Sheet.TabOrder).ThenBy(c => c.View.StartStationM).ThenBy(c => Handle(c.View.Ref)))
+            foreach (Context context in scope.Concat(changes.Select(c => c.Context)).Distinct().OrderBy(c => c.Sheet.TabOrder).ThenBy(c => c.View.StartStationM).ThenBy(c => Handle(c.View.Ref)))
             {
                 var mine = changes.Where(c => c.Context == context).Select(c => c.Change).OrderBy(c => c.Kind)
                     .ThenBy(c => c.RuleId, StringComparer.Ordinal).ThenBy(c => c.SourceKey, StringComparer.Ordinal)
@@ -203,13 +212,46 @@ namespace C3DProTools.Features.Sheets.Application
             return new ProfileLabelsPlan(results, issues);
         }
 
+        /// <summary>
+        /// The kind of label style a profile rule uses: crossing pipes (a pipe rule for other networks) take crossing pipe
+        /// profile label styles, other pipe and joint rules pipe label styles, structure rules structure label styles.
+        /// </summary>
+        public static LabelStyleKind StyleKindOf(LabelRule rule) =>
+            rule.Select.Kind == TargetKind.Structure ? LabelStyleKind.Structure
+            : rule.Select.Kind == TargetKind.Pipe && rule.Select.OtherNetworksOnly ? LabelStyleKind.CrossingPipe : LabelStyleKind.Pipe;
+
+        /// <summary>The profile view a profile label's source key names (see <see cref="SourceKey"/>); default when none.</summary>
+        public static DrawingObjectRef ViewOf(string sourceKey)
+        {
+            string s = sourceKey ?? "";
+            int at = s.LastIndexOf(ViewMarker, StringComparison.OrdinalIgnoreCase);
+            return at >= 0 && DrawingObjectRef.TryCreate(s.Substring(at + ViewMarker.Length), out DrawingObjectRef r) ? r : default;
+        }
+
         private static ProfileLabelsPlan Invalid(string message) => new(null, new[] { OperationIssue.Error(SheetCodes.SceneIncomplete, message) });
-        private static Context ContextOf(BuildTag tag, Dictionary<string, Context> contexts)
+        /// <summary>
+        /// Where an existing tool label is reconciled, or null when it is out of scope or not a profile label:
+        /// - its view still shows on the sheet it was tagged for: that view and sheet, when in scope;
+        /// - its view now shows on another sheet: that sheet when in scope (the label is there now), else the tagged sheet when
+        ///   in scope (it was built for it);
+        /// - its view shows on no sheet: the tagged sheet, when in scope and still a profile sheet.
+        /// A label whose view is gone from the drawing went with it.
+        /// </summary>
+        private static Context ContextOf(BuildTag tag, Dictionary<string, Context> contexts, SheetScene scene, HashSet<string> wanted, HashSet<string> scopeViews)
         {
             string source = tag.SourceKey ?? "";
             int at = source.LastIndexOf(ViewMarker, StringComparison.OrdinalIgnoreCase);
-            return at >= 0 && contexts.TryGetValue(source.Substring(at + ViewMarker.Length), out Context c)
-                && string.Equals(c.Sheet.Layout, tag.Layout, StringComparison.OrdinalIgnoreCase) ? c : null;
+            if (at < 0) return null;
+            string viewHandle = source.Substring(at + ViewMarker.Length);
+            bool InScope(string layout) => wanted.Count == 0 || wanted.Contains(layout ?? "");
+            if (contexts.TryGetValue(viewHandle, out Context now))
+            {
+                if (string.Equals(now.Sheet.Layout, tag.Layout, StringComparison.OrdinalIgnoreCase)) return scopeViews.Contains(viewHandle) ? now : null;
+                if (scopeViews.Contains(viewHandle)) return now;
+            }
+            ProfileViewSnapshot view = now?.View ?? scene.ProfileViews.FirstOrDefault(v => string.Equals(v.Ref.Handle, viewHandle, StringComparison.OrdinalIgnoreCase));
+            SheetSnapshot tagged = scene.Sheets.FirstOrDefault(s => s.Kind == SheetKind.Profile && string.Equals(s.Layout, tag.Layout, StringComparison.OrdinalIgnoreCase));
+            return view != null && tagged != null && InScope(tagged.Layout) ? new Context(view, tagged) : null;
         }
         private static int StyleOrder(PlannedChange change, LabelRuleSet rules)
         {

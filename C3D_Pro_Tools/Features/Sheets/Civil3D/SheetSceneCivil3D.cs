@@ -137,6 +137,8 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 catch (Exception ex) { Warn("The pipe label styles could not be read.", ex); }
                 try { Add(LabelStyleKind.Structure, civil.Styles.LabelStyles.StructureLabelStyles.LabelStyles.Cast<ObjectId>()); }
                 catch (Exception ex) { Warn("The structure label styles could not be read.", ex); }
+                try { Add(LabelStyleKind.CrossingPipe, civil.Styles.LabelStyles.PipeLabelStyles.CrossProfileLabelStyles.Cast<ObjectId>()); }
+                catch (Exception ex) { Warn("The crossing pipe label styles could not be read.", ex); }
                 return styles;
             }
 
@@ -374,8 +376,15 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         .OrderByDescending(g => g.Sum(x => x.length)).Select(g => g.Key).FirstOrDefault() ?? "";
                     List<ViewPart> drawn = parts.Select(x => x.part with { IsOwnNetwork = own.Length > 0 && x.network == own }).ToList();
 
+                    Rect2? box = null;
+                    try
+                    {
+                        Extents3d x = pv.GeometricExtents;
+                        box = new Rect2(x.MinPoint.X, x.MinPoint.Y, x.MaxPoint.X, x.MaxPoint.Y);
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     return new ProfileViewSnapshot(DrawingRefs3D.Ref(pv.ObjectId), pv.Name, DrawingRefs3D.Ref(al.ObjectId),
-                        pv.StationStart, pv.StationEnd, pv.ElevationMin, pv.ElevationMax, "", drawn, exaggeration);
+                        pv.StationStart, pv.StationEnd, pv.ElevationMin, pv.ElevationMax, "", drawn, exaggeration) { ModelBox = box };
                 }
                 catch (Exception ex) { Warn($"Profile view {pv.Name} could not be read.", ex, pv); return null; }
             }

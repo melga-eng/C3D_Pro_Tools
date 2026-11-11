@@ -19,7 +19,7 @@ namespace C3DProTools.Tests.Sheets
                 new NetworkSnapshot(R("11"), "LV", new[] { new ScenePipe(R("22"), "Cross", "LV", "Cable", new Point3(0,0,0), new Point3(1,0,0), 1, 1) }, new[] { new SceneStructure(R("32"), "Other", "LV", "MH", new Point3(40,0,0)) }) },
             ProfileViews = new[] { View("A1", 0, 100), View("A2", 90, 180) },
             Crossings = new[] { new CrossingSnapshot(R("A1"), R("22"), "LV", "Cross", 40, 10, 9, true) },
-            LabelStyles = new[] { new SceneLabelStyle(LabelStyleKind.Pipe, "Name", R("51"), "f"), new SceneLabelStyle(LabelStyleKind.Pipe, "Joint", R("52"), "f"), new SceneLabelStyle(LabelStyleKind.Structure, "MH", R("53"), "f") }
+            LabelStyles = new[] { new SceneLabelStyle(LabelStyleKind.Pipe, "Name", R("51"), "f"), new SceneLabelStyle(LabelStyleKind.Pipe, "Joint", R("52"), "f"), new SceneLabelStyle(LabelStyleKind.Structure, "MH", R("53"), "f"), new SceneLabelStyle(LabelStyleKind.CrossingPipe, "Name", R("55"), "f") }
         };
         private static ProfileViewSnapshot View(string h, double a, double b) => new(R(h), h, R("40"), a, b, 0, 20, "", new[] { Part("21", ViewPartKind.Pipe, true, 0, 180), Part("31", ViewPartKind.Structure, true, 94, 96), Part("32", ViewPartKind.Structure, false, 40, 40) }, 1);
         private static LabelRule Rule(TargetKind kind = TargetKind.Pipe, bool other = false, params string[] styles) => new("rule", ViewKind.Profile, new TargetSelector(kind, other ? "LV" : "ICT", null, other), styles.Length == 0 ? new[] { kind == TargetKind.Structure ? "MH" : "Name" } : styles, kind == TargetKind.Structure ? LabelAnchor.Insertion : kind == TargetKind.Joint ? LabelAnchor.EachJoint : LabelAnchor.Middle);
@@ -56,6 +56,15 @@ namespace C3DProTools.Tests.Sheets
         }
         [Fact] public void CrossingUsesShownSnapshotAndOtherNetworkSelector()
         { var c = Assert.Single(All(Plan(rule: Rule(other: true)))); Assert.Equal(R("22"), c.Part); Assert.Equal("P1", c.Layout); }
+        [Fact] public void CrossingRules_UseCrossingPipeStyles()
+        {
+            var s = Scene() with { LabelStyles = Scene().LabelStyles.Where(x => x.Kind != LabelStyleKind.CrossingPipe).ToArray() };
+            var p = Plan(s, Rule(other: true));
+            Assert.Empty(All(p));
+            Assert.Contains(p.Issues, i => i.Code == SheetCodes.RuleStyleMissing);
+            Assert.Equal(LabelStyleKind.CrossingPipe, ProfileLabelPlanner.StyleKindOf(Rule(other: true)));
+            Assert.Equal(LabelStyleKind.Pipe, ProfileLabelPlanner.StyleKindOf(Rule()));
+        }
         [Fact] public void HiddenCrossingsAndCrossingJointsAreNotPlanned()
         {
             var s = Scene(); Assert.Empty(All(Plan(s with { Crossings = s.Crossings.Select(c => c with { ShownInView = false }).ToArray() }, Rule(other: true))));

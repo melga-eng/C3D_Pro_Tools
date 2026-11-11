@@ -189,7 +189,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 {
                     BuildSheetsRequest request = new BuildSheetsRequest
                     {
-                        Drawing = identity, Layouts = layouts, Steps = new HashSet<BuildStep> { BuildStep.PlanLabels, BuildStep.Arrange }, Rules = null
+                        Drawing = identity, Layouts = layouts, Steps = new HashSet<BuildStep> { BuildStep.PlanLabels, BuildStep.ProfileLabels, BuildStep.Arrange }, Rules = null
                     };
                     BuildSheetsPreview p = service.PreviewAsync(request, null, CancellationToken.None).GetAwaiter().GetResult();
                     BuildPreviews[key] = p;

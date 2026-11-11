@@ -275,7 +275,7 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
 
 ### The build so far (`BuildSheetsPlanner`, `BuildSheetsCivil3D`, `SheetProductionService`)
 
-- **Steps built:** PlanLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
+- **Steps built:** PlanLabels, ProfileLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
 - **One item per plan sheet, in one transaction:** that sheet's PlanLabels changes, then **Arrange**, then the build records.
   - Arrange is the Annotation Studio arranger, with its saved settings. It may move only that sheet's unpinned tool labels,
     including those just added. Pinned and hand-placed labels are obstacles. Styles of rules with `Leader` are dragged.
@@ -299,6 +299,26 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
   - other steps and profile sheets: NotApplicable for now
 - **Pin and Release are not built yet:** `PreviewPinAsync` says so.
 - **The command `C3DProBuildSheets`** (Preview, or Apply) runs this service from the command line, for live tests.
+
+### The ProfileLabels step (`ProfileLabelPlanner` by Codex, `ProfileViewSheets`, `ProfileLabelsCivil3D`)
+
+- **Which sheet shows a view:** the first profile sheet (by tab order) whose viewport contains the centre of the view's box
+  (`ProfileViewSnapshot.ModelBox`, read from the view's extents). A view on no profile sheet gets no labels.
+- **Planning:** Codex's planner works per view. Each label's source key names its view (`part:view:handle`). Overlapping views
+  of one alignment label a part in the earlier view. Crossing pipes are labelled only when drawn in the view.
+- **Crossing pipe rules** (a pipe rule with `OtherNetworksOnly`) use crossing pipe profile label styles
+  (`LabelStyleKind.CrossingPipe`, from `CrossProfileLabelStyles`). Other pipe and joint rules use pipe label styles, and
+  structure rules use structure label styles.
+- **In the build:** one item per profile sheet (`profile:<layout>`, `ProfileSheetSet`), holding its ProfileLabels changes and
+  then Arrange in profile mode. Rules with `Leader` drag their profile labels.
+- **The stamp** also covers the profile sheets' viewports, and every mapped view's stations, box, drawn parts and crossings.
+- **Writing:**
+  - each label goes on the part's profile representation, in the view its key names:
+    - `PipeProfileLabel` at its ratio, for pipes and joints
+    - `StructureProfileLabel`, for structures
+    - `CrossingPipeProfileLabel`, for crossings; extra crossing labels Civil 3D makes are erased again
+  - each label gets its tag, checked before commit
+- **Not yet:** crossing labels are not moved by Arrange, because Annotation Studio's arranger does not scan them.
 
 ## 5. Build steps and the inventory
 
@@ -853,3 +873,10 @@ The re-review found items 1, 3, 4 and 5 resolved and item 2 partly resolved. It 
 | 2 | high · Crossing obstacles can evade stale detection | Nothing that reaches the stamp is filtered by viewport anymore. The planner hashes every network part in the drawing (plan position and elevations of both ends, outer width and height; structures with elevation). The adapter's arrange context fingerprints every obstacle exactly as Arrange's own reader (`AnnotScene.Read`, profiles included) returns it: part outlines (curved pipes sampled, structure footprints), model text, tables, framed callouts, multileaders, leaders, the other Civil 3D labels' extents, and each profile view's box, band area and drawn parts. Trade-off: editing any obstacle anywhere between Preview and Apply makes the preview stale. That is the safe side |
 | 6 | high · Apply does not reload project-sourced rules | The preview keeps the caller's request as sent (`Rules` empty means the project's rules). Apply's re-plan loads `C3DPro.project.json` again, and the rules are part of the stamp, so an edit after Preview gives `sheets.preview.stale`. Apply writes with the rules it has just loaded |
 | 7 | high · Paper-space obstacles are missing from the Arrange stamp (second re-review) | The arrange context also fingerprints each viewport's paper obstacles (sheet text, callouts and leaders), read with `AnnotSheets.PaperObstacles`, the reader Arrange uses, on every sheet |
+
+## Code review of `feature/profile-labels`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | high · Profile elevations are omitted from the stamp | Each drawn part's outside top and bottom at both ends, each view's name, band set and vertical exaggeration, and each crossing's network, name, top and bottom are now in the stamp. In the adapter's arrange context, the profile areas (view box, bands, drawn-part outlines from rim, sump and invert) were already there since the build-sheets re-review |
+| 2 | medium · Moving a view between sheets leaves its old labels unreconciled | A profile label sits in its view, so it moves with the view. A tool label whose view now shows on another sheet, or on no sheet, is reconciled when the sheet it was tagged for, or the sheet now showing the view, is in scope. Its tag names the old sheet, so it never matches a wanted label: unpinned, it is removed; pinned, it is kept and reported (`sheets.label.orphanPinned`). New labels are planned on the view's current sheet when that sheet is in scope |

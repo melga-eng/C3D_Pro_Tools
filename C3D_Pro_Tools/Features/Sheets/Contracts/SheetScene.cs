@@ -104,6 +104,8 @@ namespace C3DProTools.Features.Sheets.Contracts
     {
         private readonly IReadOnlyList<ViewPart> _parts = Frozen.List(DrawnParts);
         public IReadOnlyList<ViewPart> DrawnParts { get => _parts; init => _parts = Frozen.List(value); }
+        /// <summary>The view's box in model plan metres (graph and bands), to find the profile sheet that shows it.</summary>
+        public Rect2? ModelBox { get; init; }
     }
 
     /// <summary>
@@ -183,7 +185,8 @@ namespace C3DProTools.Features.Sheets.Contracts
     }
 
     /// <summary>Which kind of part a label style is for.</summary>
-    internal enum LabelStyleKind { Pipe = 0, Structure = 1 }
+    /// <summary>Which kind of label a style is for. CrossingPipe: profile labels of pipes crossing a view (CrossProfileLabelStyles).</summary>
+    internal enum LabelStyleKind { Pipe = 0, Structure = 1, CrossingPipe = 2 }
 
     /// <summary>A label style of the drawing, with its content fingerprint (empty when incomplete; section 10).</summary>
     internal sealed record SceneLabelStyle(LabelStyleKind Kind, string Name, DrawingObjectRef Ref, string Fingerprint);
