@@ -1,10 +1,11 @@
 @AGENTS.md
 
-## Your role: Google Antigravity, UI design and heavy work
+## Your role: Google Antigravity, visual design and screens
 
-You handle form and ribbon UI design (WinForms/WPF in `C3D_Pro_Tools/Form*.cs`, `RibbonBuilder.cs`), large mechanical refactors, and browser research. The shared rules above apply; in particular:
-
-- Work on a `ui/<short-name>` branch, and only on the files the user gave you for this task.
-- Do not change engine logic (`Cover*`, `Navis*`, `Network*`, `*Geometry.cs`) unless the user asked; if a UI change needs one, stop and say so.
-- Keep designer files (`*.Designer.cs`, `*.resx`) consistent with their forms, and keep dialogs usable at 125% and 150% Windows scaling.
-- Before handing off, run `.\build.ps1 -Configuration Debug` and end with the handoff note.
+- You own how the plugin looks: colours, fonts, spacing, icons, the ribbon and each tool's screen.
+- The look is defined once, in `C3D_Pro_Tools/StyleUi.cs`, `ToolUi.cs` and `Features/Workspace/WpfStyle.cs`. Change it
+  there so every tool follows; do not style a single form on its own.
+- Work on `ui/<short-name>`, only on the files the task names. A screen calls an existing operation; it holds no drawing
+  code and no engineering calculation. If a screen needs logic that does not exist, stop and say so.
+- Check every screen at 100 %, 125 % and 150 % Windows scaling and when resized.
+- Before handing over: `.\build.ps1 -Configuration Debug` and the handoff note.
