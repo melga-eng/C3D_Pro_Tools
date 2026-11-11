@@ -669,10 +669,24 @@ namespace C3DProTools
         private void RunMatch(List<ViewItem> targets, ProfileViewRecipe recipe, ObjectId master)
         {
             if (targets.Count == 0) { MessageBox.Show(this, "Tick the views to change under Targets.", Text); return; }
+            // A template keeps the surface names of the drawing it was captured in; this drawing's names are on the Roles page.
+            // Matching with the template's names left the data bands unchanged where the surfaces are named differently.
+            recipe.Rules = Rules().Copy();
             Document doc = AcadApp.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             CivilDocument cdoc = CivilApplication.ActiveDocument;
             MatchOptions o = Options();
+            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+            {
+                List<string> lacking = ProfileViewMatch.MissingStyles(tr, cdoc, recipe, o);
+                tr.Commit();
+                if (lacking.Count > 0)
+                {
+                    MessageBox.Show(this, "This drawing lacks styles the source uses, so bands or labels would be replaced with an incomplete set. Nothing was changed.\n\n"
+                        + string.Join("\n", lacking.Take(15)), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
 
             // A first dry run counts what is missing and extra, for the questions asked before anything changes.
             List<MatchChange> changes = new List<MatchChange>();

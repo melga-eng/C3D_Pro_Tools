@@ -293,6 +293,36 @@ namespace C3DProTools
             return new ObjectIdCollection();
         }
 
+        /// <summary>
+        /// The recipe's styles this drawing lacks: view style, band styles (by type and name), role profile styles and label
+        /// styles, for the parts the options apply. Apply replaces bands and labels, so it must not start while any is missing.
+        /// </summary>
+        public static List<string> MissingStyles(Transaction tr, CivilDocument doc, ProfileViewRecipe recipe, MatchOptions o)
+        {
+            List<string> missing = new List<string>();
+            Database db = doc.Styles.ProfileViewStyles.Count > 0 ? tr.GetObject(doc.Styles.ProfileViewStyles[0], OpenMode.ForRead).Database : null;
+            if (o.ViewStyle && recipe.ViewStyle.Length > 0 && StyleId(tr, doc.Styles.ProfileViewStyles, recipe.ViewStyle).IsNull)
+                missing.Add($"view style \"{recipe.ViewStyle}\"");
+            if (o.Bands && db != null)
+                foreach (BandRecipe b in recipe.Bands)
+                {
+                    ObjectId id = ObjectId.Null;
+                    try { id = Autodesk.Civil.DatabaseServices.Styles.BandStyle.GetBandStyleId(db, (BandType)Enum.Parse(typeof(BandType), b.BandType), b.Style); }
+                    catch (Exception) { }
+                    if (id.IsNull) missing.Add($"{b.BandType} band style \"{b.Style}\"");
+                }
+            foreach (RoleRecipe r in recipe.Roles)
+            {
+                if (o.ProfileStyles && r.Style.Length > 0 && StyleId(tr, doc.Styles.ProfileStyles, r.Style).IsNull)
+                    missing.Add($"profile style \"{r.Style}\"");
+                if (o.ProfileLabels)
+                    foreach (LabelGroupRecipe l in r.Labels)
+                        if (l.Style.Length > 0 && StyleId(tr, LabelStyles(doc, l.Kind), l.Style).IsNull)
+                            missing.Add($"{l.Kind} label style \"{l.Style}\"");
+            }
+            return missing.Distinct().ToList();
+        }
+
         private static IEnumerable LabelStyles(CivilDocument doc, string kind)
         {
             LabelStylesProfileRoot r = doc.Styles.LabelStyles.ProfileLabelStyles;

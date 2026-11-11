@@ -51,8 +51,8 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 
 | Tool (command) | What it does | State | Main code |
 |---|---|---|---|
-| Profile views run (`C3DPROPV`) | Report / Top / Dims / All for chosen alignments, no dialog, settings in `C3DPro.project.json` (`profileViews`) | **Drawing test passes** (tile 124 copy: 41 TOP fitted, then 56 of 57 fit; 41 clearance DIMs). Cover DIMs need the surface names set | `Features/ProfileTool/ProfileViewsRun.cs` |
-| Profile View Tools (`ProfileViewTools`) | Match one profile view's style, bands and profiles to others; split long views | Match: **Problem** reported 11 Nov, two fixes merged, not confirmed by you. Split: **Unknown** | `ProfileViewMatch.cs`, `ProfileViewSplit.cs`, `ProfileViewRecipe.cs` |
+| Profile views run (`C3DPROPV`) | Report / Top / Match / Dims / All for chosen alignments, no dialog, settings in `C3DPro.project.json` (`profileViews`) | **Drawing test passes** (tile 124 copy, ICT-ALI-124*: 12 TOP fitted, 21 views matched, 90 DIMs; second report: 19/19 fit, 0 Match changes). Split not in it yet | `Features/ProfileTool/ProfileViewsRun.cs` |
+| Profile View Tools (`ProfileViewTools`) | Match one profile view's style, bands and profiles to others; split long views | Match: cause of the 11 Nov problem found (template surface names); fixed in `C3DPROPV Match`, the form still has it. Split: **Unknown** | `ProfileViewMatch.cs`, `ProfileViewSplit.cs`, `ProfileViewRecipe.cs` |
 | Profile DIMs (`PROFILEDIMS`) | Cover and clearance dimensions in profile views | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
 | Annotation Studio (`AnnotationStudio`) | Add labels, arrange them inside viewports, reset, rename parts | Reset: **Works**. Arrange: **Problem**, result still not what you want (best measured: 21 of 25 labels placed). Rename: **Unknown** | `FormAnnotationStudio.cs`, `AnnotArranger.cs`, `LabelLayout.cs`, `AnnotNaming.cs` |
 | Sheet Manager (`SheetManager`) | List, rename, copy, create layouts by tile and part | **Unknown** | `SheetManager.cs`, `FormSheetManager.cs` |

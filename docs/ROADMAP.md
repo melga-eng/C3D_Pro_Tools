@@ -24,7 +24,7 @@ Days are working days and are targets: what the drawing tests find decides the r
 
 | Release | Days | Tools | Accepted when |
 |---|---|---|---|
-| **0. Foundation** | 1–2 | Background test bench (done), new agent rules (done), product map (done), new visual design chosen | You picked a design; a test runs without you |
+| **0. Foundation** | 1–2 | Background test bench (done), new agent rules (done), product map (done), new visual design chosen (Direction 2, Drafting Vellum, 2026-11-11) | You picked a design; a test runs without you |
 | **1. Profile views** | 3–4 | Profile Manager, TOP Fit, Match, Split, Profile DIMs, and one run that chains them for selected alignments | Tile 124 profile sheet 434132 matches your submitted PDF |
 | **2. Networks** | 5–6 | Network Editor (split, merge, swap, fit, conduits, rim to surface), Organizer, Repair, Networks from Feature Lines, Cover Designer | Each passes on the ICT network copy with your rules (cover 0.60, dry/dry 0.30, slope 7 %) |
 | **3. Labels** | 7–8 | Add labels, Arrange, Reset, Rename | A tile 124 plan sheet: no overlaps, every label inside its viewport |
