@@ -213,6 +213,8 @@ namespace C3DProTools
             batchSource.Items.Add(Large("Profile Views\n& TOP Fit", "PVMGR ", "Every profile view with its TOP profile: fit TOP profiles to the duct tops, create the missing ones."));
             batchSource.Items.Add(new RibbonSeparator());
             batchSource.Items.Add(Large("Label Style\nValues", "STYLEMGR ", "Batch-set label style values (text heights, arrowheads, ...) for styles by category or from labels you pick."));
+            batchSource.Items.Add(new RibbonSeparator());
+            batchSource.Items.Add(Large("Profile\nDIMs", "PROFILEDIMS ", "Draw cover DIMs (duct top to proposed surface, at structure faces and grade breaks) and clearance DIMs (duct to crossing pipes) in profile views."));
 
             isBuilt = true;
         }

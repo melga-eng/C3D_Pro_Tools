@@ -120,7 +120,15 @@ namespace C3DProTools
             {
                 List<string> c = SourcesOf(p, al);
                 bool Is(string n, string rule) => !string.IsNullOrEmpty(rule) && n.Equals(rule, StringComparison.OrdinalIgnoreCase);
-                if (c.Count == 0) return ProfileRole.None;
+                if (c.Count == 0)
+                {
+                    // No loaded surface matches: the source may be an unloaded reference (a proxy). The profile's name, which
+                    // Civil 3D gives a surface profile from its surface, is then the only clue; the longer rule name wins.
+                    bool In(string rule) => !string.IsNullOrWhiteSpace(rule) && p.Name.IndexOf(rule.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+                    bool ex = In(rules.ExistingSurface), pr = In(rules.ProposedSurface);
+                    if (ex && pr) return rules.ProposedSurface.Trim().Length >= rules.ExistingSurface.Trim().Length ? ProfileRole.Proposed : ProfileRole.Existing;
+                    return ex ? ProfileRole.Existing : pr ? ProfileRole.Proposed : ProfileRole.None;
+                }
                 if (Is(c[0], rules.ExistingSurface)) return ProfileRole.Existing;
                 if (Is(c[0], rules.ProposedSurface)) return ProfileRole.Proposed;
                 if (c.Any(n => Is(n, rules.ExistingSurface))) return ProfileRole.Existing;
