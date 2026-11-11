@@ -216,6 +216,13 @@ namespace C3DProTools
             batchSource.Items.Add(new RibbonSeparator());
             batchSource.Items.Add(Large("Profile\nDIMs", "PROFILEDIMS ", "Draw cover DIMs (duct top to proposed surface, at structure faces and grade breaks) and clearance DIMs (duct to crossing pipes) in profile views."));
 
+            // --- 7. Preset runs: the same steps with no dialog, settings from C3DPro.project.json beside the drawing ---
+            RibbonPanelSource runSource = new RibbonPanelSource { Title = "Preset Runs" };
+            customTab.Panels.Add(new RibbonPanel { Source = runSource });
+            runSource.Items.Add(Large("Profile Views\nRun", "C3DPROPV ", "Report, TOP fit, Match and DIMs for the alignments you name, with the profileViews settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
+            runSource.Items.Add(new RibbonSeparator());
+            runSource.Items.Add(Large("Networks\nRun", "C3DPRONET ", "Report, Repair, rims to surface and fit to structures for the networks you name, with the networks settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
+
             isBuilt = true;
         }
 

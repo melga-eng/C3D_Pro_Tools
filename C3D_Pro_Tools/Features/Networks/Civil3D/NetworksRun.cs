@@ -156,6 +156,13 @@ namespace C3DProTools.Features.Networks.Civil3D
                 List<OrphanPipe> orphans = NetworkRepair.Find(tr, db).Where(o => names.Contains(o.NetworkId)).ToList();
                 log.AppendLine($"Repair: {orphans.Count} pipes not in their network's member list" +
                                (orphans.Count > 0 ? $" ({string.Join(", ", orphans.Take(8).Select(o => $"{o.Name} in {o.Network}"))})" : "") + ".");
+                // A rebuilt pipe is a new object: labels on the old one would be erased with it. Labelled orphans are left alone.
+                var labelled = new HashSet<ObjectId>(AnnotLabels.Scan(tr, db).Where(l => !l.PartId.IsNull).Select(l => l.PartId));
+                List<OrphanPipe> skipped = orphans.Where(o => labelled.Contains(o.Id)).ToList();
+                if (skipped.Count > 0)
+                    log.AppendLine($"Repair: {skipped.Count} of them carry labels and are left alone (rebuilding would erase the labels): " +
+                                   string.Join(", ", skipped.Take(10).Select(o => o.Name)) + ".");
+                orphans = orphans.Except(skipped).ToList();
                 if (!write || orphans.Count == 0) { tr.Abort(); return; }
                 var notes = new List<string>();
                 int repaired = NetworkRepair.Repair(tr, orphans, notes);

@@ -90,6 +90,9 @@ namespace C3DProTools
                     }
                     if (!copy.StartPoint.IsEqualTo(s)) copy.StartPoint = s;
                     if (!copy.EndPoint.IsEqualTo(e)) copy.EndPoint = e;
+                    // Putting the ends back can drop a connection Civil 3D made at the structure's centre: check the final ones.
+                    if ((!ss.IsNull && !ss.IsErased && copy.StartStructureId != ss) || (!es.IsNull && !es.IsErased && copy.EndStructureId != es))
+                        reconnected = false;
                     // The erased pipe keeps its name until the end of the transaction, so it gives it up first.
                     string name = old.Name;
                     try { old.Name = name + " (replaced " + old.Handle + ")"; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }

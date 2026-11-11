@@ -1,7 +1,7 @@
 # Product map
 
 What is in the plugin, in plain words: each tool, what it does, its state, and where its code is.
-Claude keeps this page current. Last update: 2026-11-11.
+Claude keeps this page current. Last update: 2026-11-12.
 
 **State** is what is known today, mostly from the project history, not from a fresh test:
 
@@ -31,11 +31,12 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 
 | Tool (command) | What it does | State | Main code |
 |---|---|---|---|
-| Network Editor (`NetworkEditor`) | Split, merge, swap parts, fit pipes to structures, reverse, parallel copies, generate conduits, rim to surface | Split: **Works** (checked live 8 Nov). Generate conduits: **Not proven** in the form. Swap, fit to structure: **Unknown** after the fixes of 1–4 Nov | `FormNetworkEditor*.cs`, `NetworkEditOps.cs`, `PartSwap.cs`, `Features/Networks/` |
-| Network Organizer (`NetworkOrganizer`) | Merge scattered networks, remove duplicate pipes | **Not proven** | `NetworkOrganizer.cs`, `NetworkMerge.cs` |
+| Networks run (`C3DPRONET`) | Report / Repair / Rims / Fit / All for chosen networks, no dialog, settings in `C3DPro.project.json` (`networks`) | **Drawing test passes** (tile 124 copy: 48 rims set, 738 pipes fitted, re-run finds 0 to fit; Test.dwg: 29 fitted). Large moves are left alone and listed | `Features/Networks/Civil3D/NetworksRun.cs` |
+| Network Editor (`NetworkEditor`) | Split, merge, swap parts, fit pipes to structures, reverse, parallel copies, generate conduits, rim to surface | Split: **Works** (checked live 8 Nov). Generate conduits: **Not proven** in the form. Fit: cause of the 1 Nov failure found (pipes connected to far structures stretched up to 140 m), now refused above 3 m; merge now checks level. Swap: **Unknown** | `FormNetworkEditor*.cs`, `NetworkEditOps.cs`, `PartSwap.cs`, `Features/Networks/` |
+| Network Organizer (`NetworkOrganizer`) | Merge scattered networks, remove duplicate pipes | **Not proven**; duplicates now need matching levels (Codex fix) | `NetworkOrganizer.cs`, `NetworkMerge.cs` |
 | Networks from Feature Lines (`NetworkFromFeatureLines`) | Draw pipes along feature lines, single or batch | **Problem**: failed on parts of some feature lines and on curves (1 Nov) | `NetworkFromLines.cs`, `FormNetworkFromLines.cs` |
 | Navisworks Importer (`ImportNavisPipe`) | Bring pipes, structures and duct banks from Navisworks as Civil 3D parts | **Works** (29 Oct); one error reported 5 Nov, fix not confirmed | `Navis*.cs`, `C3DProTools.Navis/` |
-| Repair pipes (`RepairNetworkPipes`) | Find and close gaps, reconnect pipes to structures | **Unknown** | `NetworkRepair.cs`, `NetworkChecks.cs` |
+| Repair pipes (`RepairNetworkPipes`) | Rebuild pipes that dropped out of their network | Runs in `C3DPRONET Repair`; a rebuild that loses a connection is undone, labelled pipes skipped. 0 orphans in the test drawings, so the write path is not drawing-tested | `NetworkRepair.cs`, `NetworkChecks.cs` |
 | Advanced Network Tools (`AdvancedNetworkTools`) | Old entry point; its features moved to Network Editor | To remove from the ribbon | `NetworkToolsCommands.cs` |
 
 ## Coordinate: cover, clearances, profiles
