@@ -194,10 +194,10 @@ namespace C3DProTools
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, ShowCellToolTips = true, MultiSelect = true
             };
             g.RowTemplate.Height = 26;
-            g.ColumnHeadersDefaultCellStyle.BackColor = StyleUi.Surface;
+            g.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(234, 229, 220); // #EAE5DC (Direction 2 grid header)
             g.ColumnHeadersDefaultCellStyle.ForeColor = StyleUi.Muted;
             g.ColumnHeadersDefaultCellStyle.Font = StyleUi.Bold;
-            g.ColumnHeadersDefaultCellStyle.SelectionBackColor = StyleUi.Surface;
+            g.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(234, 229, 220);
             g.ColumnHeadersDefaultCellStyle.SelectionForeColor = StyleUi.Muted;
             g.DefaultCellStyle.SelectionBackColor = StyleUi.AccentSoft;
             g.DefaultCellStyle.SelectionForeColor = StyleUi.Text;
@@ -218,7 +218,7 @@ namespace C3DProTools
         public NavList()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Color.FromArgb(241, 245, 249);
+            BackColor = Color.FromArgb(234, 229, 220); // #EAE5DC (Direction 2 vellum nav background)
             Dock = DockStyle.Left;
             Width = 236;
             Cursor = Cursors.Hand;
@@ -262,7 +262,7 @@ namespace C3DProTools
                 if (i == _selected || i == _hover)
                 {
                     using (GraphicsPath path = StyleUi.Rounded(r, 6))
-                    using (SolidBrush b = new SolidBrush(i == _selected ? StyleUi.Panel : Color.FromArgb(226, 232, 240)))
+                    using (SolidBrush b = new SolidBrush(i == _selected ? StyleUi.Panel : Color.FromArgb(223, 217, 206))) // #DFD9CE (Direction 2 nav hover)
                         g.FillPath(b, path);
                     if (i == _selected)
                         using (SolidBrush accent = new SolidBrush(StyleUi.Accent)) g.FillRectangle(accent, r.X, r.Y + Scaled(8), Scaled(3), r.Height - Scaled(16));

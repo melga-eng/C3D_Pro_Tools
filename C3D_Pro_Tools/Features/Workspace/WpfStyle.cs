@@ -20,25 +20,25 @@ namespace C3DProTools.Features.Workspace
     internal static class WpfStyle
     {
         // --- Core Colors matching StyleUi ---
-        public static readonly Color HeaderColor = Color.FromRgb(15, 23, 42);          // #0F172A
-        public static readonly Color HeaderTextColor = Color.FromRgb(241, 245, 249);    // #F1F5F9
-        public static readonly Color HeaderMutedColor = Color.FromRgb(148, 163, 184);   // #94A3B8
-        public static readonly Color SurfaceColor = Color.FromRgb(248, 250, 252);      // #F8FAFC
-        public static readonly Color PanelColor = Colors.White;                        // #FFFFFF
-        public static readonly Color BorderColor = Color.FromRgb(226, 232, 240);       // #E2E8F0
-        public static readonly Color TextColor = Color.FromRgb(15, 23, 42);            // #0F172A
-        public static readonly Color MutedColor = Color.FromRgb(100, 116, 139);        // #64748B
-        public static readonly Color AccentColor = Color.FromRgb(37, 99, 235);         // #2563EB
-        public static readonly Color AccentHoverColor = Color.FromRgb(29, 78, 216);    // #1D4ED8
-        public static readonly Color AccentSoftColor = Color.FromRgb(219, 234, 254);   // #DBEAFE
-        public static readonly Color DangerColor = Color.FromRgb(220, 38, 38);         // #DC2626
-        public static readonly Color DangerSoftColor = Color.FromRgb(254, 226, 226);   // #FEE2E2
-        public static readonly Color WarningColor = Color.FromRgb(180, 83, 9);         // #B45309
-        public static readonly Color WarningSoftColor = Color.FromRgb(254, 243, 199);  // #FEF3C7
-        public static readonly Color SuccessColor = Color.FromRgb(21, 128, 61);        // #15803D
-        public static readonly Color SuccessSoftColor = Color.FromRgb(220, 252, 231);  // #DCFCE7
-        public static readonly Color PurpleColor = Color.FromRgb(109, 40, 217);        // #6D28D9
-        public static readonly Color PurpleSoftColor = Color.FromRgb(237, 233, 254);   // #EDE9FE
+        public static readonly Color HeaderColor = Color.FromRgb(14, 26, 45);          // #0E1A2D (Deep Prussian blueprint navy)
+        public static readonly Color HeaderTextColor = Color.FromRgb(244, 247, 251);    // #F4F7FB (Starch white)
+        public static readonly Color HeaderMutedColor = Color.FromRgb(141, 161, 190);   // #8DA1BE (Blueprint chalk cyan metadata)
+        public static readonly Color SurfaceColor = Color.FromRgb(243, 239, 232);      // #F3EFE8 (Warm architectural drafting vellum)
+        public static readonly Color PanelColor = Colors.White;                        // #FFFFFF (Clean drafting card & grid background)
+        public static readonly Color BorderColor = Color.FromRgb(217, 209, 195);       // #D9D1C3 (Drafting rule buff borders & grid lines)
+        public static readonly Color TextColor = Color.FromRgb(23, 28, 36);            // #171C24 (Drafting ink black)
+        public static readonly Color MutedColor = Color.FromRgb(105, 100, 88);         // #696458 (Pencil lead sepia notes)
+        public static readonly Color AccentColor = Color.FromRgb(27, 88, 156);         // #1B589C (Prussian cobalt blueprint ink)
+        public static readonly Color AccentHoverColor = Color.FromRgb(20, 67, 119);    // #144377 (Deep cobalt hover)
+        public static readonly Color AccentSoftColor = Color.FromRgb(228, 237, 247);   // #E4EDF7 (Blueprint wash row selection)
+        public static readonly Color DangerColor = Color.FromRgb(185, 28, 28);         // #B91C1C (Red correction pen alert)
+        public static readonly Color DangerSoftColor = Color.FromRgb(252, 226, 226);   // #FCE2E2 (Crimson deviation alert background)
+        public static readonly Color WarningColor = Color.FromRgb(146, 64, 14);        // #92400E (Ochre review / medium)
+        public static readonly Color WarningSoftColor = Color.FromRgb(253, 241, 214);  // #FDF1D6 (Ochre review background)
+        public static readonly Color SuccessColor = Color.FromRgb(21, 101, 53);        // #156535 (Exact / High survey precision)
+        public static readonly Color SuccessSoftColor = Color.FromRgb(225, 242, 231);  // #E1F2E7 (Exact / High background)
+        public static readonly Color PurpleColor = Color.FromRgb(90, 58, 139);         // #5A3A8B (Blueprint indigo / structure)
+        public static readonly Color PurpleSoftColor = Color.FromRgb(239, 235, 248);   // #EFEBF8 (Blueprint indigo background)
 
         // --- Brushes (Frozen for WPF performance and cross-thread usage) ---
         public static readonly SolidColorBrush HeaderBrush = CreateFrozenBrush(HeaderColor);
@@ -62,7 +62,8 @@ namespace C3DProTools.Features.Workspace
         public static readonly SolidColorBrush PurpleSoftBrush = CreateFrozenBrush(PurpleSoftColor);
 
         // --- Typography ---
-        public static readonly FontFamily Segoe = new FontFamily("Segoe UI");
+        public static readonly FontFamily Segoe = new FontFamily("Aptos, Segoe UI");
+        public static readonly FontFamily Mono = new FontFamily("Consolas, Cascadia Mono");
         public const double BaseFontSize = 12.0;    // 9pt
         public const double SmallFontSize = 11.0;   // 8pt
         public const double HeadingFontSize = 14.0; // 10.5pt
@@ -85,7 +86,7 @@ namespace C3DProTools.Features.Workspace
                 StepState.OutOfDate => (WarningBrush, WarningSoftBrush),
                 StepState.HasIssues => (DangerBrush, DangerSoftBrush),
                 StepState.NotBuilt => (AccentBrush, AccentSoftBrush),
-                StepState.NotApplicable => (MutedBrush, CreateFrozenBrush(Color.FromRgb(241, 245, 249))),
+                StepState.NotApplicable => (MutedBrush, CreateFrozenBrush(Color.FromRgb(234, 229, 220))),
                 _ => (MutedBrush, BorderBrush)
             };
         }
@@ -106,9 +107,9 @@ namespace C3DProTools.Features.Workspace
             return status switch
             {
                 OperationStatus.Succeeded => (SuccessBrush, SuccessSoftBrush, SuccessBrush),
-                OperationStatus.NoChange => (AccentBrush, CreateFrozenBrush(Color.FromRgb(239, 246, 255)), AccentBrush),
+                OperationStatus.NoChange => (AccentBrush, AccentSoftBrush, AccentBrush),
                 OperationStatus.Rejected => (DangerBrush, DangerSoftBrush, DangerBrush),
-                OperationStatus.Cancelled => (MutedBrush, CreateFrozenBrush(Color.FromRgb(241, 245, 249)), BorderBrush),
+                OperationStatus.Cancelled => (MutedBrush, CreateFrozenBrush(Color.FromRgb(234, 229, 220)), BorderBrush),
                 OperationStatus.RolledBack => (DangerBrush, DangerSoftBrush, DangerBrush),
                 OperationStatus.PartiallySucceeded => (WarningBrush, WarningSoftBrush, WarningBrush),
                 OperationStatus.OutcomeUnknown => (PurpleBrush, PurpleSoftBrush, PurpleBrush),
