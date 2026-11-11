@@ -97,6 +97,7 @@ namespace C3DProTools
         public bool MatchProfileLabels { get; set; } = true;
         public bool MatchElevation { get; set; } = true;
         public bool StylesInView { get; set; }
+        public bool BandRolesByName { get; set; } = true;
         public bool CreateMissing { get; set; } = true;
         public OtherProfileAction Others { get; set; } = OtherProfileAction.Hide;
         public double Margin { get; set; } = 1.0;

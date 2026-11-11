@@ -119,5 +119,28 @@ namespace C3DProTools
             if (inside) ranges.Add((start, s1));
             return ranges;
         }
+        // Band style names: which profiles a data band is meant to show. Roles as ints: 0 none, 1 existing, 2 proposed, 3 top.
+        private static bool Word(string name, string pattern) =>
+            Regex.IsMatch(name ?? "", $@"(^|[^A-Za-z])({pattern})([^A-Za-z]|$)", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// The profiles a profile data band shows, told by its style name: "Existing Levels", "NGL", "EG" the existing ground;
+        /// "Proposed Levels", "FGL", "Design" the proposed ground; "Top of Duct", "TOP", "TOD" the top of pipe / duct. A
+        /// difference band ("Level Difference", "Depth", "Cover", "Cut / Fill") compares the ground (existing when its name
+        /// says so, else proposed) as profile 1 with the top as profile 2. Null for a name that says none of these (chainage,
+        /// title), whose profiles are left as recorded.
+        /// </summary>
+        public static (int p1, int p2)? BandRolesFromName(string styleName)
+        {
+            bool existing = Word(styleName, "EXISTING|EXIST|NGL|EGL|EG|OGL|NATURAL");
+            bool proposed = Word(styleName, "PROPOSED|PROP|FGL|FG|DESIGN|FINISHED");
+            bool top = Word(styleName, "TOP|TOD|DUCT|DUCTS|PIPE|PIPES");
+            bool difference = Word(styleName, "DIFFERENCE|DIFF|DEPTH|COVER|CUT|FILL|CUT/FILL");
+            if (difference) return (existing && !proposed ? 1 : 2, 3);
+            if (existing && !proposed && !top) return (1, 1);
+            if (proposed && !existing && !top) return (2, 2);
+            if (top && !existing && !proposed) return (3, 3);
+            return null;
+        }
     }
 }
