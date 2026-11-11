@@ -51,6 +51,7 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 
 | Tool (command) | What it does | State | Main code |
 |---|---|---|---|
+| Profile views run (`C3DPROPV`) | Report / Top / Dims / All for chosen alignments, no dialog, settings in `C3DPro.project.json` (`profileViews`) | **Drawing test passes** (tile 124 copy: 41 TOP fitted, then 56 of 57 fit; 41 clearance DIMs). Cover DIMs need the surface names set | `Features/ProfileTool/ProfileViewsRun.cs` |
 | Profile View Tools (`ProfileViewTools`) | Match one profile view's style, bands and profiles to others; split long views | Match: **Problem** reported 11 Nov, two fixes merged, not confirmed by you. Split: **Unknown** | `ProfileViewMatch.cs`, `ProfileViewSplit.cs`, `ProfileViewRecipe.cs` |
 | Profile DIMs (`PROFILEDIMS`) | Cover and clearance dimensions in profile views | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
 | Annotation Studio (`AnnotationStudio`) | Add labels, arrange them inside viewports, reset, rename parts | Reset: **Works**. Arrange: **Problem**, result still not what you want (best measured: 21 of 25 labels placed). Rename: **Unknown** | `FormAnnotationStudio.cs`, `AnnotArranger.cs`, `LabelLayout.cs`, `AnnotNaming.cs` |
