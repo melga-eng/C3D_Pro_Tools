@@ -183,14 +183,18 @@ namespace C3DProTools.ProfileTool
                 foreach (var f in fits)
                 {
                     if (f.Primary == null || f.Result.Points.Count < 2) { report.Skipped++; continue; }
+                    // One nested transaction per profile: a failure after Clear restores that profile, not an empty one.
+                    using var one = tr.TransactionManager.StartTransaction();
                     try
                     {
-                        var p = (Profile)tr.GetObject(f.Primary.Id, OpenMode.ForWrite);
+                        var p = (Profile)one.GetObject(f.Primary.Id, OpenMode.ForWrite);
                         WriteTangents(p, f.Result.Points);
+                        one.Commit();
                         report.Done++;
                     }
                     catch (Exception ex)
                     {
+                        one.Abort();
                         report.Skipped++;
                         report.Notes.Add($"{f.Alignment} / {f.Primary.Name}: {ex.Message}");
                     }
@@ -218,9 +222,11 @@ namespace C3DProTools.ProfileTool
                 foreach (var f in fits)
                 {
                     if (f.Result.Points.Count < 2) { report.Skipped++; report.Notes.Add($"{f.Alignment}: no ducts"); continue; }
+                    // Nested per alignment: a profile whose tangents fail is not left behind half made.
+                    using var one = tr.TransactionManager.StartTransaction();
                     try
                     {
-                        var al = (Alignment)tr.GetObject(f.AlignmentId, OpenMode.ForRead);
+                        var al = (Alignment)one.GetObject(f.AlignmentId, OpenMode.ForRead);
                         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (ObjectId pid in al.GetProfileIds())
                             if (tr.GetObject(pid, OpenMode.ForRead) is Profile ep) taken.Add(ep.Name);
@@ -230,12 +236,14 @@ namespace C3DProTools.ProfileTool
                         for (int i = 1; taken.Contains(name); i++) name = $"{baseName} ({i})";
 
                         ObjectId id = Profile.CreateByLayout(name, f.AlignmentId, layer, o.StyleId, o.LabelSetId);
-                        var p = (Profile)tr.GetObject(id, OpenMode.ForWrite);
+                        var p = (Profile)one.GetObject(id, OpenMode.ForWrite);
                         WriteTangents(p, f.Result.Points);
+                        one.Commit();
                         report.Done++;
                     }
                     catch (Exception ex)
                     {
+                        one.Abort();
                         report.Skipped++;
                         report.Notes.Add($"{f.Alignment}: {ex.Message}");
                     }

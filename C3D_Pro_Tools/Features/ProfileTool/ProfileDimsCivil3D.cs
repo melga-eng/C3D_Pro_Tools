@@ -90,9 +90,9 @@ namespace C3DProTools.ProfileTool
         public const string XDataApp = "C3DPRO_DIM";
 
         /// <summary>Reads the drawing (read-only) and plans every profile view.</summary>
-        public static List<ViewDims> Plan(Document doc, ProfileDimSettings settings, out List<OperationIssue> sceneIssues)
+        public static List<ViewDims> Plan(Document doc, ProfileDimSettings settings, out List<OperationIssue> sceneIssues, ProfileRoleRules roleRules = null)
         {
-            SheetScene scene = new SheetSceneCivil3D().Read(new SheetSceneRequest { Drawing = DrawingRefs3D.Identity(doc) }, CancellationToken.None);
+            SheetScene scene = new SheetSceneCivil3D(roleRules: roleRules).Read(new SheetSceneRequest { Drawing = DrawingRefs3D.Identity(doc) }, CancellationToken.None);
             sceneIssues = scene.Issues.ToList();
             ProfileDimOptions options = settings.Options();
             Database db = doc.Database;
