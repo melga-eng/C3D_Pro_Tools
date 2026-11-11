@@ -286,9 +286,9 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 bool surface = type == ProfileType.EG;
                 if (surface)
                 {
-                    string source = surfaces.SourceOf(p, al);
-                    if (source.Length > 0 && source.Equals(_rules.ExistingSurface, StringComparison.OrdinalIgnoreCase)) role = SceneProfileRole.Existing;
-                    else if (source.Length > 0 && source.Equals(_rules.ProposedSurface, StringComparison.OrdinalIgnoreCase)) role = SceneProfileRole.Proposed;
+                    ProfileRole r = surfaces.RoleOf(p, al, _rules);
+                    if (r == ProfileRole.Existing) role = SceneProfileRole.Existing;
+                    else if (r == ProfileRole.Proposed) role = SceneProfileRole.Proposed;
                 }
                 else if (ProfileViewMatch.IsTopName(p.Name, _rules)) role = SceneProfileRole.Top;
                 return new SceneProfile(DrawingRefs3D.Ref(p.ObjectId), p.Name, role, SampleRuns(p, surface));

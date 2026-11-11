@@ -34,6 +34,7 @@
 		<Compile Include="..\..\C3D_Pro_Tools\ArrangeCase.cs" Link="Engine\ArrangeCase.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\SheetRefs.cs" Link="Engine\SheetRefs.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\BatchTargets.cs" Link="Engine\BatchTargets.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\Features\ProfileTool\TopProfileMath.cs" Link="Engine\TopProfileMath.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\FormCoverPreview.cs" Link="Forms\FormCoverPreview.cs" />
 		<!-- Contracts: compiled here, where no Autodesk assembly is referenced, so an Autodesk dependency fails the build. -->
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Networks\Contracts\**\*.cs" Link="Contracts\Networks\%(RecursiveDir)%(Filename)%(Extension)" />

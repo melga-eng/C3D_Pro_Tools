@@ -205,8 +205,28 @@ namespace C3DProTools
             panelSource.Items.Add(new RibbonSeparator());
             panelSource.Items.Add(cleanerButton);
 
+            // --- 6. Batch Tools panel: profiles by surface, TOP profiles on ducts, label style values ---
+            RibbonPanelSource batchSource = new RibbonPanelSource { Title = "Batch Tools" };
+            customTab.Panels.Add(new RibbonPanel { Source = batchSource });
+            batchSource.Items.Add(Large("Profile\nManager", "PROFILEMGR ", "Profiles of every alignment by source surface: delete by surface, create surface profiles on all alignments."));
+            batchSource.Items.Add(new RibbonSeparator());
+            batchSource.Items.Add(Large("Profile Views\n& TOP Fit", "PVMGR ", "Every profile view with its TOP profile: fit TOP profiles to the duct tops, create the missing ones."));
+            batchSource.Items.Add(new RibbonSeparator());
+            batchSource.Items.Add(Large("Label Style\nValues", "STYLEMGR ", "Batch-set label style values (text heights, arrowheads, ...) for styles by category or from labels you pick."));
+
             isBuilt = true;
         }
+
+        private static RibbonButton Large(string text, string command, string tip) => new RibbonButton
+        {
+            Text = text,
+            ShowText = true,
+            Size = RibbonItemSize.Large,
+            Orientation = System.Windows.Controls.Orientation.Vertical,
+            CommandParameter = command,
+            ToolTip = tip,
+            CommandHandler = new RibbonCommandHandler()
+        };
     }
 
     public class RibbonCommandHandler : System.Windows.Input.ICommand

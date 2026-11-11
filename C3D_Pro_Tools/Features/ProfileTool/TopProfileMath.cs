@@ -25,7 +25,7 @@ namespace C3DProTools.ProfileTool
         public override string ToString() => $"{Station:F3}  {Elevation:F3}";
     }
 
-    public sealed class TopProfileResult
+    public sealed class TopFitResult
     {
         public List<StationElevation> Points = new();
         public List<string> Warnings = new();
@@ -44,9 +44,9 @@ namespace C3DProTools.ProfileTool
         public const double MaxGap = 8.0;
         private const double OverlapReport = 0.05;
 
-        public static TopProfileResult Compute(IEnumerable<DuctSegment> ducts, double alignStart, double alignEnd)
+        public static TopFitResult Compute(IEnumerable<DuctSegment> ducts, double alignStart, double alignEnd)
         {
-            var result = new TopProfileResult();
+            var result = new TopFitResult();
             var segs = ducts.Where(d => d.Length > StationEps && d.S1 > alignStart && d.S0 < alignEnd).ToList();
             if (segs.Count == 0) return result;
 

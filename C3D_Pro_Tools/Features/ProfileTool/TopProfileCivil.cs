@@ -40,7 +40,7 @@ namespace C3DProTools.ProfileTool
         public string Alignment;
         public double Start, End;
         public List<DuctInfo> Ducts = new();
-        public TopProfileResult Result = new();
+        public TopFitResult Result = new();
         public List<ProfileRef> Tops = new();
         public ProfileRef Primary;
         public double? MaxDiff;
