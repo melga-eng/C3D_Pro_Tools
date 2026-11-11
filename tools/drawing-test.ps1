@@ -25,6 +25,7 @@ param(
     [string[]]$Reject = @('Unhandled', 'failed:', 'Unknown command'),
     [ValidateSet('Debug', 'Release')] [string]$Configuration = 'Debug',
     [int]$TimeoutSeconds = 300,
+    [string]$Settings = '',
     [switch]$KeepResult
 )
 
@@ -45,9 +46,9 @@ $dwg = Join-Path $run 'test.dwg'
 Copy-Item -LiteralPath $Drawing $dwg
 Copy-Item "$pluginOut\*" "$run\bin" -Recurse
 
-# A project settings file beside the drawing travels with it.
-$settings = Join-Path (Split-Path $Drawing -Parent) 'C3DPro.project.json'
-if (Test-Path -LiteralPath $settings) { Copy-Item -LiteralPath $settings $run }
+# The project settings: -Settings when given, otherwise the file beside the drawing.
+if (-not $Settings) { $Settings = Join-Path (Split-Path $Drawing -Parent) 'C3DPro.project.json' }
+if (Test-Path -LiteralPath $Settings) { Copy-Item -LiteralPath $Settings (Join-Path $run 'C3DPro.project.json') }
 
 $dll = (Join-Path $run 'bin\C3D_Pro_Tools.dll') -replace '\\', '/'
 $lines = @('SECURELOAD', '0', 'NETLOAD', "`"$dll`"")

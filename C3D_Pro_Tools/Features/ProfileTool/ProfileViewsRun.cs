@@ -43,6 +43,10 @@ namespace C3DProTools.ProfileTool
         public string ProposedSurface { get; set; } = "";
         public ProfileDimSettings Dims { get; set; } = new ProfileDimSettings();
 
+        /// <summary>Match: a Profile View Tools template name, or the name of a finished view in the drawing to copy from.</summary>
+        public string MatchTemplate { get; set; } = "";
+        public string MatchSourceView { get; set; } = "";
+
         /// <summary>Role rules with this preset's surface names over the saved ones; null when the preset names none.</summary>
         public ProfileRoleRules RoleRules()
         {
@@ -106,8 +110,8 @@ namespace C3DProTools.ProfileTool
             if (doc == null) return;
             Editor ed = doc.Editor;
 
-            var kw = new PromptKeywordOptions("\nProfile views [Report/Top/Dims/All] <Report>: ") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Top", "Dims", "All" }) kw.Keywords.Add(k);
+            var kw = new PromptKeywordOptions("\nProfile views [Report/Top/Match/Dims/All] <Report>: ") { AllowNone = true };
+            foreach (string k in new[] { "Report", "Top", "Match", "Dims", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -131,7 +135,9 @@ namespace C3DProTools.ProfileTool
                     throw new InvalidOperationException($"the drawing units are {doc.Database.Insunits}; C3DPROPV works in metre drawings only. Nothing was changed.");
                 CivilDocument civil = CivilDocument.GetCivilDocument(doc.Database);
                 bool doTop = mode == "Top" || mode == "All", doDims = mode == "Dims" || mode == "All";
+                bool doMatch = mode == "Match" || (mode == "All" && (s.MatchTemplate.Length > 0 || s.MatchSourceView.Length > 0));
                 TopStep(doc, civil, s, doTop, log);
+                if (doMatch || mode == "Report") MatchStep(doc, civil, s, doMatch, log);
                 DimStep(doc, s, doDims, log);
             }
             catch (System.Exception ex)
@@ -202,6 +208,86 @@ namespace C3DProTools.ProfileTool
                 if (tr.GetObject(id, OpenMode.ForRead) is StyleBase st && string.Equals(st.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))
                     return id;
             return ObjectId.Null;
+        }
+
+        /// <summary>
+        /// Matches the chosen alignments' views to a template or a source view. The role surfaces come from this preset (or the
+        /// names saved in Profile View Tools), never from the template, whose names belong to the drawing it was captured in.
+        /// </summary>
+        private static void MatchStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
+        {
+            ProfileViewToolsSettings saved = ProfileViewToolsSettings.Load();
+            ProfileRoleRules rules = s.RoleRules() ?? saved.Rules ?? new ProfileRoleRules();
+            if (s.MatchTemplate.Length == 0 && s.MatchSourceView.Length == 0)
+            {
+                if (write) log.AppendLine("Match: set matchTemplate or matchSourceView in the profileViews settings.");
+                return;
+            }
+            var o = new MatchOptions
+            {
+                ViewStyle = saved.MatchViewStyle, Bands = saved.MatchBands, ProfileStyles = saved.MatchProfileStyles, ProfileLabels = saved.MatchProfileLabels,
+                Elevation = saved.MatchElevation, StylesInView = saved.StylesInView, BandRolesByName = saved.BandRolesByName, CreateMissing = saved.CreateMissing,
+                Others = saved.Others, Margin = saved.Margin, DatumIncrement = saved.DatumIncrement, TopPrefix = saved.TopPrefix,
+            };
+            var changes = new List<MatchChange>();
+            var problems = new List<string>();
+            Database db = doc.Database;
+            using (write ? doc.LockDocument() : null)
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                var surfaces = new ProfileViewMatch.Surfaces(tr, civil);
+                ObjectId sourceId = ObjectId.Null;
+                ProfileViewRecipe recipe;
+                List<(ObjectId id, string name, string alignment)> views = new();
+                foreach (ObjectId vid in ProfileViewMatch.AllViews(tr, db))
+                {
+                    if (tr.GetObject(vid, OpenMode.ForRead) is not Autodesk.Civil.DatabaseServices.ProfileView v) continue;
+                    string al = tr.GetObject(v.AlignmentId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Alignment a ? a.Name : "";
+                    views.Add((vid, v.Name, al));
+                }
+                if (s.MatchSourceView.Length > 0)
+                {
+                    var src = views.FirstOrDefault(v => string.Equals(v.name, s.MatchSourceView.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (src.id.IsNull) { log.AppendLine($"Match: no profile view named \"{s.MatchSourceView}\"."); return; }
+                    sourceId = src.id;
+                    recipe = ProfileViewMatch.Capture(tr, (Autodesk.Civil.DatabaseServices.ProfileView)tr.GetObject(src.id, OpenMode.ForRead), rules, surfaces);
+                }
+                else
+                {
+                    recipe = saved.Templates.FirstOrDefault(t => string.Equals(t.Name, s.MatchTemplate.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (recipe == null)
+                    {
+                        log.AppendLine($"Match: no template \"{s.MatchTemplate}\"; saved templates: {string.Join(", ", saved.Templates.Select(t => t.Name))}.");
+                        return;
+                    }
+                    recipe.Rules = rules.Copy();
+                }
+
+                foreach (ProfileRole role in ProfileViewMatch.Roles)
+                {
+                    string surface = role == ProfileRole.Existing ? rules.ExistingSurface : role == ProfileRole.Proposed ? rules.ProposedSurface : null;
+                    if (surface != null && surfaces.IdOf(surface).IsNull)
+                        problems.Add($"the {ProfileViewMatch.RoleName(role).ToLowerInvariant()} surface \"{surface}\" is not in the drawing, so bands meant for that profile keep what they show");
+                }
+
+                var targets = views.Where(v => v.id != sourceId && s.Includes(v.alignment)).ToList();
+                var log2 = new List<string>();
+                foreach (var t in targets)
+                {
+                    try { ProfileViewMatch.Apply(tr, civil, recipe, t.id, o, surfaces, write, changes, log2); }
+                    catch (System.Exception ex) { log2.Add($"{t.name}: {ex.Message}"); }
+                }
+                if (write) tr.Commit(); else tr.Abort();
+
+                int changed = changes.Select(c => c.View).Distinct().Count();
+                log.AppendLine($"Match{(write ? "" : " (preview)")} from {(sourceId.IsNull ? $"template \"{recipe.Name}\"" : $"view \"{s.MatchSourceView}\"")}: " +
+                               $"{targets.Count} views, {changed} {(write ? "changed" : "would change")}, {changes.Count} changes" +
+                               $"{(log2.Count > 0 ? $", {log2.Count} notes" : "")}.");
+                foreach (string p in problems) log.AppendLine($"Match: {p}.");
+                foreach (var g in changes.GroupBy(c => c.What.Split('"')[0].Trim()).OrderByDescending(g => g.Count()).Take(12))
+                    log.AppendLine($"  {g.Count(),4} x {g.Key}");
+                foreach (string n in log2.Take(20)) log.AppendLine($"  note: {n}");
+            }
         }
 
         private static List<string> SurfaceNames(Document doc)
