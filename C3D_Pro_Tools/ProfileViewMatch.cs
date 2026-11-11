@@ -40,6 +40,8 @@ namespace C3DProTools
         public bool ViewStyle = true, Bands = true, ProfileStyles = true, ProfileLabels = true, Elevation = true;
         /// <summary>Profile styles as the view's overrides (only that view) instead of on the profiles themselves.</summary>
         public bool StylesInView;
+        /// <summary>A data band's profiles follow its style name (Existing Levels, Proposed Levels, TOP OF DUCT, Level Difference) over what the source recorded.</summary>
+        public bool BandRolesByName = true;
         public bool CreateMissing = true;
         public OtherProfileAction Others = OtherProfileAction.Hide;
         public double Margin = 1.0;
@@ -410,7 +412,7 @@ namespace C3DProTools
             }
 
             // 3. Bands.
-            if (o.Bands && recipe.Bands.Count > 0) ApplyBands(tr, view, recipe, roleIds, write, Change, log);
+            if (o.Bands && recipe.Bands.Count > 0) ApplyBands(tr, view, recipe, roleIds, o.BandRolesByName, write, Change, log);
 
             // 4. Role profiles' styles, visibility and labels.
             Dictionary<ObjectId, ProfileOverride> overrides = new Dictionary<ObjectId, ProfileOverride>();
@@ -499,7 +501,7 @@ namespace C3DProTools
             return true;
         }
 
-        private static void ApplyBands(Transaction tr, ProfileView view, ProfileViewRecipe recipe, Dictionary<ProfileRole, ObjectId> roleIds, bool write,
+        private static void ApplyBands(Transaction tr, ProfileView view, ProfileViewRecipe recipe, Dictionary<ProfileRole, ObjectId> roleIds, bool byName, bool write,
             Action<string, string, string> change, List<string> log)
         {
             foreach (bool top in new[] { false, true })
@@ -545,8 +547,11 @@ namespace C3DProTools
                         if (h.LabelAtEndStation != w.LabelAtEnd) { change(label + " label at end", h.LabelAtEndStation ? "on" : "off", w.LabelAtEnd ? "on" : "off"); if (write) h.LabelAtEndStation = w.LabelAtEnd; }
                     }
                     catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                    SetProfile(label + " profile 1", w.Profile1, () => h.Profile1Id, id => h.Profile1Id = id);
-                    SetProfile(label + " profile 2", w.Profile2, () => h.Profile2Id, id => h.Profile2Id = id);
+                    (ProfileRole p1, ProfileRole p2) = (w.Profile1, w.Profile2);
+                    if (byName && w.BandType == nameof(BandType.ProfileData) && ProfileViewMath.BandRolesFromName(w.Style) is (int n1, int n2))
+                        (p1, p2) = ((ProfileRole)n1, (ProfileRole)n2);
+                    SetProfile(label + " profile 1", p1, () => h.Profile1Id, id => h.Profile1Id = id);
+                    SetProfile(label + " profile 2", p2, () => h.Profile2Id, id => h.Profile2Id = id);
                 }
                 if (write)
                 {

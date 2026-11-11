@@ -51,6 +51,7 @@ namespace C3DProTools
         private readonly CheckBox _chkViewStyle = ToolUi.Check("View style"), _chkBands = ToolUi.Check("Bands, and the profiles each band shows (by role)");
         private readonly CheckBox _chkProfileStyles = ToolUi.Check("Profile styles"), _chkLabels = ToolUi.Check("Profile labels");
         private readonly CheckBox _chkElevation = ToolUi.Check("Elevation range: fit the profiles and parts, plus");
+        private readonly CheckBox _chkBandsByName = ToolUi.Check("Band profiles by the band's name: Existing / NGL, Proposed, TOP OF DUCT; Level Difference = ground and TOP");
         private readonly CheckBox _chkInView = ToolUi.Check("Set profile styles in these views only (view overrides), not on the profiles");
         private readonly TextBox _txtMargin = ToolUi.Number(1, 50);
         /// <summary>Elevation ranges round outward to whole steps of this (m); 1, 2 or 5 offered, any positive number typed.</summary>
@@ -148,7 +149,8 @@ namespace C3DProTools
             (Panel host, TableLayoutPanel stack) = ToolUi.Page();
             TableLayoutPanel src = ToolUi.Card("Source", "The finished view (or a template saved from one). Its view style, bands, profile styles and labels are read by role.");
             ToolUi.Wide(src, ToolUi.Inline(_rbFromView, _cbSource, StyleUi.Secondary("Pick…", (s, e) => PickSource())));
-            ToolUi.Wide(src, ToolUi.Inline(_rbFromTemplate, _cbTemplate, StyleUi.Secondary("Save the source view as a template…", (s, e) => SaveTemplate())));
+            ToolUi.Wide(src, ToolUi.Inline(_rbFromTemplate, _cbTemplate, StyleUi.Secondary("Save the source view as a template…", (s, e) => SaveTemplate()),
+                StyleUi.Secondary("Update template from its source view", (s, e) => UpdateTemplate(TemplateChosen()))));
             ToolUi.Add(stack, src);
 
             TableLayoutPanel roles = ToolUi.Card("Roles",
@@ -170,6 +172,7 @@ namespace C3DProTools
             TableLayoutPanel what = ToolUi.Card("What to match");
             ToolUi.Wide(what, _chkViewStyle);
             ToolUi.Wide(what, _chkBands);
+            ToolUi.Wide(what, _chkBandsByName);
             ToolUi.Wide(what, _chkProfileStyles);
             ToolUi.Wide(what, _chkLabels);
             ToolUi.Wide(what, ToolUi.Inline(_chkElevation, _txtMargin, Muted("m above and below, rounded to whole"), _cbDatum, Muted("m")));
@@ -206,7 +209,8 @@ namespace C3DProTools
             foreach ((string name, string header, int w) in new[] { ("name", "Template", 30), ("source", "Recorded from", 30), ("when", "Saved", 15), ("what", "Contents", 60) })
                 _gridTemplates.Columns.Add(new DataGridViewTextBoxColumn { Name = name, HeaderText = header, FillWeight = w, SortMode = DataGridViewColumnSortMode.NotSortable });
             ToolUi.Wide(card, _gridTemplates);
-            ToolUi.Wide(card, ToolUi.Inline(StyleUi.Secondary("Rename…", (s, e) => RenameTemplate()), StyleUi.Secondary("Delete", (s, e) => DeleteTemplate())));
+            ToolUi.Wide(card, ToolUi.Inline(StyleUi.Secondary("Rename…", (s, e) => RenameTemplate()), StyleUi.Secondary("Delete", (s, e) => DeleteTemplate()),
+                StyleUi.Secondary("Update from its source view", (s, e) => UpdateTemplate(_gridTemplates.CurrentRow?.Tag as ProfileViewRecipe))));
             ToolUi.Add(stack, card);
             return host;
         }
@@ -395,6 +399,7 @@ namespace C3DProTools
             _chkLabels.Checked = _s.MatchProfileLabels;
             _chkElevation.Checked = _s.MatchElevation;
             _chkInView.Checked = _s.StylesInView;
+            _chkBandsByName.Checked = _s.BandRolesByName;
             _txtMargin.Text = ToolUi.Format(_s.Margin);
             if (_cbDatum.Items.Count == 0) _cbDatum.Items.AddRange(new object[] { "1", "2", "5" });
             _cbDatum.Text = ToolUi.Format(_s.DatumIncrement > 0 ? _s.DatumIncrement : 1);
@@ -441,6 +446,7 @@ namespace C3DProTools
             _s.MatchProfileLabels = _chkLabels.Checked;
             _s.MatchElevation = _chkElevation.Checked;
             _s.StylesInView = _chkInView.Checked;
+            _s.BandRolesByName = _chkBandsByName.Checked;
             if (ToolUi.TryNumber(_txtMargin, out double m) && m >= 0) _s.Margin = m;
             _s.DatumIncrement = Datum();
             _s.MatchZones = _chkMatchZones.Checked;
@@ -491,7 +497,7 @@ namespace C3DProTools
             return new MatchOptions
             {
                 ViewStyle = _chkViewStyle.Checked, Bands = _chkBands.Checked, ProfileStyles = _chkProfileStyles.Checked, ProfileLabels = _chkLabels.Checked,
-                Elevation = _chkElevation.Checked, StylesInView = _chkInView.Checked, CreateMissing = _chkCreate.Checked,
+                Elevation = _chkElevation.Checked, StylesInView = _chkInView.Checked, BandRolesByName = _chkBandsByName.Checked, CreateMissing = _chkCreate.Checked,
                 Others = _rbDelete.Checked ? OtherProfileAction.Delete : _rbHide.Checked ? OtherProfileAction.Hide : OtherProfileAction.Leave,
                 Margin = Math.Max(0, margin), DatumIncrement = Datum(), TopPrefix = _txtTopPrefix.Text
             };
@@ -581,7 +587,14 @@ namespace C3DProTools
         {
             if (_rbFromTemplate.Checked && TemplateChosen() is ProfileViewRecipe t)
             {
-                _lblRoles.Text = $"Template \"{t.Name}\": {t.Summary}.";
+                // The page's surfaces may be another drawing's: the template's own are offered when they are in this drawing.
+                if (_cbExisting.SelectedIndex < 0 && t.Rules != null) ToolUi.Select(_cbExisting, t.Rules.ExistingSurface);
+                if (_cbProposed.SelectedIndex < 0 && t.Rules != null) ToolUi.Select(_cbProposed, t.Rules.ProposedSurface);
+                List<string> lacking = ProfileViewMatch.Roles.Where(r => t.RoleOf(r) == null).Select(r => ProfileViewMatch.RoleName(r).ToLowerInvariant()).ToList();
+                bool sourceHere = _views.Any(v => v.Name.Equals(t.SourceView, StringComparison.OrdinalIgnoreCase));
+                _lblRoles.Text = $"Template \"{t.Name}\": {t.Summary}." + (lacking.Count == 0 ? "" :
+                    $"\nIt records no {string.Join(" and no ", lacking)} profile, so bands meant for it are left as they are." +
+                    (sourceHere ? $" Its source view \"{t.SourceView}\" is in this drawing: Update template from its source view." : " Save it again from a finished view."));
                 return;
             }
             if (!(_cbSource.SelectedItem is ViewItem source)) { _lblRoles.Text = "Choose the source view to see its profiles by role."; return; }
@@ -623,17 +636,32 @@ namespace C3DProTools
                 ProfileViewRecipe t = TemplateChosen();
                 if (t == null) { problem = "Choose a saved template (or a source view)."; return null; }
                 ProfileViewRecipe copy = System.Text.Json.JsonSerializer.Deserialize<ProfileViewRecipe>(System.Text.Json.JsonSerializer.Serialize(t));
-                copy.Rules = Rules();
+                ProfileRoleRules page = Rules();
+                // A surface not chosen on the page (none of this drawing's) falls back to the template's own.
+                if (page.ExistingSurface.Length == 0 && _surfaceNames.Contains(t.Rules?.ExistingSurface ?? "")) page.ExistingSurface = t.Rules.ExistingSurface;
+                if (page.ProposedSurface.Length == 0 && _surfaceNames.Contains(t.Rules?.ProposedSurface ?? "")) page.ProposedSurface = t.Rules.ProposedSurface;
+                copy.Rules = page;
+                if (page.ExistingSurface.Length == 0 && copy.RoleOf(ProfileRole.Existing) != null) problem = "Choose the existing ground surface under Roles (the template's is not in this drawing).";
+                else if (page.ProposedSurface.Length == 0 && copy.RoleOf(ProfileRole.Proposed) != null) problem = "Choose the proposed ground surface under Roles (the template's is not in this drawing).";
                 return copy;
             }
             if (!(_cbSource.SelectedItem is ViewItem source)) { problem = "Choose the source view (the finished one)."; return null; }
+            return CaptureView(source.Id, null, out problem, out _);
+        }
+
+        /// <summary>The view read now into a recipe, with the given roles (the page's when null). <paramref name="missing"/> names roles not found.</summary>
+        private ProfileViewRecipe CaptureView(ObjectId viewId, ProfileRoleRules rules, out string problem, out string missing)
+        {
+            problem = null; missing = null;
             Database db = AcadApp.DocumentManager.MdiActiveDocument.Database;
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
                 ProfileViewMatch.Surfaces surfaces = new ProfileViewMatch.Surfaces(tr, CivilApplication.ActiveDocument);
-                ProfileViewRecipe r = ProfileViewMatch.Capture(tr, (ProfileView)tr.GetObject(source.Id, OpenMode.ForRead), Rules(), surfaces);
+                ProfileViewRecipe r = ProfileViewMatch.Capture(tr, (ProfileView)tr.GetObject(viewId, OpenMode.ForRead), rules ?? Rules(), surfaces);
                 tr.Commit();
+                List<string> lacking = ProfileViewMatch.Roles.Where(x => r.RoleOf(x) == null).Select(x => ProfileViewMatch.RoleName(x).ToLowerInvariant()).ToList();
                 if (r.Roles.Count == 0) problem = "None of the source view's profiles has a role: check the surfaces and the top words under Roles.";
+                else if (lacking.Count > 0) missing = $"No {string.Join(" and no ", lacking)} profile was found in \"{r.SourceView}\" with these roles, so bands meant for it will not be set.";
                 return r;
             }
         }
@@ -772,8 +800,10 @@ namespace C3DProTools
         private void SaveTemplate()
         {
             if (!(_cbSource.SelectedItem is ViewItem source)) { MessageBox.Show(this, "Choose the source view first.", Text); return; }
-            ProfileViewRecipe r = Recipe(out string problem);
+            // Always the view itself, even while a template is the chosen source.
+            ProfileViewRecipe r = CaptureView(source.Id, null, out string problem, out string missing);
             if (r == null || problem != null) { MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (missing != null && MessageBox.Show(this, missing + "\n\nSave it anyway?", Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
             string name = FormPartsLists.AskText(this, "Save profile view template", "Name of the template:", source.Name);
             if (string.IsNullOrWhiteSpace(name)) return;
             r.Name = name.Trim();
@@ -788,6 +818,31 @@ namespace C3DProTools
             FillTemplateCombo(r.Name);
             _rbFromView.Checked = true;
             MessageBox.Show(this, $"Saved \"{r.Name}\": {r.Summary}.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>
+        /// Reads the template's source view again (it must be in this drawing) and replaces the template's contents, keeping
+        /// its name. Fixes a template saved while a role was not recognised.
+        /// </summary>
+        private void UpdateTemplate(ProfileViewRecipe t)
+        {
+            if (t == null) { MessageBox.Show(this, "Choose a template first.", Text); return; }
+            ViewItem source = _views.FirstOrDefault(v => v.Name.Equals(t.SourceView, StringComparison.OrdinalIgnoreCase));
+            if (source == null) { MessageBox.Show(this, $"The template's source view \"{t.SourceView}\" is not in this drawing.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            ProfileRoleRules rules = Rules();
+            if (rules.ExistingSurface.Length == 0 && _surfaceNames.Contains(t.Rules?.ExistingSurface ?? "")) rules.ExistingSurface = t.Rules.ExistingSurface;
+            if (rules.ProposedSurface.Length == 0 && _surfaceNames.Contains(t.Rules?.ProposedSurface ?? "")) rules.ProposedSurface = t.Rules.ProposedSurface;
+            ProfileViewRecipe r = CaptureView(source.Id, rules, out string problem, out string missing);
+            if (r == null || problem != null) { MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            string question = $"Update \"{t.Name}\" from \"{t.SourceView}\"?\n\nNow: {t.Summary}\nBecomes: {r.Summary}" + (missing != null ? "\n\n" + missing : "");
+            if (MessageBox.Show(this, question, Text, MessageBoxButtons.OKCancel, missing != null ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK) return;
+            r.Name = t.Name;
+            int i = _s.Templates.IndexOf(t);
+            if (i >= 0) _s.Templates[i] = r; else _s.Templates.Add(r);
+            _s.Save();
+            FillTemplates();
+            FillTemplateCombo(r.Name);
+            ShowSourceRoles();
         }
 
         private void RenameTemplate()
@@ -1063,7 +1118,7 @@ namespace C3DProTools
                                 _rbFromTemplate.Checked = true;
                             }
                             ProfileViewRecipe recipe = Recipe(out string problem);
-                            if (recipe == null || (problem != null && recipe.Roles.Count == 0)) { MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                            if (recipe == null || (problem != null && (recipe.Roles.Count == 0 || _rbFromTemplate.Checked))) { MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
                             ObjectId master = _rbFromView.Checked && _chkLink.Checked && _cbSource.SelectedItem is ViewItem s ? s.Id : ObjectId.Null;
                             List<ViewItem> targets = Targets().Where(t => !(_rbFromView.Checked && _cbSource.SelectedItem is ViewItem src && t.Id == src.Id)).ToList();
                             RunMatch(targets, recipe, master);
