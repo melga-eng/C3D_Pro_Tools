@@ -44,6 +44,12 @@ Read first: [docs/PRODUCT_MAP.md](docs/PRODUCT_MAP.md) (every tool, its state, i
 | **OpenAI Codex** | `C3D_Pro_Tools-codex` | The one end review of each task. Builds separate pure-logic pieces and drawing tests the user assigns |
 | **Google Antigravity** | `C3D_Pro_Tools-antigravity` | Visual design and screens, only for commands that already pass their drawing test, never against fake data |
 
+Claude can start the other two without their windows, always from their own folder:
+
+- Codex: `codex exec --sandbox read-only -o <answer.txt> "<task>"` for reviews (`--sandbox workspace-write` for builds).
+- Antigravity: `C:\Users\melga\.gemini\bin\agy.exe --print "<task>" --mode plan` (read-only). It cannot ask for permission in
+  this mode, so a task that needs shell commands needs its window, or an explicit allow-rule the user approves.
+
 Each agent switches branches only in its own folder. Two agents never edit the same file at the same time. Merging to `main`
 is allowed after the end review is clean; never push without the user asking.
 

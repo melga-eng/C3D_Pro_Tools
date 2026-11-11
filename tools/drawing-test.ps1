@@ -53,7 +53,9 @@ $dll = (Join-Path $run 'bin\C3D_Pro_Tools.dll') -replace '\\', '/'
 $lines = @('SECURELOAD', '0', 'NETLOAD', "`"$dll`"")
 $lines += Get-Content -LiteralPath $Script
 if ($KeepResult) { $lines += @('_QSAVE') }
-$lines += @('(princ "\nC3DPRO-TEST-END")', '_QUIT', '_Y')
+# The marker is joined at run time, so the echoed command line itself never contains it.
+$marker = 'C3DPRO-TEST-END'
+$lines += @('(princ (strcat "\n" "C3DPRO-" "TEST-END"))', '_QUIT', '_Y')
 $scr = Join-Path $run 'run.scr'
 Set-Content -LiteralPath $scr -Value $lines -Encoding ascii
 
@@ -62,16 +64,25 @@ $arguments = "/i `"$dwg`" /s `"$scr`" /loadmodule `"$acadDir\AecBase.dbx`" /prod
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $proc = Start-Process -FilePath $console -ArgumentList $arguments -RedirectStandardOutput $log `
     -RedirectStandardError "$run\err.txt" -WindowStyle Hidden -PassThru
+$null = $proc.Handle   # keeps the handle so ExitCode is readable after the process ends
 
 $timedOut = -not $proc.WaitForExit($TimeoutSeconds * 1000)
-if ($timedOut) { $proc.Kill() }
+if ($timedOut) { $proc.Kill(); $proc.WaitForExit() }
 $seconds = [int]$clock.Elapsed.TotalSeconds
 
 $text = (Get-Content -LiteralPath $log -Encoding Unicode -ErrorAction SilentlyContinue) -join "`n"
+$errText = (Get-Content -LiteralPath "$run\err.txt" -ErrorAction SilentlyContinue) -join "`n"
 $problems = @()
-if ($timedOut -and $text -notmatch 'C3DPRO-TEST-END') {
-    $problems += "Stopped at the $TimeoutSeconds s timeout (a command is waiting for a form or a pick)."
+if ($timedOut) {
+    $problems += "Stopped at the $TimeoutSeconds s timeout (a command is waiting for a form or a pick, or Civil 3D hung)."
 }
+elseif ($proc.ExitCode -ne 0) {
+    $problems += "Civil 3D console exited with code $($proc.ExitCode)."
+}
+if ($text -notmatch "(?m)^\s*$marker") {
+    $problems += 'The script did not reach its end (completion marker missing).'
+}
+if ($errText.Trim()) { $problems += "Error output: $($errText.Trim())" }
 foreach ($e in $Expect) { if ($text -notmatch [regex]::Escape($e)) { $problems += "Expected text missing: $e" } }
 foreach ($r in $Reject) { if ($text -match [regex]::Escape($r)) { $problems += "Unwanted text found: $r" } }
 
