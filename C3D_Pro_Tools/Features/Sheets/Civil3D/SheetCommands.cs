@@ -153,6 +153,77 @@ namespace C3DProTools.Features.Sheets.Civil3D
         /// <summary>The digest of the last previewed plan, by drawing session, rule set and sheets (this Civil 3D session only).</summary>
         private static readonly Dictionary<string, string> PreviewedPlans = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        /// <summary>The last build preview per drawing session and sheet list, for C3DProBuildSheets Apply.</summary>
+        private static readonly Dictionary<string, BuildSheetsPreview> BuildPreviews = new Dictionary<string, BuildSheetsPreview>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The build through the same service the workspace uses (PlanLabels and Arrange so far), for testing from the command
+        /// line: "Preview" (the default) writes the preview to %TEMP%\C3DProBuildSheets.txt; "Apply" writes the last preview of
+        /// the same sheets, and only if nothing changed since. Rules come from C3DPro.project.json beside the drawing.
+        /// </summary>
+        [CommandMethod("C3DProBuildSheets")]
+        public void BuildSheets()
+        {
+            Document doc = AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            var ed = doc.Editor;
+            try
+            {
+                var kw = new Autodesk.AutoCAD.EditorInput.PromptKeywordOptions("\nBuild sheets [Preview/Apply] <Preview>: ") { AllowNone = true };
+                kw.Keywords.Add("Preview"); kw.Keywords.Add("Apply");
+                kw.Keywords.Default = "Preview";
+                var r = ed.GetKeywords(kw);
+                if (r.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.OK && r.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.None) return;
+                bool apply = r.StringResult == "Apply";
+                var sr = ed.GetString(new Autodesk.AutoCAD.EditorInput.PromptStringOptions("\nSheets (comma separated, Enter for every plan sheet): ") { AllowSpaces = true });
+                if (sr.Status != Autodesk.AutoCAD.EditorInput.PromptStatus.OK) return;
+                List<string> layouts = (sr.StringResult ?? "").Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+
+                SheetProductionService service = new SheetProductionService();
+                DrawingIdentity identity = DrawingRefs3D.Identity(doc);
+                string key = identity.SessionKey + "|" + string.Join(",", layouts.Select(l => l.ToUpperInvariant()).OrderBy(l => l));
+                StringBuilder b = new StringBuilder();
+                b.AppendLine($"Build sheets for {doc.Name} ({(apply ? "apply" : "preview")})");
+
+                if (!apply)
+                {
+                    BuildSheetsRequest request = new BuildSheetsRequest
+                    {
+                        Drawing = identity, Layouts = layouts, Steps = new HashSet<BuildStep> { BuildStep.PlanLabels, BuildStep.Arrange }, Rules = null
+                    };
+                    BuildSheetsPreview p = service.PreviewAsync(request, null, CancellationToken.None).GetAwaiter().GetResult();
+                    BuildPreviews[key] = p;
+                    b.AppendLine($"Preview: {p.Status}, {p.Items.Count} sheet(s), stamp {p.SceneStamp}");
+                    foreach (OperationIssue i in p.Issues) b.AppendLine($"  {i.Severity} {i.Code} {i.Layout} {i.Object}: {i.Message}");
+                    foreach (BuildItem item in p.Items)
+                    {
+                        b.AppendLine($"{item.ItemKey}: {item.Changes.Count} change(s)");
+                        foreach (PlannedChange c in item.Changes.Take(300)) b.AppendLine($"  {c.ChangeId}  {c.Step}  {c.Kind}  {c.SourceKey}  {c.Description}");
+                    }
+                }
+                else if (!BuildPreviews.TryGetValue(key, out BuildSheetsPreview previewed))
+                    b.AppendLine("There is no preview of these sheets yet: run Preview first.");
+                else
+                {
+                    BuildSheetsResult result = service.ApplyAsync(new BuildSheetsApplyRequest { Preview = previewed }, null, CancellationToken.None).GetAwaiter().GetResult();
+                    BuildPreviews.Remove(key);
+                    b.AppendLine($"Apply: {result.Status}");
+                    foreach (OperationIssue i in result.Issues) b.AppendLine($"  {i.Severity} {i.Code}: {i.Message}");
+                    foreach (BuildItemOutcome o in result.Items)
+                    {
+                        b.AppendLine($"  {o.ItemKey}: {o.Status}, added {o.Added}, arranged {o.Updated}, removed {o.Removed}");
+                        foreach (OperationIssue i in o.Issues) b.AppendLine($"    {i.Severity} {i.Code}: {i.Message}");
+                    }
+                }
+                Finish(doc, b, "C3DProBuildSheets.txt");
+            }
+            catch (System.Exception ex)
+            {
+                C3DProLogger.Error("Build sheets failed", ex);
+                ed.WriteMessage($"\nBuild sheets failed: {ex.Message}\n");
+            }
+        }
+
         private static void Finish(Document doc, StringBuilder b, string fileName)
         {
             string file = Path.Combine(Path.GetTempPath(), fileName);

@@ -273,6 +273,33 @@ Placement uses the existing `LabelPlanner` (paper mm, viewport frame), with pinn
 - **The command `C3DProPlanLabels`:** Preview, the default, writes the plan to `%TEMP%\C3DProPlanLabels.txt`; Apply writes it.
   Sheet names limit it to those sheets. Rules come from `C3DPro.project.json` beside the drawing.
 
+### The build so far (`BuildSheetsPlanner`, `BuildSheetsCivil3D`, `SheetProductionService`)
+
+- **Steps built:** PlanLabels and Arrange. Any other step requested gives an Info `sheets.step.notBuilt` and is left out.
+- **One item per plan sheet, in one transaction:** that sheet's PlanLabels changes, then **Arrange**, then the build records.
+  - Arrange is the Annotation Studio arranger, with its saved settings. It may move only that sheet's unpinned tool labels,
+    including those just added. Pinned and hand-placed labels are obstacles. Styles of rules with `Leader` are dragged.
+  - After arranging, every movable label's tag is re-recorded, so the tool's own move is never taken for the user's.
+  - Labels with no clear place stay where they are (Warning `sheets.arrange.unresolved`).
+- **The preview's `SceneStamp`** is the PlanLabels digest of the joined items, plus the requested steps. For each sheet
+  being arranged, it also covers everything Arrange reads:
+  - every label on the sheet: its placement and rotation, and whether it is a tool label or pinned
+  - the fingerprint of every label style used there
+  - every network part the sheet shows
+  - the adapter's arrange context: the saved Annotation Studio arrange settings, and the model text, multileaders and
+    leaders inside the sheets' viewports
+
+  A sheet whose labels use a style that can't be fingerprinted is not arranged (`sheets.scene.fingerprintIncomplete`). Apply plans again and writes only when the stamp is equal
+  (otherwise `sheets.preview.stale`).
+- **Rules:** a request without rules uses the project's single rule set from `C3DPro.project.json`.
+- **Apply from the palette** runs in the document's command context, so a build is one UNDO step.
+- **The overview** shows a state for each plan sheet:
+  - PlanLabels: NotBuilt, OutOfDate, Built or NotApplicable, from whether changes are planned and tool labels exist
+  - Arrange: Built when a build recorded it and nothing is planned
+  - other steps and profile sheets: NotApplicable for now
+- **Pin and Release are not built yet:** `PreviewPinAsync` says so.
+- **The command `C3DProBuildSheets`** (Preview, or Apply) runs this service from the command line, for live tests.
+
 ## 5. Build steps and the inventory
 
 Every item on the target sheets maps to one step, one owner and one acceptance check.
@@ -806,3 +833,23 @@ Review 2 found review 1's items 1, 2 and 4 to 8 resolved, and items 3 and 5 part
 | 3 | high · Apply writes a newly generated, unreviewed plan | Apply plans again and writes only when the plan's digest (`PlanLabelPlanner.Digest`: contract version, every rule field, every change, the geometry of every labelled part, the placement of every removed label, the fingerprints of the styles used, and every plan viewport outline) equals the last preview's for that drawing, rule set and sheets. Otherwise nothing is written, and the new plan becomes the preview to review (`sheets.preview.planChanged`) |
 | 4 | medium · Multiple rule sets silently select the first | With several rule sets, the command asks for one by name. An unknown name plans nothing (`sheets.rules.ambiguous`) |
 | 5 | medium · Incomplete fingerprints compare as unchanged | A rule that uses a style whose fingerprint is incomplete plans nothing, and its labels are left as they are (Error `sheets.scene.fingerprintIncomplete`, naming the style), just as for a missing style. So two incomplete reads around an edit can never let Apply through |
+
+## Code review of `feature/build-sheets`
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | high · Build-record keys contain the illegal character `|` | The key is the step plus a hex digest of the layout name (`BuildXData.RecordKey`). The layout and step are stored in the record's data, and `ReadRecords` reads them from there |
+| 2 | high · The stamp omits inputs used by Arrange | The stamp now covers every label on an arranged sheet (placement, rotation, target), the fingerprints of the styles used there, the network parts the sheet shows, and the adapter's arrange context (saved settings, model text and leaders). A sheet with an unreadable style is not arranged |
+| 3 | high · Stale validation happens before the command context and the lock | Apply runs whole inside the command context (`ApplyNow`). It checks that the previewed drawing is the active one, takes the lock, plans again and compares the stamp, and only then writes |
+| 4 | medium · Arrange reselects duplicate-tag labels | Arrange and `BuildSheetsPlanner.Movable` keep only the lowest handle of each identity. Copies stay put as obstacles |
+| 5 | medium · Cancellation during revalidation is reported as stale | A cancelled re-plan gives a `Cancelled` result, with nothing written |
+
+### Re-review
+
+The re-review found items 1, 3, 4 and 5 resolved and item 2 partly resolved. It added one finding:
+
+| # | Finding | Change |
+|---|---|---|
+| 2 | high · Crossing obstacles can evade stale detection | Nothing that reaches the stamp is filtered by viewport anymore. The planner hashes every network part in the drawing (plan position and elevations of both ends, outer width and height; structures with elevation). The adapter's arrange context fingerprints every obstacle exactly as Arrange's own reader (`AnnotScene.Read`, profiles included) returns it: part outlines (curved pipes sampled, structure footprints), model text, tables, framed callouts, multileaders, leaders, the other Civil 3D labels' extents, and each profile view's box, band area and drawn parts. Trade-off: editing any obstacle anywhere between Preview and Apply makes the preview stale. That is the safe side |
+| 6 | high · Apply does not reload project-sourced rules | The preview keeps the caller's request as sent (`Rules` empty means the project's rules). Apply's re-plan loads `C3DPro.project.json` again, and the rules are part of the stamp, so an edit after Preview gives `sheets.preview.stale`. Apply writes with the rules it has just loaded |
+| 7 | high · Paper-space obstacles are missing from the Arrange stamp (second re-review) | The arrange context also fingerprints each viewport's paper obstacles (sheet text, callouts and leaders), read with `AnnotSheets.PaperObstacles`, the reader Arrange uses, on every sheet |

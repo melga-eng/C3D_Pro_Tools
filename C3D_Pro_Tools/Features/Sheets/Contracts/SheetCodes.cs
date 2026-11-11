@@ -26,6 +26,10 @@ namespace C3DProTools.Features.Sheets.Contracts
         public const string PlanChanged = "sheets.preview.planChanged";
         /// <summary>Several label rule sets and none chosen.</summary>
         public const string RulesAmbiguous = "sheets.rules.ambiguous";
+        /// <summary>A requested build step that this version does not build yet.</summary>
+        public const string StepNotBuilt = "sheets.step.notBuilt";
+        /// <summary>Arrange found no clear place for some labels; they stay where they were.</summary>
+        public const string ArrangeUnresolved = "sheets.arrange.unresolved";
 
         public const string RequestDrawing = "sheets.request.drawing";
         public const string RequestNoSteps = "sheets.request.noSteps";
