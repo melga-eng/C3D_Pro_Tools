@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Profile Manager: standalone quick tool. NETLOAD C3DProTools.ProfileTool.dll, then run PROFILEMGR.
+	     Scans every alignment's profiles, works out the source surface of each surface (EG) profile,
+	     deletes profiles by surface and creates surface profiles on all alignments.
+	     Not part of C3D_Pro_Tools.dll or the installer. -->
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>C3DProTools.ProfileTool</RootNamespace>
+		<AssemblyName>C3DProTools.ProfileTool</AssemblyName>
+		<Version>0.1.0</Version>
+		<Product>C3D Pro Tools Profile Manager</Product>
+		<Company>Mohamed Elgarhy</Company>
+		<Authors>Mohamed Elgarhy</Authors>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<PlatformTarget>x64</PlatformTarget>
+		<NoWarn>MSB3277</NoWarn>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<AutoCAD2026Dir Condition=" '$(AutoCAD2026Dir)' == '' ">C:\Program Files\Autodesk\AutoCAD 2026\</AutoCAD2026Dir>
+		<AcadDir>$([MSBuild]::EnsureTrailingSlash('$(AutoCAD2026Dir)'))</AcadDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="acmgd">
+			<HintPath>$(AcadDir)acmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="acdbmgd">
+			<HintPath>$(AcadDir)acdbmgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="accoremgd">
+			<HintPath>$(AcadDir)accoremgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AecBaseMgd">
+			<HintPath>$(AcadDir)Aca\AecBaseMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AeccDbMgd">
+			<HintPath>$(AcadDir)C3D\AeccDbMgd.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+	</ItemGroup>
+</Project>
