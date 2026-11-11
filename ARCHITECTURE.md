@@ -1,5 +1,7 @@
 # Architecture and coordination standard
 
+> Since 2026-11-11 `AGENTS.md` sets the process (tasks, reviews, handoffs) and wins where the two differ. In particular: no stale-preview digests, fingerprints or tokens for new work, no separate contract review, and one end review per task. The layering and transaction rules below still apply.
+
 Applies to new and refactored features. Existing features migrate one operation at a time. The user assigns work and authorizes integration; no agent assigns another agent work or merges branches. Roles and drawing permissions remain in `AGENTS.md`.
 
 ## Responsibilities and ownership

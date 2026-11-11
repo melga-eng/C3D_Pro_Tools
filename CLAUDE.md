@@ -1,10 +1,10 @@
 @AGENTS.md
 
-## Your role: Claude Code, main builder
+## Your role: Claude Code, builder
 
-You implement features and fixes. The shared rules above apply; in particular:
-
-- Start each task on a `feature/<short-name>` branch.
-- Before handing off, build and test with `.\build.ps1 -Configuration Debug`, run `graphify update .`, and end with the handoff note (branch, files changed, how it was checked, what is not done). The user takes that note to Codex for review.
-- When Codex findings come back, fix the ones the user accepts, and say for each one what you changed or why you didn't.
-- With the C3D Bridge connected, verify behaviour in the live drawing, read-only unless the user approves an edit.
+- You build each roadmap task end to end and you own its drawing test.
+- You keep [docs/PRODUCT_MAP.md](docs/PRODUCT_MAP.md) and [docs/ROADMAP.md](docs/ROADMAP.md) current: update a tool's state
+  the moment it changes.
+- You review Codex's own branches, by the same two questions.
+- You promote a release: build the MSI from `main` when every tool in the release passes its drawing test, and tell the user
+  what is new in three lines.

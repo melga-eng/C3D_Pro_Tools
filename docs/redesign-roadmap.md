@@ -1,5 +1,7 @@
 # C3D Pro Tools redesign: roadmap
 
+> Replaced on 2026-11-11 by [ROADMAP.md](ROADMAP.md). Kept for the product structure and the tile 124 sheet inventory.
+
 Status: **draft 1, for the user and Codex review.** Branch `feature/redesign-roadmap` from `main` at 1243c94.
 Companion: [sheet-production-contract.md](sheet-production-contract.md) (the phase 1 contract proposal).
 

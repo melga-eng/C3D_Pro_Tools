@@ -1,62 +1,84 @@
-# C3D_Pro_Tools
+# C3D Pro Tools: rules for every agent
 
-Civil 3D 2026 (.NET 10) plugin. C# source is in `C3D_Pro_Tools/`, the WiX installer in `C3DProInstaller/`, and the build script is `build.ps1`.
+Civil 3D 2026 (.NET 10) plugin for dry-utility networks. One user: a civil engineer who works in Civil 3D all day, is not a
+programmer, and needs working tools now. `CLAUDE.md` and `GEMINI.md` import this file and add one role each.
 
-This file holds the rules for every agent on the project: Claude Code, OpenAI Codex and Google Antigravity. `CLAUDE.md` and `GEMINI.md` import it and only add each agent's role, so put shared rules here, once.
+Read first: [docs/PRODUCT_MAP.md](docs/PRODUCT_MAP.md) (every tool, its state, its code) and
+[docs/ROADMAP.md](docs/ROADMAP.md) (what is being worked on now).
 
-Follow [ARCHITECTURE.md](ARCHITECTURE.md) for feature boundaries, ownership, contracts, transaction/result rules, UI conventions and coordinated implementation. It applies to new and refactored features; migrate existing code one operation at a time.
+## The five rules
 
-## Team workflow (the user orchestrates every step)
+1. **Done means it works on the user's drawing.** A task is finished when its drawing test passes on a copy of a real project
+   drawing and the result matches the example the user gave. Passing unit tests and a clean build are required, not sufficient.
+2. **One task in progress per agent, and only tasks from the roadmap.** A new idea goes to the roadmap's "Later" list, not
+   into the code. Do not add features, options or safety layers nobody asked for.
+3. **Never test in the user's working session.** Test with `tools\drawing-test.ps1` (background Civil 3D on a drawing copy).
+   Ask for a live check only when the tool already passes there, and ask once, with exact steps.
+4. **Fewer steps for the user beats more options.** Remember the last settings, offer presets, select first, run on many
+   objects at once. If a tool needs more clicks than doing the job by hand, it is not done.
+5. **Say plainly what you did and what you did not check.** No "should work". If it was not run on a drawing, say so.
 
-Three agents work on this repo. Each has one job. None starts another agent's work or merges anything; the user moves the work from one agent to the next.
+## Two tracks
 
-| Agent | Role | Does | Does not |
-|---|---|---|---|
-| **Claude Code** | Main builder | Implements features and fixes on a feature branch, writes the contracts, builds, runs tests, commits when asked. Reviews Codex's engine branches | Review its own work as final |
-| **OpenAI Codex** | Engine builder, reviewer and auditor | Builds the pure-logic engines the user assigns to it (plain data in and out, no Autodesk API, no UI), with unit tests, on its own `feature/<x>` branch against an accepted contract. Reviews Claude's and Antigravity's branches against `main` with the `civil3d-auditor` skill and reports findings by severity | Edit Civil 3D adapters, forms or files outside its assigned engine and test files; change a contract (it proposes the change to the user instead) |
-| **Google Antigravity** | UI design and heavy work | WinForms/WPF form layouts, ribbon/icons, large mechanical refactors, browser research | Change engine logic (`Cover*`, `Navis*`, `Network*` solvers) without a note to the user |
+- **One-off job in a drawing** (move these manholes, fix this cover): do it through the C3D Bridge, on a copy first. It does
+  not become plugin code. Save the script in `recipes/` with two lines on what it does.
+- **Repeated job:** it becomes a plugin command when the user has needed it three times, or says so.
 
-Rules for all three:
+## How a task runs
 
-- **One branch per task.** Work on `feature/<short-name>` (or `ui/<short-name>` for Antigravity). Never commit to `main`.
-- **Each agent works in its own folder (git worktree), never in another agent's.** Claude: `C3D_Pro_Tools`. Codex: `C3D_Pro_Tools-codex`. Antigravity: `C3D_Pro_Tools-antigravity`, all beside each other in `C:\Users\melga\source\repos`. Switch branches only inside your own folder; a `git checkout` in a shared folder moves the other agents' work onto the wrong branch.
-- **Two agents never edit the same files at the same time.** If a task needs another agent's files, stop and tell the user.
-- **Nobody gives their own code the final review.** Codex reviews Claude's and Antigravity's branches. Claude reviews Codex's engine branches.
-- **Leave a handoff note.** When you finish, end with: the branch, what changed (files), how you checked it (build/tests/live Civil 3D), and what is not done. The user pastes this into the next agent.
-- **Build and test before handing off:** `.\build.ps1 -Configuration Debug` (builds everything and runs the tests). Report failures as they are.
-- **Review findings** go in the format: `severity (high/medium/low) · file:line · problem · concrete failure scenario · suggested fix`.
+1. The user gives a request card ([docs/REQUEST_CARD.md](docs/REQUEST_CARD.md)). If the result example or the rule numbers
+   are missing, ask before writing code. Ask everything in one message.
+2. The builder works on `feature/<short-name>` in their own folder and adds or updates a drawing test in `tests/drawing/`.
+3. Before handing over: `.\build.ps1 -Configuration Debug`, the drawing test, `graphify update .`.
+4. **One review, at the end.** The reviewer answers two questions only: can this damage the drawing, and can it give a wrong
+   result? At most five findings, each with a real failure the user could hit. The builder fixes them and merges. There is no
+   second review round unless a fix changed the design.
+5. Handoff note, five lines at most: branch, what changed, how it was checked (which drawing test, which drawing), what is
+   not done. Write it to `docs/handoff/<branch>.md` so the next agent reads it from the repo and the user does not paste it.
 
-## Live Civil 3D connection (C3D Bridge MCP)
+## Who does what
 
-`C3DProTools.Bridge/` is a small plugin that runs inside Civil 3D and exposes the open drawing to agents as an MCP server at `http://127.0.0.1:47321/mcp` (localhost only). Load it in Civil 3D with `NETLOAD` (or it autoloads from the bundle); `C3DBRIDGE` shows its status.
+| Agent | Folder | Job |
+|---|---|---|
+| **Claude Code** | `C3D_Pro_Tools` | Builds features end to end (Civil 3D code, logic, wiring), writes drawing tests, promotes builds |
+| **OpenAI Codex** | `C3D_Pro_Tools-codex` | The one end review of each task. Builds separate pure-logic pieces and drawing tests the user assigns |
+| **Google Antigravity** | `C3D_Pro_Tools-antigravity` | Visual design and screens, only for commands that already pass their drawing test, never against fake data |
 
-Tools: `c3d_status`, `c3d_list_objects`, `c3d_get_object`, `c3d_list_civil`, `c3d_zoom_to`, `c3d_run_command`, `c3d_execute_csharp`.
+Claude can start the other two without their windows, always from their own folder:
 
-- **Read before you write.** Use `c3d_status` and the list/get tools to see the drawing before changing anything.
-- **The user's drawing is real work.** Before anything that modifies the drawing (`c3d_run_command` that edits, `c3d_execute_csharp` that writes), say what it will change and wait for the user's go-ahead, unless they already asked for exactly that change.
-- **Name the drawing.** `c3d_run_command` and `c3d_execute_csharp` require `drawing` (as `c3d_status` lists it); they refuse to run if another drawing is active. A timeout that says "cancelled" means nothing ran; "still running" means it may still change the drawing, so re-read before retrying.
-- **Test code changes live** by running the plugin's own commands through `c3d_run_command` after the user has reloaded the rebuilt DLL.
-- `c3d_execute_csharp` snippets must follow the auditor rules below: one `Transaction` in `using`, `doc.LockDocument()` is already taken by the bridge, no UI calls.
+- Codex: `codex exec --sandbox read-only -o <answer.txt> "<task>"` for reviews (`--sandbox workspace-write` for builds).
+- Antigravity: `C:\Users\melga\.gemini\bin\agy.exe --print "<task>" --mode plan` (read-only). It cannot ask for permission in
+  this mode, so a task that needs shell commands needs its window, or an explicit allow-rule the user approves.
 
-## Knowledge graph (graphify): use it first
+Each agent switches branches only in its own folder. Two agents never edit the same file at the same time. Merging to `main`
+is allowed after the end review is clean; never push without the user asking.
 
-A graphify knowledge graph of this codebase lives in `graphify-out/`. Use it before grepping or reading whole files.
+## Code structure
 
-- **Orientation:** for a new task, read `graphify-out/GRAPH_REPORT.md` first. It covers the clusters, the core classes (god nodes) and the unexpected links.
-- **Find code:** use the `graphify` MCP tools: `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `get_community`, `god_nodes`. If the MCP server isn't available, use the CLI instead: `graphify query "<question>"`, `graphify explain "<Class>"`, `graphify path "<A>" "<B>"`.
-- **Before changing a class or method:** run `get_neighbors` on it (or `graphify explain "<Name>"`) to see every caller and dependent. Check those call sites before editing so nothing breaks.
-- **Then read the code:** the graph gives file and line references (e.g. `PipeRunBuilder.cs:L85`). Open only those ranges, not whole files.
-- **Graph vs code:** if the graph and the source disagree, the source is the truth. The graph may be stale.
+`command → operation → drawing reader/writer → pure calculation`. Details in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Keeping the graph current
+- Every operation must be runnable with no dialog, from a settings object. The form only fills that object. This is what
+  makes presets, batch runs and background tests possible.
+- Calculations take and return plain data (no Autodesk types), so they can be unit tested.
+- Every drawing change: lock the document, one `Transaction` in `using`, one UNDO step, a per-item report of what changed
+  and what failed. UNDO is the safety net; do not build stale-preview digests, fingerprints or tokens for new work.
+- Project rules (cover, clearances, slopes, styles) come from `C3DPro.project.json` beside the drawing, not from code.
+- Check Civil 3D API names with the `c3d-api` tools or in a drawing test before using them. Code checklist:
+  `.agents/skills/civil3d-auditor/SKILL.md`.
 
-- After editing `.cs` files, run `graphify update .` before finishing the task. It takes about 3 seconds, runs locally and uses no LLM.
-- After big refactors that delete code, run `graphify update . --force`.
-- The Obsidian vault in `graphify-out/obsidian/` is not refreshed automatically. Regenerate it with `graphify export obsidian` when the user wants to browse the latest map.
-- Do not edit anything in `graphify-out/` by hand.
+## Builds
 
-## Civil 3D API
+- **Stable:** the installed MSI. The user works with it. It is rebuilt only when a release in the roadmap passes.
+- **Dev:** `C3D_Pro_Tools\bin\Debug\net10.0-windows\C3D_Pro_Tools.dll`, used by drawing tests, or loaded by the user with
+  `AddInManagerManual` to try something without restarting.
 
-Use the `c3d-api` plugin skills and MCP tools (`lookup_type`, `search_api`, `get_parameters`, …) to verify Civil 3D / AutoCAD .NET API names and signatures instead of guessing. Agents without those tools: check against the live drawing with the bridge, or say the API name is unverified.
+## Live drawing (C3D Bridge)
 
-Code rules (full checklist in `.agents/skills/civil3d-auditor/SKILL.md`): lock the document from modeless forms and ribbon handlers, wrap every `Transaction` in `using`, never reuse opened objects after commit, check style names exist before `.Add()`, Autodesk references stay `Private=False`.
+MCP server inside Civil 3D at `http://127.0.0.1:47321/mcp`. Read before writing. The drawing is real work: say what will
+change and get a yes before any edit, unless the user asked for exactly that edit. `c3d_run_command` and
+`c3d_execute_csharp` need the `drawing` name. A timeout that says "still running" may still change the drawing; re-read first.
+
+## Code map (graphify)
+
+`graphify-out/` holds a map of the code. Use `graphify query`, `graphify explain "<Class>"` or the graphify MCP tools to find
+callers before changing a class. The source is the truth if they disagree. Run `graphify update .` after editing `.cs` files.
