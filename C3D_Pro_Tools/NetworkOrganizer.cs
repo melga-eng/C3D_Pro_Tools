@@ -92,7 +92,8 @@ namespace C3DProTools
                         list.Add((new MergePart
                         {
                             Id = id.Handle.ToString(), Name = st.Name, Network = net.Name, IsPipe = false, Family = FamilyOf(st), Size = SizeOf(st), InTarget = netId == target,
-                            A = (st.Location.X, st.Location.Y, st.Location.Z), Uses = (labels.TryGetValue(id, out int c) ? c : 0) + Views(st)
+                            A = (st.Location.X, st.Location.Y, st.Location.Z), RimElevation = st.RimElevation, SumpElevation = st.SumpElevation,
+                            Uses = (labels.TryGetValue(id, out int c) ? c : 0) + Views(st)
                         }, id, netId));
             }
             return list;

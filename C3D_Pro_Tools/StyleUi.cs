@@ -11,48 +11,78 @@ namespace C3DProTools
     /// so every window resizes and no text is squeezed onto two lines.</summary>
     internal static class StyleUi
     {
-        public static readonly Color Header = Color.FromArgb(15, 23, 42);
-        public static readonly Color HeaderText = Color.FromArgb(241, 245, 249);
-        public static readonly Color HeaderMuted = Color.FromArgb(148, 163, 184);
-        public static readonly Color Surface = Color.FromArgb(248, 250, 252);
-        public static readonly Color Panel = Color.White;
-        public static readonly Color Border = Color.FromArgb(226, 232, 240);
-        public static readonly Color Text = Color.FromArgb(15, 23, 42);
-        public static readonly Color Muted = Color.FromArgb(100, 116, 139);
-        public static readonly Color Accent = Color.FromArgb(37, 99, 235);
-        public static readonly Color AccentSoft = Color.FromArgb(219, 234, 254);
-        public static readonly Color Danger = Color.FromArgb(220, 38, 38);
+        public static readonly Color Header = Color.FromArgb(14, 26, 45);        // #0E1A2D (Deep Prussian blueprint navy)
+        public static readonly Color HeaderText = Color.FromArgb(244, 247, 251);  // #F4F7FB (Starch white)
+        public static readonly Color HeaderMuted = Color.FromArgb(141, 161, 190); // #8DA1BE (Blueprint chalk cyan metadata)
+        public static readonly Color Surface = Color.FromArgb(243, 239, 232);    // #F3EFE8 (Warm architectural drafting vellum)
+        public static readonly Color Panel = Color.White;                         // #FFFFFF (Clean drafting card & grid background)
+        public static readonly Color Border = Color.FromArgb(217, 209, 195);     // #D9D1C3 (Drafting rule buff borders & grid lines)
+        public static readonly Color Text = Color.FromArgb(23, 28, 36);          // #171C24 (Drafting ink black)
+        public static readonly Color Muted = Color.FromArgb(87, 83, 74);        // #57534A (pencil lead sepia; 4.5:1 or more on every vellum fill)
+        public static readonly Color Accent = Color.FromArgb(27, 88, 156);       // #1B589C (Prussian cobalt blueprint ink)
+        public static readonly Color AccentSoft = Color.FromArgb(228, 237, 247); // #E4EDF7 (Blueprint wash row selection)
+        public static readonly Color Danger = Color.FromArgb(185, 28, 28);       // #B91C1C (Red correction pen alert)
 
-        public static readonly Font Base = new Font("Segoe UI", 9F);
-        public static readonly Font Bold = new Font("Segoe UI Semibold", 9F);
-        public static readonly Font Small = new Font("Segoe UI", 8F);
-        public static readonly Font Title = new Font("Segoe UI Semibold", 15F);
-        public static readonly Font Heading = new Font("Segoe UI Semibold", 11F);
+        private static readonly string FontFamilyName = ResolveFontFamily();
+
+        private static string ResolveFontFamily()
+        {
+            try
+            {
+                using (Font test = new Font("Aptos", 9F))
+                {
+                    if (test.Name == "Aptos")
+                        return "Aptos";
+                }
+            }
+            catch
+            {
+            }
+            return "Segoe UI";
+        }
+
+        public static readonly Font Base = new Font(FontFamilyName, 9F);
+        public static readonly Font Bold = FontFamilyName == "Aptos"
+            ? new Font("Aptos", 9F, FontStyle.Bold)
+            : new Font("Segoe UI Semibold", 9F);
+        public static readonly Font Small = new Font(FontFamilyName, 8F);
+        public static readonly Font Title = FontFamilyName == "Aptos"
+            ? new Font("Aptos", 15F, FontStyle.Bold)
+            : new Font("Segoe UI Semibold", 15F);
+        public static readonly Font Heading = FontFamilyName == "Aptos"
+            ? new Font("Aptos", 11F, FontStyle.Bold)
+            : new Font("Segoe UI Semibold", 11F);
+        public static readonly Font Mono = new Font("Consolas", 9F);
 
         /// <summary>Text and background colours of a status pill.</summary>
         public static (Color fore, Color back) PillColors(string kind)
         {
             switch (kind)
             {
-                case "Used": return (Color.FromArgb(21, 128, 61), Color.FromArgb(220, 252, 231));
-                case "Unused": return (Color.FromArgb(180, 83, 9), Color.FromArgb(254, 243, 199));
-                case "Hidden ref": return (Color.FromArgb(109, 40, 217), Color.FromArgb(237, 233, 254));
-                case "Protected": return (Color.FromArgb(71, 85, 105), Color.FromArgb(226, 232, 240));
-                case "Duplicate": return (Color.FromArgb(194, 65, 12), Color.FromArgb(255, 237, 213));
-                case "Non-standard": return (Color.FromArgb(190, 18, 60), Color.FromArgb(255, 228, 230));
-                case "Standard": return (Color.FromArgb(15, 118, 110), Color.FromArgb(204, 251, 241));
-                case "Missing": return (Color.FromArgb(29, 78, 216), Color.FromArgb(219, 234, 254));
-                case "Checked": return (Accent, AccentSoft);
-                case "High": case "Imported": case "Exact": return (Color.FromArgb(21, 128, 61), Color.FromArgb(220, 252, 231));
-                case "Medium": case "Nearest size": return (Color.FromArgb(180, 83, 9), Color.FromArgb(254, 243, 199));
-                case "Low": case "Failed": case "No part": return (Color.FromArgb(185, 28, 28), Color.FromArgb(254, 226, 226));
-                case "Pipe": return (Color.FromArgb(29, 78, 216), Color.FromArgb(219, 234, 254));
-                case "Box": return (Color.FromArgb(15, 118, 110), Color.FromArgb(204, 251, 241));
-                case "Structure": return (Color.FromArgb(109, 40, 217), Color.FromArgb(237, 233, 254));
-                case "Solid": return (Color.FromArgb(71, 85, 105), Color.FromArgb(226, 232, 240));
-                case "Skip": case "Already imported": return (Color.FromArgb(100, 116, 139), Color.FromArgb(241, 245, 249));
-                case "Review": return (Color.FromArgb(180, 83, 9), Color.FromArgb(254, 243, 199));
-                default: return (Muted, Border);
+                case "Standard":
+                    return (Color.FromArgb(14, 100, 102), Color.FromArgb(219, 241, 241)); // #0E6466, #DBF1F1 (Standard compliance)
+                case "High": case "Imported": case "Exact": case "Used":
+                    return (Color.FromArgb(21, 101, 53), Color.FromArgb(225, 242, 231)); // #156535, #E1F2E7 (Exact / High survey precision)
+                case "Medium": case "Nearest size": case "Review": case "Unused": case "Duplicate":
+                    return (Color.FromArgb(146, 64, 14), Color.FromArgb(253, 241, 214)); // #92400E, #FDF1D6 (Ochre review / medium)
+                case "Missing":
+                    return (Color.FromArgb(27, 73, 133), Color.FromArgb(222, 234, 248)); // #1B4985, #DEEAF8 (Missing ungenerated)
+                case "Non-standard": case "Low": case "Failed": case "No part":
+                    return (Color.FromArgb(153, 27, 27), Color.FromArgb(252, 226, 226)); // #991B1B, #FCE2E2 (Crimson deviation / alert)
+                case "Pipe":
+                    return (Color.FromArgb(0, 102, 153), Color.FromArgb(225, 243, 251)); // #006699, #E1F3FB (Conduit run blue)
+                case "Box":
+                    return (Color.FromArgb(19, 107, 88), Color.FromArgb(221, 242, 237)); // #136B58, #DDF2ED (Duct bank teal)
+                case "Checked":
+                    return (Accent, AccentSoft);                                          // (#1B589C, #E4EDF7)
+                case "Structure": case "Hidden ref":
+                    return (Color.FromArgb(90, 58, 139), Color.FromArgb(239, 235, 248)); // #5A3A8B, #EFEBF8 (Blueprint indigo / structure)
+                case "Protected": case "Solid":
+                    return (Color.FromArgb(87, 83, 74), Color.FromArgb(234, 229, 220));  // #57534A, #EAE5DC (Pencil sepia slate)
+                case "Skip": case "Already imported":
+                    return (Color.FromArgb(87, 83, 74), Color.FromArgb(234, 229, 220)); // #57534A, #EAE5DC (Muted sepia on soft vellum)
+                default:
+                    return (Muted, Border);
             }
         }
 
@@ -88,7 +118,7 @@ namespace C3DProTools
             b.BackColor = Accent;
             b.ForeColor = Color.White;
             b.FlatAppearance.BorderColor = Accent;
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(29, 78, 216);
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(20, 67, 119); // #144377 (Deep cobalt hover)
             b.Font = Bold;
             return b;
         }
@@ -98,7 +128,7 @@ namespace C3DProTools
             Button b = Basic(text, click);
             b.BackColor = Panel;
             b.ForeColor = Text;
-            b.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            b.FlatAppearance.BorderColor = Color.FromArgb(200, 191, 176); // #C8BFB0 (Buff drafting border)
             b.FlatAppearance.MouseOverBackColor = Surface;
             return b;
         }
@@ -107,7 +137,8 @@ namespace C3DProTools
         {
             Button b = Secondary(text, click);
             b.ForeColor = Danger;
-            b.FlatAppearance.BorderColor = Color.FromArgb(252, 165, 165);
+            b.FlatAppearance.BorderColor = Color.FromArgb(238, 180, 180); // #EEB4B4 (Muted red outline)
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(252, 226, 226); // #FCE2E2 (Danger soft hover)
             return b;
         }
 
@@ -115,10 +146,10 @@ namespace C3DProTools
         public static Button HeaderButton(string text, EventHandler click = null)
         {
             Button b = Basic(text, click);
-            b.BackColor = Color.FromArgb(30, 41, 59);
+            b.BackColor = Color.FromArgb(25, 45, 75); // #192D4B (Prussian navy header button)
             b.ForeColor = HeaderText;
-            b.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(51, 65, 85);
+            b.FlatAppearance.BorderColor = Color.FromArgb(40, 68, 110); // #28446E
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 68, 110); // #28446E
             return b;
         }
 
@@ -250,7 +281,7 @@ namespace C3DProTools
             RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             using (GraphicsPath path = StyleUi.Rounded(r, r.Height / 2))
             {
-                using (SolidBrush fill = new SolidBrush(_selected ? soft : _hover ? Color.FromArgb(241, 245, 249) : StyleUi.Panel))
+                using (SolidBrush fill = new SolidBrush(_selected ? soft : _hover ? Color.FromArgb(234, 229, 220) : StyleUi.Panel))
                     g.FillPath(fill, path);
                 using (Pen border = new Pen(_selected ? dot : StyleUi.Border, _selected ? 1.6f : 1f))
                     g.DrawPath(border, path);
