@@ -193,7 +193,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
         /// What Arrange reads, as one fingerprint: the saved arrange settings, and every obstacle exactly as Arrange's own reader
         /// sees it: each network part's outline (curved pipes sampled, outer width, structure footprints), the model text,
         /// tables, framed callouts, multileaders and leaders, the other Civil 3D labels' extents, and each profile view's box,
-        /// band area and drawn parts (with their elevations). Nothing is filtered by viewport: Arrange keeps clear of what
+        /// band area and drawn parts (with their elevations), and on paper each viewport's sheet obstacles. Nothing is filtered by viewport: Arrange keeps clear of what
         /// reaches into a viewport and its margin, which a point test cannot tell (a pipe can cross a viewport with both ends
         /// outside it), so any change to an obstacle anywhere makes the preview stale. That errs on the safe side.
         /// </summary>
@@ -239,6 +239,16 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     }
                     b.Append('\u001E');
                 }
+                // Paper space: the sheet text, callouts and leaders over each viewport, read as Arrange reads them, on every
+                // sheet (unfiltered, as above).
+                foreach (SheetInfo sheet in AnnotSheets.Read(tr, doc.Database).OrderBy(sh => sh.Layout, StringComparer.OrdinalIgnoreCase))
+                    for (int i = 0; i < sheet.Viewports.Count; i++)
+                    {
+                        b.Append("paper\u001F").Append(sheet.Layout).Append('\u001F').Append(i);
+                        foreach (var box in AnnotSheets.PaperObstacles(tr, sheet, sheet.Viewports[i]))
+                            b.Append('\u001F').Append($"{R(box.MinX)},{R(box.MinY)},{R(box.MaxX)},{R(box.MaxY)}");
+                        b.Append('\u001E');
+                    }
                 tr.Commit();
             }
             byte[] h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(b.ToString()));
