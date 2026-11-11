@@ -51,6 +51,11 @@ namespace C3DProTools
             foreach (OrphanPipe o in orphans)
             {
                 if (o.Curved) { log.Add($"{o.Name}: curved pipes cannot be rebuilt this way; redraw it, or copy a straight pipe of {o.Size} onto it."); continue; }
+                // Each pipe in its own nested transaction: a rebuild whose reconnection fails is undone, so the original stays
+                // connected instead of being replaced by a loose copy.
+                Transaction outer = tr;
+                using Transaction one = outer.TransactionManager.StartTransaction();
+                tr = one;
                 try
                 {
                     Pipe old = (Pipe)tr.GetObject(o.Id, OpenMode.ForWrite);
@@ -91,10 +96,15 @@ namespace C3DProTools
                     old.Erase();
                     try { copy.Name = name; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     foreach (ObjectId v in views) try { if (!v.IsErased) copy.AddToProfileView(v); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                    if (reconnected) fixedCount++;
-                    else log.Add($"{o.Name}: rebuilt, but it could not be reconnected to its structure(s); connect it by hand (details in {C3DProLogger.LogPath}).");
+                    if (reconnected) { one.Commit(); fixedCount++; }
+                    else
+                    {
+                        one.Abort();
+                        log.Add($"{o.Name}: the rebuilt pipe could not be reconnected to its structure(s), so it was undone and the original kept (details in {C3DProLogger.LogPath}).");
+                    }
                 }
-                catch (Exception ex) { log.Add($"{o.Name}: {ex.Message}"); }
+                catch (Exception ex) { one.Abort(); log.Add($"{o.Name}: {ex.Message}"); }
+                finally { tr = outer; }
             }
             return fixedCount;
         }

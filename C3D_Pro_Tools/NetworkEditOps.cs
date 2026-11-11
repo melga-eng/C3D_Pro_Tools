@@ -169,6 +169,8 @@ namespace C3DProTools
         // Smallest radius an offset arc may shrink to before the copy is skipped (m).
         private const double MinArcRadius = 0.05;
         private const double MinPipeLength = 0.05;
+        /// <summary>Fit leaves a pipe alone when an end would move further than this (m) in plan: its connection is wrong.</summary>
+        public const double MaxFitMove = 3.0;
 
         internal sealed class Counts
         {
@@ -803,7 +805,8 @@ namespace C3DProTools
         /// a box of the given length × width when both are positive, keeping the slope), including loose ends lying inside a
         /// structure that would be connected to it. Read-only.
         /// </summary>
-        public static List<ManholeAdjustment> PlanFit(Transaction tr, List<ObjectId> pipeIds, StructureFace face, bool connectLooseEnds, double boxLength = 0, double boxWidth = 0)
+        public static List<ManholeAdjustment> PlanFit(Transaction tr, List<ObjectId> pipeIds, StructureFace face, bool connectLooseEnds, double boxLength = 0, double boxWidth = 0,
+            double maxMove = MaxFitMove)
         {
             List<ManholeAdjustment> plan = new List<ManholeAdjustment>();
             Dictionary<ObjectId, List<StructureFootprint>> byNetwork = new Dictionary<ObjectId, List<StructureFootprint>>();
@@ -842,6 +845,16 @@ namespace C3DProTools
                 Point3d p2 = endFp != null ? endFp.Fit(a.OrigEnd, a.OrigStart, face, FitInset) : a.OrigEnd;
                 KeepSlope(a.OrigStart, a.OrigEnd, ref p1, ref p2);
                 if (p1.DistanceTo(p2) <= MinPipeLength) { a.Note = "Would be shorter than 5 cm"; continue; }
+                // A pipe can stay connected to a structure it was moved away from; fitting it would stretch it back across the
+                // drawing (seen: +140 m). Fitting only trims or extends to a nearby wall, so a long move means a wrong connection.
+                double startMove = ManholeAdjustment.PlanLength(a.OrigStart, p1), endMove = ManholeAdjustment.PlanLength(a.OrigEnd, p2);
+                if (maxMove > 0 && Math.Max(startMove, endMove) > maxMove)
+                {
+                    bool atStart = startMove >= endMove;
+                    a.Note = $"Its {(atStart ? "start" : "end")} would move {Math.Max(startMove, endMove):F1} m to {(atStart ? a.StartStructureName : a.EndStructureName)}: " +
+                             "it is connected to a structure far from the pipe end; check the connection";
+                    continue;
+                }
                 a.NewStart = p1;
                 a.NewEnd = p2;
                 a.Actionable = true;
@@ -1069,6 +1082,8 @@ namespace C3DProTools
 
         // Pipes merge only when they meet within this distance and turn less than this.
         private const double MergeGap = 0.01, MergeAngle = 0.5 * Math.PI / 180.0;
+        /// <summary>Merging also needs the ends within 10 mm in level and the grades within 0.1 % (0.001 m/m).</summary>
+        private const double MergeLevelGap = 0.01, MergeGradeDiff = 0.001;
 
         internal sealed class MergePlan
         {
@@ -1095,6 +1110,10 @@ namespace C3DProTools
                     if (new Point2d(a.EndPoint.X, a.EndPoint.Y).GetDistanceTo(new Point2d(b.StartPoint.X, b.StartPoint.Y)) > MergeGap) continue;
                     Vector2d da = new Vector2d(a.EndPoint.X - a.StartPoint.X, a.EndPoint.Y - a.StartPoint.Y), db = new Vector2d(b.EndPoint.X - b.StartPoint.X, b.EndPoint.Y - b.StartPoint.Y);
                     if (da.Length < 1e-9 || db.Length < 1e-9 || da.GetAngleTo(db) > MergeAngle) continue;
+                    // In level too: the merged pipe is one straight grade, so the ends must meet in 3D and the grades agree;
+                    // otherwise a vertical step or a grade break between them would be lost.
+                    if (Math.Abs(a.EndPoint.Z - b.StartPoint.Z) > MergeLevelGap) continue;
+                    if (Math.Abs((a.EndPoint.Z - a.StartPoint.Z) / da.Length - (b.EndPoint.Z - b.StartPoint.Z) / db.Length) > MergeGradeDiff) continue;
                     next[a] = b;
                     previous[b] = a;
                 }
