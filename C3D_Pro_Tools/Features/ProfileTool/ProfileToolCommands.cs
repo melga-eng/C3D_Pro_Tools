@@ -30,6 +30,16 @@ namespace C3DProTools.ProfileTool
             AcApp.ShowModalDialog(form);
         }
 
+        /// <summary>Profile DIMs: cover DIMs (duct top to proposed surface) and clearance DIMs (duct to crossing pipes) in profile views.</summary>
+        [CommandMethod("C3DPRO", "PROFILEDIMS", CommandFlags.Modal)]
+        public void ProfileDims()
+        {
+            var doc = AcApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            using var form = new ProfileDimsForm(doc);
+            AcApp.ShowModalDialog(form);
+        }
+
         /// <summary>Label style editor: batch-set any label style value, for styles picked by category or from selected labels.</summary>
         [CommandMethod("C3DPRO", "STYLEMGR", CommandFlags.Modal)]
         public void StyleManager()
