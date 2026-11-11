@@ -18,5 +18,16 @@ namespace C3DProTools.ProfileTool
             using var form = new ProfileManagerForm(doc, civil);
             AcApp.ShowModalDialog(form);
         }
+
+        /// <summary>Profile views: list/filter/sort, fit TOP profiles to duct tops, create missing TOP profiles.</summary>
+        [CommandMethod("C3DPRO", "PVMGR", CommandFlags.Modal)]
+        public void ProfileViewManager()
+        {
+            var doc = AcApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            var civil = CivilDocument.GetCivilDocument(doc.Database);
+            using var form = new ProfileViewManagerForm(doc, civil);
+            AcApp.ShowModalDialog(form);
+        }
     }
 }
