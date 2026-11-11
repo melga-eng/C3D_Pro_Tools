@@ -669,6 +669,9 @@ namespace C3DProTools
         private void RunMatch(List<ViewItem> targets, ProfileViewRecipe recipe, ObjectId master)
         {
             if (targets.Count == 0) { MessageBox.Show(this, "Tick the views to change under Targets.", Text); return; }
+            // A template keeps the surface names of the drawing it was captured in; this drawing's names are on the Roles page.
+            // Matching with the template's names left the data bands unchanged where the surfaces are named differently.
+            recipe.Rules = Rules().Copy();
             Document doc = AcadApp.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             CivilDocument cdoc = CivilApplication.ActiveDocument;
