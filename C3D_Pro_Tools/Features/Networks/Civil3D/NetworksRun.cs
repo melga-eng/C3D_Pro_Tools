@@ -338,7 +338,17 @@ namespace C3DProTools.Features.Networks.Civil3D
             CoverRoute route = job.Route;
             var stations = route.Records.Select(r => r.S).ToList();
             var kinds = route.Records.Select(r => PavementZones.KindAt(tests, r.Plan.X, r.Plan.Y)).ToList();
-            foreach (PavementRun run in PavementZones.PavedStretches(stations, kinds))
+            // The kind anywhere along the route: the plan position between its two checked stations, by straight interpolation.
+            int KindAtStation(double st)
+            {
+                var recs = route.Records;
+                int hi = recs.FindIndex(r => r.S >= st);
+                if (hi <= 0) return kinds[Math.Max(0, hi)];
+                RouteRecord a = recs[hi - 1], b = recs[hi];
+                double t = b.S - a.S > 1e-9 ? (st - a.S) / (b.S - a.S) : 0;
+                return PavementZones.KindAt(tests, a.Plan.X + (b.Plan.X - a.Plan.X) * t, a.Plan.Y + (b.Plan.Y - a.Plan.Y) * t);
+            }
+            foreach (PavementRun run in PavementZones.PavedStretches(stations, kinds, KindAtStation))
                 route.Zones.Add(new CoverZone
                 {
                     S0 = run.S0, S1 = run.S1, MinCover = pav.Of(run.Kind).MinCover, Label = pav.Of(run.Kind).Name,

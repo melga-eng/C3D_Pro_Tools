@@ -73,17 +73,32 @@ namespace C3DProTools
         /// The paved stretches of a route checked at these stations (in order), each from the last station before it to the first
         /// after it, so its edges are always inside (as cover zones from polygons are). Unpaved stretches are left out.
         /// </summary>
-        public static List<PavementRun> PavedStretches(IReadOnlyList<double> stations, IReadOnlyList<int> kinds)
+        public static List<PavementRun> PavedStretches(IReadOnlyList<double> stations, IReadOnlyList<int> kinds, Func<double, int> kindAt = null, double tolerance = 0.01)
         {
             var list = new List<PavementRun>();
             int n = Math.Min(stations.Count, kinds.Count);
+            // Where the kind changes between two checked stations: halved down to the tolerance when the kind can be asked
+            // anywhere, else the outer station (the stretch then reaches the stations either side).
+            double Edge(int inside, int outside)
+            {
+                if (kindAt == null) return stations[outside];
+                double a = stations[inside], b = stations[outside];
+                int k = kinds[inside];
+                while (Math.Abs(b - a) > tolerance)
+                {
+                    double m = (a + b) / 2;
+                    if (kindAt(m) == k) a = m; else b = m;
+                }
+                return (a + b) / 2;
+            }
             int i = 0;
             while (i < n)
             {
                 if (kinds[i] <= 0) { i++; continue; }
                 int j = i;
                 while (j + 1 < n && kinds[j + 1] == kinds[i]) j++;
-                list.Add(new PavementRun(stations[Math.Max(0, i - 1)], stations[Math.Min(n - 1, j + 1)], kinds[i]));
+                double s0 = i > 0 ? Edge(i, i - 1) : stations[0], s1 = j + 1 < n ? Edge(j, j + 1) : stations[n - 1];
+                list.Add(new PavementRun(s0, s1, kinds[i]));
                 i = j + 1;
             }
             return list;

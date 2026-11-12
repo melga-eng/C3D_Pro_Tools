@@ -209,7 +209,12 @@ namespace C3DProTools.ProfileTool
             {
                 var missing = new List<string>();
                 List<Func<double, double, bool>> tests = PavementCivil3D.Tests(tr, civil, ps, missing);
-                if (missing.Count > 0) log.AppendLine($"Pavement: surfaces not in the drawing, left out: {string.Join(", ", missing)}.");
+                // A pavement surface that is not there (a reference not loaded) would make its edges vanish and erase their labels.
+                if (missing.Count > 0)
+                {
+                    log.AppendLine($"Pavement: surfaces not in the drawing: {string.Join(", ", missing)}." + (write ? " Nothing was labelled or erased." : ""));
+                    write = false;
+                }
                 Surface proposed = null;
                 foreach (ObjectId id in civil.GetSurfaceIds())
                     if (tr.GetObject(id, OpenMode.ForRead) is Surface sf && string.Equals(sf.Name, s.ProposedSurface ?? "", StringComparison.OrdinalIgnoreCase)) proposed = sf;
@@ -247,6 +252,7 @@ namespace C3DProTools.ProfileTool
                 ObjectId marker = PavementCivil3D.Marker(tr, civil, ps.MarkerStyle);
 
                 int views = 0, edges = 0, made = 0, replaced = 0, failed = 0;
+                var atTop = new List<string>();
                 foreach (ObjectId aid in civil.GetAlignmentIds())
                 {
                     if (!(tr.GetObject(aid, OpenMode.ForRead) is Alignment al) || !s.Includes(al.Name)) continue;
@@ -268,12 +274,18 @@ namespace C3DProTools.ProfileTool
                             foreach (ObjectId old in PavementCivil3D.EarlierLabels(one, db, vid)) { one.GetObject(old, OpenMode.ForWrite).Erase(); replaced++; }
                             foreach (var e in found)
                             {
-                                double elevation = v.ElevationMax;
+                                double elevation = double.NaN;
                                 if (proposed != null)
                                 {
                                     double x = 0, y = 0;
                                     try { al.PointLocation(e.station, 0, ref x, ref y); elevation = proposed.FindElevationAtXY(x, y); }
-                                    catch (System.Exception) { elevation = v.ElevationMax; }
+                                    catch (System.Exception) { elevation = double.NaN; }
+                                }
+                                if (double.IsNaN(elevation))
+                                {
+                                    // No proposed level there: on the view's top line, and said so.
+                                    elevation = v.ElevationMax;
+                                    atTop.Add($"{v.Name} {e.station:0.000}");
                                 }
                                 ObjectId id = StationElevationLabel.Create(vid, styles[(e.kind, e.start)], marker, e.station, elevation);
                                 PavementCivil3D.Tag(one, db, one.GetObject(id, OpenMode.ForWrite));
@@ -295,6 +307,8 @@ namespace C3DProTools.ProfileTool
                                    (write ? " Nothing was labelled." : ""));
                 log.AppendLine($"Pavement: {views} profile views, {edges} pavement edges" +
                                (write && badStyles.Count == 0 ? $"; labelled {made}, earlier tool labels replaced {replaced}, views failed {failed}." : "."));
+                if (atTop.Count > 0)
+                    log.AppendLine($"Pavement: {atTop.Count} labels are on the view's top line, the proposed surface \"{s.ProposedSurface}\" has no level there: {string.Join(", ", atTop.Take(10))}.");
                 if (write && badStyles.Count == 0) tr.Commit(); else tr.Abort();
             }
         }

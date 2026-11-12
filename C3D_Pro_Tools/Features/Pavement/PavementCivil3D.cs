@@ -153,11 +153,13 @@ namespace C3DProTools.Features.Pavement
             LabelStyle source = (LabelStyle)tr.GetObject(baseStyle, OpenMode.ForWrite);
             id = source.CopyAsSibling(name);
             LabelStyle made = (LabelStyle)tr.GetObject(id, OpenMode.ForWrite);
-            bool first = true;
-            foreach (ObjectId cid in made.GetComponents(LabelStyleComponentType.Text))
+            // The text that carries the station is kept (rewritten); the others are hidden. With no station anywhere, the first.
+            var texts = made.GetComponents(LabelStyleComponentType.Text).Cast<ObjectId>()
+                .Select(cid => tr.GetObject(cid, OpenMode.ForWrite) as LabelStyleTextComponent).Where(c => c != null).ToList();
+            LabelStyleTextComponent keep = texts.FirstOrDefault(c => (c.Text.Contents.Value ?? "").Contains("Station Value")) ?? texts.FirstOrDefault();
+            foreach (LabelStyleTextComponent c in texts)
             {
-                if (!(tr.GetObject(cid, OpenMode.ForWrite) is LabelStyleTextComponent c)) continue;
-                if (first)
+                if (c == keep)
                 {
                     string old = c.Text.Contents.Value ?? "";
                     // The station value field of the base style, with its own precision and format.
@@ -165,7 +167,6 @@ namespace C3DProTools.Features.Pavement
                     // As a plain chainage to the millimetre (76.183), the way the sheets show it, not 0+076.18.
                     string field = m.Success ? System.Text.RegularExpressions.Regex.Replace(m.Value.Replace("|FS|", "|FD|"), @"\|P\d\|", "|P3|") : null;
                     c.Text.Contents.Value = field != null ? $"{text}\\PCH:{field}" : text;
-                    first = false;
                 }
                 else c.General.Visible.Value = false;
             }

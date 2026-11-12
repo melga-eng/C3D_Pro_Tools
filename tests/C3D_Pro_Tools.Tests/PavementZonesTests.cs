@@ -64,6 +64,18 @@ namespace C3D_Pro_Tools.Tests
         }
 
         [Fact]
+        public void PavedStretchEdgesAreFoundBetweenStationsWhenTheKindCanBeAsked()
+        {
+            double[] s = { 0, 1, 2 };
+            int[] k = { 0, 1, 0 };
+            // Taxiway from 0.4 to 1.7: the stretch must not take in the unpaved stations 0 and 2.
+            List<PavementRun> runs = PavementZones.PavedStretches(s, k, st => st >= 0.4 && st < 1.7 ? 1 : 0);
+            Assert.Single(runs);
+            Assert.InRange(runs[0].S0, 0.39, 0.41);
+            Assert.InRange(runs[0].S1, 1.69, 1.71);
+        }
+
+        [Fact]
         public void TypeBUnderTaxiwayFailsTypeAUnderRoadIsOnlyANote()
         {
             var taxiway = new PavementZone { Name = "Taxiway Pavement", MinCover = 1.5, DuctType = "A" };
