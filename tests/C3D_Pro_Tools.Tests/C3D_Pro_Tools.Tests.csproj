@@ -22,6 +22,7 @@
 		<Compile Include="..\..\C3D_Pro_Tools\CoverRoute.Model.cs" Link="Engine\CoverRoute.Model.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverRules.cs" Link="Engine\CoverRules.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\PavementZones.cs" Link="Engine\PavementZones.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\NamePatterns.cs" Link="Engine\NamePatterns.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverSolver.cs" Link="Engine\CoverSolver.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverEvaluation.cs" Link="Engine\CoverEvaluation.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\NavisGeometryFit.cs" Link="Engine\NavisGeometryFit.cs" />

@@ -88,15 +88,8 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
         }
 
-        public bool Includes(string network)
-        {
-            // Patterns with a leading ! exclude: "ICT-*,!*-EQUIP" is every ICT network except the equipment ones.
-            string[] parts = (Networks ?? "*").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            bool Match(string p) => Regex.IsMatch(network ?? "", "^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$", RegexOptions.IgnoreCase);
-            string[] include = parts.Where(p => !p.StartsWith("!")).ToArray();
-            if (parts.Where(p => p.StartsWith("!")).Any(p => Match(p.Substring(1)))) return false;
-            return include.Length == 0 || include.Any(Match);
-        }
+        // Patterns with a leading ! exclude: "ICT-*,!*-EQUIP" is every ICT network except the equipment ones.
+        public bool Includes(string network) => NamePatterns.Matches(Networks, network);
     }
 
     public sealed class NetworksRun
@@ -121,8 +114,19 @@ namespace C3DProTools.Features.Networks.Civil3D
             if (nr.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(nr.StringResult)) s.Networks = nr.StringResult.Trim();
 
+            string nameNote;
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+            {
+                var names = new List<string>();
+                foreach (ObjectId id in CivilDocument.GetCivilDocument(doc.Database).GetPipeNetworkIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Network net) names.Add(net.Name);
+                s.Networks = NamePatterns.Widen(s.Networks, names, "network", out nameNote);
+                tr.Commit();
+            }
+
             var log = new StringBuilder();
             log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{s.Networks}\", settings from {source}");
+            if (nameNote != null) log.AppendLine(nameNote);
             try
             {
                 if (ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
