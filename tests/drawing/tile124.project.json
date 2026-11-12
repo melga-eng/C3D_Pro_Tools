@@ -34,5 +34,45 @@
     "labels":  {
                    "layouts":  "*102054",
                    "networks":  "ICT-*"
-               }
+               },
+    "labelRules":  [
+                       {
+                           "name":  "KSIA ICT tile 124 (test)",
+                           "version":  1,
+                           "rules":  [
+                                         {
+                                             "id":  "ict.plan.manhole",
+                                             "view":  "Plan",
+                                             "select":  {
+                                                            "kind":  "Structure",
+                                                            "networkPattern":  "ICT-TILE-124"
+                                                        },
+                                             "labelStyles":  [
+                                                                 "KSIA_Description Only_Northing_Easting"
+                                                             ],
+                                             "at":  "Insertion",
+                                             "every":  "PerPart",
+                                             "leader":  true,
+                                             "side":  "Alternate",
+                                             "priority":  2
+                                         },
+                                         {
+                                             "id":  "ict.plan.joint",
+                                             "view":  "Plan",
+                                             "select":  {
+                                                            "kind":  "Joint",
+                                                            "networkPattern":  "ICT-TILE-124"
+                                                        },
+                                             "labelStyles":  [
+                                                                 "KSIA_START [NE]"
+                                                             ],
+                                             "at":  "EachJoint",
+                                             "every":  "PerPart",
+                                             "leader":  true,
+                                             "side":  "Alternate",
+                                             "priority":  3
+                                         }
+                                     ]
+                       }
+                   ]
 }

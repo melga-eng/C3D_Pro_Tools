@@ -44,6 +44,8 @@ namespace C3DProTools.Features.Labels
         public List<string> KeepClearNetworks { get; set; }
         /// <summary>When set, each viewport's arrangement is written there as a case file (to replay it in the unit tests).</summary>
         public string ExportFolder { get; set; } = "";
+        /// <summary>The label rule set (labelRules in the settings file) Add uses; empty = the only one.</summary>
+        public string RuleSet { get; set; } = "";
 
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions
         {
@@ -112,7 +114,7 @@ namespace C3DProTools.Features.Labels
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nLabels") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Arrange", "Reset" }) kw.Keywords.Add(k);
+            foreach (string k in new[] { "Report", "Add", "Arrange", "Reset" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -131,7 +133,8 @@ namespace C3DProTools.Features.Labels
             log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{s.Layouts}\", networks \"{s.Networks}\", settings from {source}");
             try
             {
-                Run(doc, s, mode, log);
+                if (mode == "Report" || mode == "Add") Add(doc, s, mode == "Add", log);
+                if (mode != "Add") Run(doc, s, mode, log);
             }
             catch (System.Exception ex)
             {
@@ -144,6 +147,61 @@ namespace C3DProTools.Features.Labels
             string[] summary = log.ToString().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0 && l[0] != ' ').ToArray();
             ed.WriteMessage("\n" + string.Join("\n", summary) + (file != null ? $"\nFull report: {file}" : "") + "\n");
             if (mode != "Report") ViewHelper.Regen(doc);
+        }
+
+        /// <summary>
+        /// The labels the project's label rules (labelRules in the settings file) ask for on the chosen layouts: added (and the
+        /// rule-made ones no longer asked for removed), one transaction per sheet; with <paramref name="write"/> false only listed.
+        /// </summary>
+        private static void Add(Document doc, LabelsSettings s, bool write, StringBuilder log)
+        {
+            Sheets.Application.ProjectSettings project = Sheets.Application.ProjectSettings.Load(doc.Name, out string problem);
+            if (problem != null) { log.AppendLine($"Add: {problem}"); return; }
+            Sheets.Contracts.LabelRuleSet rules = project.RuleSet(string.IsNullOrWhiteSpace(s.RuleSet) ? null : s.RuleSet);
+            if (rules == null)
+            {
+                log.AppendLine(project.LabelRules.Count == 0 ? "Add: no label rules (labelRules in the settings file); skipped."
+                    : $"Add: set labels.ruleSet to one of {string.Join(", ", project.LabelRules.Select(r => $"\"{r?.Name}\""))}; skipped.");
+                return;
+            }
+            var ruleIssues = Sheets.Contracts.LabelRuleValidation.Validate(rules);
+            if (ruleIssues.Count > 0)
+            {
+                log.AppendLine($"Add: the rule set \"{rules.Name}\" has errors; nothing added.");
+                foreach (var i in ruleIssues) log.AppendLine($"  {i.Code}: {i.Message}");
+                return;
+            }
+            List<string> layouts;
+            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+            {
+                layouts = AnnotSheets.Read(tr, doc.Database).Where(x => LabelsSettings.Matches(s.Layouts, x.Layout)).Select(x => x.Layout).ToList();
+                tr.Commit();
+            }
+            if (layouts.Count == 0) { log.AppendLine($"Add: no layout matches \"{s.Layouts}\"."); return; }
+
+            var identity = Networks.Civil3D.DrawingRefs3D.Identity(doc);
+            var scene = new Sheets.Civil3D.SheetSceneCivil3D().Read(new Sheets.Contracts.SheetSceneRequest { Drawing = identity }, System.Threading.CancellationToken.None);
+            var plan = Sheets.Application.PlanLabelPlanner.Plan(scene, rules, layouts);
+            int adds = plan.Items.Sum(i => i.Changes.Count(c => c.Kind == Sheets.Contracts.ChangeKind.Add));
+            int removes = plan.Items.Sum(i => i.Changes.Count(c => c.Kind == Sheets.Contracts.ChangeKind.Remove));
+            log.AppendLine($"Add (rule set \"{rules.Name}\"): {layouts.Count} layouts, {adds} labels {(write ? "to add" : "would be added")}, {removes} rule-made labels {(write ? "to remove" : "would be removed")}.");
+            foreach (var i in plan.Issues) log.AppendLine($"  {i.Severity} {i.Code} {i.Layout} {i.Object}: {i.Message}");
+            foreach (var item in plan.Items)
+            {
+                log.AppendLine($"  {item.ItemKey}: {item.Changes.Count} changes");
+                foreach (var c in item.Changes.Take(100)) log.AppendLine($"    {c.Kind} {c.RuleId} {c.SourceKey} {c.Description}");
+            }
+            if (!write || plan.Items.Count == 0) return;
+            int added = 0, removed = 0, failed = 0;
+            using (doc.LockDocument())
+                foreach (var item in plan.Items)
+                {
+                    var o = Sheets.Civil3D.PlanLabelsCivil3D.Apply(doc, item);
+                    added += o.Added; removed += o.Removed;
+                    if (o.Issues.Count > 0) failed++;
+                    foreach (var i in o.Issues) log.AppendLine($"  {item.ItemKey}: {i.Code}: {i.Message}");
+                }
+            log.AppendLine($"Add: added {added}, removed {removed}, sheets with problems {failed}.");
         }
 
         private static void Run(Document doc, LabelsSettings s, string mode, StringBuilder log)
