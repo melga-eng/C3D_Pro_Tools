@@ -273,6 +273,20 @@ namespace C3DProTools.Features.Networks.Civil3D
                 var setup = new CoverJobs.Setup { Spacing = s.CoverSpacing > 0 ? s.CoverSpacing : 1.0, Gap = saved.GapLimit > 0 ? saved.GapLimit : 1.0 };
                 setup.ZonePolygons = CoverJobs.ReadZonePolygons(tr, db, o.Rules);
 
+                // Pavement from surfaces (the project's pavement section): its cover and duct type by stretch; unpaved has its own cover.
+                Pavement.PavementSettings pav = Pavement.PavementSettings.Load(doc.Name, out string pavProblem);
+                if (pavProblem != null) log.AppendLine($"Cover: {pavProblem}");
+                List<Func<double, double, bool>> pavTests = null;
+                if (pav.Any)
+                {
+                    var missing = new List<string>();
+                    pavTests = Pavement.PavementCivil3D.Tests(tr, civil, pav, missing);
+                    if (missing.Count > 0) log.AppendLine($"Cover: pavement surfaces not in the drawing, left out: {string.Join(", ", missing)}.");
+                    if (pav.Unpaved.MinCover > 0) o.MinCover = pav.Unpaved.MinCover;
+                }
+                var sizeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                int wrongType = 0;
+
                 var nets = Networks(tr, db, s, out _);
                 int routes = 0, pipes = 0, errors = 0;
                 var failing = new List<string>();
@@ -291,14 +305,20 @@ namespace C3DProTools.Features.Networks.Civil3D
                         catch (System.Exception ex) { errors++; failing.Add($"  {n.name} {job.Name}: {ex.Message}"); continue; }
                         if (job.Error != null) { errors++; failing.Add($"  {n.name} {job.Name}: {job.Error}"); continue; }
                         if (job.Current == null) continue;
+                        if (pavTests != null) wrongType += ApplyPavement(tr, job, pav, pavTests, sizeOf);
                         pipes += job.Current.Count;
                         foreach (CoverRow r in job.Current.Where(r => r.Failed))
                             failing.Add($"  {n.name} {r.Pipe.Name}: cover {r.MinCover:0.00}–{r.MaxCover:0.00} m; {r.Status}");
                     }
                 }
                 tr.Abort();
-                log.AppendLine($"Cover check ({s.CoverMin:0.00}–{s.CoverMax:0.00} m to the top of the encasement on {surface.Name}, slope up to {s.CoverMaxSlope:0.#} %, " +
+                string limits = pav.Any
+                    ? string.Join(", ", pav.Zones.Select(z => $"{z.Name} {z.MinCover:0.00} m{(z.DuctType.Length > 0 ? " type " + z.DuctType : "")}")) +
+                      $", {pav.Unpaved.Name} {o.MinCover:0.00} m{(pav.Unpaved.DuctType.Length > 0 ? " type " + pav.Unpaved.DuctType : "")}; max {s.CoverMax:0.00} m"
+                    : $"{s.CoverMin:0.00}–{s.CoverMax:0.00} m";
+                log.AppendLine($"Cover check ({limits} to the top of the encasement on {surface.Name}, slope up to {s.CoverMaxSlope:0.#} %, " +
                                $"crossings {s.CoverClearance:0.00} m clear): {routes} routes, {pipes} pipes, {failing.Count - errors} pipes fail" +
+                               (pavTests != null ? $" ({wrongType} with the wrong duct type for their pavement)" : "") +
                                (errors > 0 ? $", {errors} routes could not be checked" : "") + ". Changes nothing.");
                 // What fails most, numbers taken out so the same rule groups together.
                 var reasons = failing.Select(f => f.IndexOf(" m; ", StringComparison.Ordinal) is int at && at > 0 ? f.Substring(at + 4) : null).Where(r => r != null)
@@ -307,6 +327,63 @@ namespace C3DProTools.Features.Networks.Civil3D
                 foreach (var g in reasons) log.AppendLine($"  {g.Count(),5} x {g.Key}");
                 foreach (string f in failing) log.AppendLine(f);
             }
+        }
+
+        /// <summary>
+        /// Gives a checked route its pavement stretches (each with its own minimum cover), checks it again, and fails each duct
+        /// whose type (A or B, from its name or size) is not the one its pavement asks for. Returns how many ducts have the wrong type.
+        /// </summary>
+        private static int ApplyPavement(Transaction tr, CoverJob job, Pavement.PavementSettings pav, List<Func<double, double, bool>> tests, Dictionary<string, string> sizeOf)
+        {
+            CoverRoute route = job.Route;
+            var stations = route.Records.Select(r => r.S).ToList();
+            var kinds = route.Records.Select(r => PavementZones.KindAt(tests, r.Plan.X, r.Plan.Y)).ToList();
+            // The kind anywhere along the route: the plan position between its two checked stations, by straight interpolation.
+            int KindAtStation(double st)
+            {
+                var recs = route.Records;
+                int hi = recs.FindIndex(r => r.S >= st);
+                if (hi <= 0) return kinds[Math.Max(0, hi)];
+                RouteRecord a = recs[hi - 1], b = recs[hi];
+                double t = b.S - a.S > 1e-9 ? (st - a.S) / (b.S - a.S) : 0;
+                return PavementZones.KindAt(tests, a.Plan.X + (b.Plan.X - a.Plan.X) * t, a.Plan.Y + (b.Plan.Y - a.Plan.Y) * t);
+            }
+            foreach (PavementRun run in PavementZones.PavedStretches(stations, kinds, KindAtStation))
+                route.Zones.Add(new CoverZone
+                {
+                    S0 = run.S0, S1 = run.S1, MinCover = pav.Of(run.Kind).MinCover, Label = pav.Of(run.Kind).Name,
+                    MaxCover = PavementZones.ZoneMax(pav.Of(run.Kind), job.Options.MaxCover),
+                });
+            job.Current = CoverEvaluation.Evaluate(route, CoverJobs.CurrentPipes(route), job.Options);
+
+            int wrong = 0;
+            foreach (CoverRow row in job.Current)
+            {
+                string name = row.Pipe.Name ?? "";
+                if (!sizeOf.TryGetValue(name, out string size))
+                {
+                    size = "";
+                    foreach ((ObjectId id, bool _) in job.Pipes)
+                        if (tr.GetObject(id, OpenMode.ForRead) is Pipe p && p.Name == name) { try { size = p.PartSizeName ?? ""; } catch (System.Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } break; }
+                    sizeOf[name] = size;
+                }
+                string type = PavementZones.DuctTypeOf(name, size);
+                // Only the A / B families are checked (a 1C micro duct has no such rule).
+                if (type != "A" && type != "B") continue;
+                PavementZone strictest = PavementZones.KindsBetween(stations, kinds, row.Pipe.S0, row.Pipe.S1)
+                    .Select(k => pav.Of(k)).OrderByDescending(z => z.MinCover).FirstOrDefault();
+                var check = PavementZones.CheckType(type, strictest);
+                if (check == null) continue;
+                if (check.Value.fails)
+                {
+                    // "OK" (or "OK; <notes>") becomes the issue (with the notes); other problems follow it.
+                    row.Status = row.Status.StartsWith("OK", StringComparison.Ordinal) ? check.Value.text + row.Status.Substring(2) : check.Value.text + "; " + row.Status;
+                    row.Failed = true;
+                    wrong++;
+                }
+                else row.Status += "; " + check.Value.text;
+            }
+            return wrong;
         }
 
         private static void Rims(Document doc, NetworksSettings s, bool write, StringBuilder log)

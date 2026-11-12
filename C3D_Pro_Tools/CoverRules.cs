@@ -60,6 +60,8 @@ namespace C3DProTools
     internal sealed class CoverZone
     {
         public double S0, S1, MinCover;
+        /// <summary>Most cover allowed here: 0 = the general maximum; NaN = no maximum here (a zone deeper than the general band).</summary>
+        public double MaxCover;
         public string Label = "";
     }
 
