@@ -23,7 +23,9 @@ using Surface = Autodesk.Civil.DatabaseServices.Surface;
 //   Rims    sets structure rims to the surface (plus aboveSurface)
 //   Fit     trims or extends straight pipe ends to their structures' chosen face, connecting loose ends inside a structure
 //   Repair  rebuilds pipes that dropped out of their network's member list
-//   All     Repair, Rims, then Fit
+//   Duplicates deletes true copies inside each network (same place, levels, family and size); copies with labels or profile views stay
+//   Cover   checks cover, slope and crossing clearances along every route (reads only)
+//   All     Repair, Duplicates, Rims, Fit, then the Cover check
 // Each writing step is one transaction (one UNDO); data-shortcut objects are never changed.
 namespace C3DProTools.Features.Networks.Civil3D
 {
@@ -48,6 +50,13 @@ namespace C3DProTools.Features.Networks.Civil3D
         public double FitMaxMove { get; set; } = NetworkEditOps.MaxFitMove;
         /// <summary>A rim that would change by more than this (m) is left alone and listed (equipment, wrong surface).</summary>
         public double RimMaxChange { get; set; } = 1.0;
+        /// <summary>Cover check (reads only): surface (empty: <see cref="Surface"/>), limits to the top of the encasement (m), slope (%), crossing clearance (m).</summary>
+        public string CoverSurface { get; set; } = "";
+        public double CoverMin { get; set; } = 0.60;
+        public double CoverMax { get; set; } = 1.50;
+        public double CoverMaxSlope { get; set; } = 7.0;
+        public double CoverClearance { get; set; } = 0.30;
+        public double CoverSpacing { get; set; } = 1.0;
 
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions
         {
@@ -100,7 +109,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nNetworks") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Rims", "Fit", "Repair", "All" }) kw.Keywords.Add(k);
+            foreach (string k in new[] { "Report", "Rims", "Fit", "Repair", "Duplicates", "Cover", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -119,9 +128,13 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
                     throw new InvalidOperationException($"the drawing units are {doc.Database.Insunits}; C3DPRONET works in metre drawings only. Nothing was changed.");
                 bool all = mode == "All";
-                Repair(doc, s, all || mode == "Repair", log);
-                Rims(doc, s, all || mode == "Rims", log);
-                Fit(doc, s, all || mode == "Fit", log);
+                // Report and All run every step (Report as a preview); a single step runs only itself.
+                bool Runs(string step) => mode == "Report" || all || mode == step;
+                if (Runs("Repair")) Repair(doc, s, all || mode == "Repair", log);
+                if (Runs("Duplicates")) Duplicates(doc, s, all || mode == "Duplicates", log);
+                if (Runs("Rims")) Rims(doc, s, all || mode == "Rims", log);
+                if (Runs("Fit")) Fit(doc, s, all || mode == "Fit", log);
+                if (Runs("Cover")) Cover(doc, s, log);
             }
             catch (System.Exception ex)
             {
@@ -174,6 +187,115 @@ namespace C3DProTools.Features.Networks.Civil3D
                 tr.Commit();
                 log.AppendLine($"Repair: rebuilt {repaired} of {orphans.Count}.");
                 foreach (string n in notes.Take(15)) log.AppendLine($"  {n}");
+            }
+        }
+
+        private static void Duplicates(Document doc, NetworksSettings s, bool write, StringBuilder log)
+        {
+            Database db = doc.Database;
+            CivilDocument civil = CivilDocument.GetCivilDocument(db);
+            using (write ? doc.LockDocument() : null)
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                var nets = Networks(tr, db, s, out _);
+                Dictionary<ObjectId, int> labels = NetworkOrganizer.LabelCounts(tr, db);
+                int copies = 0, used = 0, deleted = 0, reconnected = 0, failed = 0;
+                var lines = new List<string>();
+                foreach (var n in nets)
+                {
+                    var plan = NetworkOrganizer.Plan(tr, db, new[] { n.id }, n.id, labels);
+                    var idOf = plan.ToDictionary(p => p.row.Part, p => p.id);
+                    var rows = plan.Where(p => p.row.Action == MergeAction.DeleteCopy && p.row.Keeper != null).ToList();
+                    if (rows.Count == 0) continue;
+                    // A copy that is labelled or drawn in a profile view is left alone: deleting it would take those with it.
+                    var inUse = rows.Where(p => p.row.Part.Uses > 0).ToList();
+                    var delete = rows.Except(inUse).ToDictionary(p => p.id, p => idOf[p.row.Keeper]);
+                    copies += rows.Count; used += inUse.Count;
+                    lines.Add($"  {n.name}: {rows.Count} copies, {delete.Count} {(write ? "deleted" : "to delete")}" +
+                              (inUse.Count > 0 ? $", {inUse.Count} labelled or in a profile view left alone ({string.Join(", ", inUse.Take(8).Select(p => p.row.Part.Name))})" : ""));
+                    foreach (var p in rows.Except(inUse)) lines.Add($"    {(p.row.Part.IsPipe ? "pipe" : "structure")} {p.row.Part.Name}: copy of {p.row.Keeper.Name}");
+                    if (!write || delete.Count == 0) continue;
+                    using Transaction one = tr.TransactionManager.StartTransaction();
+                    try
+                    {
+                        MergeResult r = NetworkOrganizer.Merge(one, civil, new List<ObjectId> { n.id }, n.id, null, new List<ObjectId>(), delete, false, false, doc.Editor);
+                        one.Commit();
+                        deleted += r.Deleted; reconnected += r.Reconnected;
+                        foreach (string l in r.Log) lines.Add($"    {l}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        one.Abort();
+                        failed++;
+                        lines.Add($"    {n.name}: nothing deleted ({ex.Message}).");
+                    }
+                }
+                log.AppendLine($"Duplicates: {copies} copies in {nets.Count} networks" +
+                               (used > 0 ? $"; {used} labelled or in a profile view are left alone" : "") +
+                               (write ? $"; deleted {deleted}, pipes moved to the structure that stays {reconnected}, networks failed {failed}." : "."));
+                foreach (string l in lines) log.AppendLine(l);
+                if (write) tr.Commit(); else tr.Abort();
+            }
+        }
+
+        /// <summary>Checks the current cover, slopes and crossing clearances of every route of the matched networks. Changes nothing.</summary>
+        private static void Cover(Document doc, NetworksSettings s, StringBuilder log)
+        {
+            string surfaceName = string.IsNullOrWhiteSpace(s.CoverSurface) ? s.Surface : s.CoverSurface;
+            if (string.IsNullOrWhiteSpace(surfaceName)) { log.AppendLine("Cover: no surface set (networks.coverSurface or networks.surface); skipped."); return; }
+            Database db = doc.Database;
+            CivilDocument civil = CivilDocument.GetCivilDocument(db);
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                Surface surface = null;
+                foreach (ObjectId id in civil.GetSurfaceIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Surface sf && string.Equals(sf.Name, surfaceName.Trim(), StringComparison.OrdinalIgnoreCase)) surface = sf;
+                if (surface == null) { log.AppendLine($"Cover: the surface \"{surfaceName}\" is not in the drawing; skipped."); tr.Abort(); return; }
+
+                // The project limits from the settings file; the design rules (zones, clearance matrix, bends) as saved in the Cover Designer.
+                CoverOptimizerSettings saved = CoverOptimizerSettings.Load();
+                var o = new CoverOptions
+                {
+                    Mode = CoverMode.Dry, Reference = CoverReference.OutsideTop,
+                    MinCover = s.CoverMin, MaxCover = s.CoverMax, MinLength = saved.MinLength, MaxLength = saved.MaxLength,
+                    MinSlope = saved.DryMinSlope / 100.0, MaxSlope = s.CoverMaxSlope / 100.0, MaxSlopeChange = saved.MaxSlopeChange / 100.0,
+                    MaxDrop = saved.MaxDrop, StartFixed = true, CrossingClearance = s.CoverClearance, Rules = saved.Rules ?? new CoverRules(),
+                };
+                var setup = new CoverJobs.Setup { Spacing = s.CoverSpacing > 0 ? s.CoverSpacing : 1.0, Gap = saved.GapLimit > 0 ? saved.GapLimit : 1.0 };
+                setup.ZonePolygons = CoverJobs.ReadZonePolygons(tr, db, o.Rules);
+
+                var nets = Networks(tr, db, s, out _);
+                int routes = 0, pipes = 0, errors = 0;
+                var failing = new List<string>();
+                foreach (var n in nets)
+                {
+                    if (n.pipes.Count == 0) continue;
+                    List<CoverJob> jobs;
+                    try { jobs = CoverJobs.FromNetwork(tr, n.id, setup.Gap, setup.CenterTolerance, false); }
+                    catch (System.Exception ex) { errors++; failing.Add($"  {n.name}: routes could not be read ({ex.Message})"); continue; }
+                    var batch = new HashSet<ObjectId>(n.pipes);
+                    foreach (CoverJob job in jobs)
+                    {
+                        routes++;
+                        try { CoverJobs.Prepare(tr, civil, job, surface, o, setup, batch); }
+                        catch (System.Exception ex) { errors++; failing.Add($"  {n.name} {job.Name}: {ex.Message}"); continue; }
+                        if (job.Error != null) { errors++; failing.Add($"  {n.name} {job.Name}: {job.Error}"); continue; }
+                        if (job.Current == null) continue;
+                        pipes += job.Current.Count;
+                        foreach (CoverRow r in job.Current.Where(r => r.Failed))
+                            failing.Add($"  {n.name} {r.Pipe.Name}: cover {r.MinCover:0.00}–{r.MaxCover:0.00} m; {r.Status}");
+                    }
+                }
+                tr.Abort();
+                log.AppendLine($"Cover check ({s.CoverMin:0.00}–{s.CoverMax:0.00} m to the top of the encasement on {surface.Name}, slope up to {s.CoverMaxSlope:0.#} %, " +
+                               $"crossings {s.CoverClearance:0.00} m clear): {routes} routes, {pipes} pipes, {failing.Count - errors} pipes fail" +
+                               (errors > 0 ? $", {errors} routes could not be checked" : "") + ". Changes nothing.");
+                // What fails most, numbers taken out so the same rule groups together.
+                var reasons = failing.Select(f => f.IndexOf(" m; ", StringComparison.Ordinal) is int at && at > 0 ? f.Substring(at + 4) : null).Where(r => r != null)
+                    .SelectMany(r => r.Split("; ")).Select(r => Regex.Replace(r, @"-?\d+(\.\d+)?", "#"))
+                    .GroupBy(r => r).OrderByDescending(g => g.Count()).Take(12);
+                foreach (var g in reasons) log.AppendLine($"  {g.Count(),5} x {g.Key}");
+                foreach (string f in failing) log.AppendLine(f);
             }
         }
 
