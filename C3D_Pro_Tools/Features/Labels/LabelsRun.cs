@@ -238,22 +238,54 @@ namespace C3DProTools.Features.Labels
                 ArrangeOptions o = s.Options(saved);
                 o.Only = movable;
                 AnnotScene scene = AnnotScene.Read(tr, db, civil, o.AvoidModelText, o.Profile);
+                int lockedShown = AnnotLabels.OnSheets(labels, sheets, s.Plan, s.Profile).Count(l => l.Locked && movable.Contains(l.Id));
+
+                // Every viewport checked on its own (a label shown in two viewports is checked in both), nothing moved.
+                ArrangeReport Check(string title)
+                {
+                    var report = new ArrangeReport();
+                    foreach (SheetInfo sheet in sheets)
+                    {
+                        int problems = 0, count = 0;
+                        foreach (SheetViewport v in sheet.Viewports)
+                        {
+                            var one = new SheetInfo { Layout = sheet.Layout, TabOrder = sheet.TabOrder, LayoutId = sheet.LayoutId, BlockId = sheet.BlockId };
+                            one.Viewports.Add(v);
+                            one.Texts.AddRange(sheet.Texts);
+                            ArrangeReport r = AnnotArranger.Arrange(tr, one, labels, scene, o, new HashSet<ObjectId>(), true, ppu);
+                            report.Add(r);
+                            problems += r.Problems; count += r.Checked;
+                            foreach (ArrangeIssue i in r.Issues) log.AppendLine($"    {sheet.Layout}{(sheet.Viewports.Count > 1 ? $" viewport {sheet.Viewports.IndexOf(v) + 1}" : "")}: {Describe(tr, labels, i.LabelId)}: {i.Text}");
+                        }
+                        log.AppendLine($"  {title} {sheet.Layout}: {sheet.Viewports.Count} viewports, {count} labels, with a problem {problems}");
+                    }
+                    return report;
+                }
+
+                string lockedNote = lockedShown > 0 ? $"; {lockedShown} locked labels are not checked or moved" : "";
+                if (!write)
+                {
+                    ArrangeReport c = Check("check");
+                    tr.Abort();
+                    log.AppendLine($"Labels: {c.Checked} label checks on {sheets.Count} layouts: {c.Problems} with a problem (overlap or outside the viewport), {c.Unmeasured} could not be measured{lockedNote}. Changes nothing.");
+                    return;
+                }
+
+                // Arranging shares what is done, so a label placed on one layout is not moved again on the next.
                 var total = new ArrangeReport();
-                // A check measures each layout on its own; arranging shares what is done, so a label placed on one layout is not moved again.
                 var handled = new HashSet<ObjectId>();
                 foreach (SheetInfo sheet in sheets)
                 {
-                    ArrangeReport r = AnnotArranger.Arrange(tr, sheet, labels, scene, o, write ? handled : new HashSet<ObjectId>(), !write, ppu);
+                    ArrangeReport r = AnnotArranger.Arrange(tr, sheet, labels, scene, o, handled, false, ppu);
                     total.Add(r);
-                    log.AppendLine($"  {sheet.Layout}: {sheet.Viewports.Count} viewports, {r.Checked} labels, " +
-                                   (write ? $"moved {r.Moved}, without a clear place {r.Unresolved}" : $"with a problem {r.Problems}") +
+                    log.AppendLine($"  {sheet.Layout}: {sheet.Viewports.Count} viewports, {r.Checked} labels, moved {r.Moved}, without a clear place {r.Unresolved}" +
                                    (r.Unmeasured > 0 ? $", could not be measured {r.Unmeasured}" : ""));
-                    foreach (ArrangeIssue i in r.Issues) log.AppendLine($"    {Describe(tr, labels, i.LabelId)}: {i.Text}");
                 }
-                if (write) tr.Commit(); else tr.Abort();
-                log.AppendLine(write
-                    ? $"Arrange: {total.Checked} labels on {sheets.Count} layouts: moved {total.Moved}, without a clear place {total.Unresolved} (listed), could not be measured {total.Unmeasured}."
-                    : $"Labels: {total.Checked} labels on {sheets.Count} layouts: {total.Problems} with a problem (overlap or outside the viewport), {total.Unmeasured} could not be measured. Changes nothing.");
+                // Then every layout checked as it now is: a label placed for one layout may be wrong on another that shows it.
+                ArrangeReport after = Check("after");
+                tr.Commit();
+                log.AppendLine($"Arrange: {total.Checked} labels on {sheets.Count} layouts: moved {total.Moved}, without a clear place {total.Unresolved}, could not be measured {total.Unmeasured}.");
+                log.AppendLine($"After arranging: {after.Problems} label problems left on these layouts (listed){lockedNote}.");
             }
         }
 
