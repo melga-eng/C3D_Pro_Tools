@@ -633,8 +633,8 @@ namespace C3DProTools
                 {
                     Info = l, Key = "label " + K(l.Id), PartKey = K(l.PartId), NetworkKey = K(net), Anchor = lo.Anchor, Location = lo.Location, Shape = lo.Hull,
                     Factor = lo.Factor, Orientation = orient, TextAngle = lo.TextAngleDeg, Fixed = !chosen || l.Locked, Dragged = lo.Dragged,
-                    WantsDragged = o.DraggedStyles.Contains(FormAnnotationStudio.StyleKey(l.Kind, l.Style ?? "")), OriginalLocation = l.Location, OriginalRatio = Ratio(e),
-                    MaySlide = l.IsPipe && o.SlideStyles.Contains(FormAnnotationStudio.StyleKey(l.Kind, l.Style ?? ""))
+                    WantsDragged = o.DraggedStyles.Contains(AnnotLabelRules.StyleKey(l.Kind, l.Style ?? "")), OriginalLocation = l.Location, OriginalRatio = Ratio(e),
+                    MaySlide = l.IsPipe && o.SlideStyles.Contains(AnnotLabelRules.StyleKey(l.Kind, l.Style ?? ""))
                 };
                 it.Networks = new HashSet<string>(extra);
                 if (it.NetworkKey != null) it.Networks.Add(it.NetworkKey);
@@ -648,12 +648,12 @@ namespace C3DProTools
             Dictionary<string, List<double>> dragAngles = new Dictionary<string, List<double>>();
             foreach (Item it in items.Where(i => i.Dragged && !double.IsNaN(i.TextAngle)))
             {
-                string key = FormAnnotationStudio.StyleKey(it.Info.Kind, it.Info.Style ?? "");
+                string key = AnnotLabelRules.StyleKey(it.Info.Kind, it.Info.Style ?? "");
                 if (!dragAngles.TryGetValue(key, out List<double> l)) dragAngles[key] = l = new List<double>();
                 l.Add(Math.Abs(LabelLayout.OffUpright(it.TextAngle * Math.PI / 180)) * 180 / Math.PI);
             }
             foreach (Item it in items)
-                it.UprightDragged = !dragAngles.TryGetValue(FormAnnotationStudio.StyleKey(it.Info.Kind, it.Info.Style ?? ""), out List<double> seen) ||
+                it.UprightDragged = !dragAngles.TryGetValue(AnnotLabelRules.StyleKey(it.Info.Kind, it.Info.Style ?? ""), out List<double> seen) ||
                                     seen.Count(a => a < 2) * 2 >= seen.Count;
 
             bool InArea(Item it, IEnumerable<(double X, double Y)> shape) =>
