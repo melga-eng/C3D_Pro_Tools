@@ -778,6 +778,10 @@ namespace C3DProTools
                 List<LabelSpot> tried = new List<LabelSpot>();
                 LabelSpot? spot = plan.Spot;
                 bool done = false;
+                // Second best: a tried place clear of every label, text, part and the viewport edge that only covers another
+                // label's leader line. Better than putting the label back where it overlaps labels.
+                LabelObstacles noLeaders = others.WithoutLeaders();
+                (LabelSpot spot, (double X, double Y) end)? fallback = null;
                 for (int attempt = 0; attempt < 5 && !done; attempt++)
                 {
                     if (attempt > 0 || !spot.HasValue)
@@ -792,13 +796,17 @@ namespace C3DProTools
                     LabelOutline got = Measure(tr, label, it, v, paperPerUnit);
                     if (got == null) break;
                     bool Bad(LabelOutline g) => ProblemIn(others, it, g.Hull, true).Length > 0 || others.LeaderCrossesText(start, g.Location, it.Key);
+                    bool OnlyLeaders(LabelOutline g) => ProblemIn(noLeaders, it, g.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, g.Location, it.Key);
                     if (Bad(got))
                     {
+                        if (fallback == null && OnlyLeaders(got)) fallback = (spot.Value, spot.Value.End);
                         LRect actual = LRect.Around(got.Hull);
                         double errX = spot.Value.Box.Center.X - actual.Center.X, errY = spot.Value.Box.Center.Y - actual.Center.Y;
                         if (Math.Abs(errX) <= 0.2 && Math.Abs(errY) <= 0.2) continue;
-                        if (!SetLocation(label, it, v, (spot.Value.End.X + errX, spot.Value.End.Y + errY))) continue;
+                        (double X, double Y) corrected = (spot.Value.End.X + errX, spot.Value.End.Y + errY);
+                        if (!SetLocation(label, it, v, corrected)) continue;
                         got = Measure(tr, label, it, v, paperPerUnit);
+                        if (got != null && Bad(got) && fallback == null && OnlyLeaders(got)) fallback = (spot.Value, corrected);
                         if (got == null || Bad(got)) continue;
                     }
                     live = others;
@@ -809,6 +817,26 @@ namespace C3DProTools
                     report.Moved++;
                     Record(it, got.Hull, start, got.Location, 1);
                     done = true;
+                }
+                if (!done && fallback.HasValue)
+                {
+                    LabelSpot fs = fallback.Value.spot;
+                    bool ratioOk = true;
+                    if (fs.Ratio.HasValue) try { SetRatio(label, fs.Ratio.Value); } catch (Exception) { ratioOk = false; }
+                    (double X, double Y) start = fs.Ratio.HasValue ? fs.Anchor : it.Anchor;
+                    LabelOutline got = ratioOk && SetLocation(label, it, v, fallback.Value.end) ? Measure(tr, label, it, v, paperPerUnit) : null;
+                    if (got != null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
+                    {
+                        live = others;
+                        if (fs.Ratio.HasValue) LabelLayout.ReserveAnchor(live, start, it.Key);
+                        live.AddPolygon(got.Hull, ObstacleGroup.Text, "label", part: it.Key);
+                        live.AddSegment(start, got.Location, ObstacleGroup.Leader, "leader", part: it.Key);
+                        live.Placed(LRect.Around(got.Hull), it.Key);
+                        report.Moved++;
+                        Record(it, got.Hull, start, got.Location, 1);
+                        report.Issues.Add(new ArrangeIssue { LabelId = it.Info.Id, Sheet = sheet.Layout, Where = it.Info.Anchor, Text = "Placed clear of labels and text, but over another label's leader" });
+                        done = true;
+                    }
                 }
                 if (!done)
                 {

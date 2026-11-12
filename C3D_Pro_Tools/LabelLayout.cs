@@ -145,6 +145,15 @@ namespace C3DProTools
             return c;
         }
 
+        /// <summary>A copy without any leader lines (for a second-best place that covers only another label's leader).</summary>
+        public LabelObstacles WithoutLeaders()
+        {
+            LabelObstacles c = new LabelObstacles();
+            foreach (Item it in _items) if (it.Group != ObstacleGroup.Leader) c.Add(it);
+            c._placed.AddRange(_placed);
+            return c;
+        }
+
         internal IEnumerable<LRect> PlacedBoxes => _items.Where(p => p.Group == ObstacleGroup.Text && !p.IsSegment).Select(p => p.Bounds);
 
         internal void Placed(LRect box, string owner) => _placed.Add((box, owner));
