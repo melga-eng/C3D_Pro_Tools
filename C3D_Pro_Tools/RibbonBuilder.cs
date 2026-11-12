@@ -221,7 +221,9 @@ namespace C3DProTools
             customTab.Panels.Add(new RibbonPanel { Source = runSource });
             runSource.Items.Add(Large("Profile Views\nRun", "C3DPROPV ", "Report, TOP fit, Match and DIMs for the alignments you name, with the profileViews settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
             runSource.Items.Add(new RibbonSeparator());
-            runSource.Items.Add(Large("Networks\nRun", "C3DPRONET ", "Report, Repair, rims to surface and fit to structures for the networks you name, with the networks settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
+            runSource.Items.Add(Large("Networks\nRun", "C3DPRONET ", "Report, Repair, Duplicates, rims to surface, fit to structures and the cover check for the networks you name, with the networks and pavement settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
+            runSource.Items.Add(new RibbonSeparator());
+            runSource.Items.Add(Large("Labels\nRun", "C3DPROLBL ", "Report, Add (label rules), Arrange and Reset for the layouts you name, with the labels settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
 
             isBuilt = true;
         }

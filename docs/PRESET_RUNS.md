@@ -79,6 +79,25 @@ surface is not found (it would erase earlier cover DIMs and draw none). Both com
 | `fitMaxMove` | 3.0 | An end that would move more than this (m) is left alone: its structure connection is wrong |
 | `connectLooseEnds` | true | Connect pipe ends lying inside a structure |
 
+## C3DPROLBL: labels (work in progress)
+
+| Step | What it does |
+|---|---|
+| Report | What Add would add, and every label shown on the layouts with an overlap or outside its viewport |
+| Add | Adds the labels the project's label rules (`labelRules`) ask for on the chosen layouts; a re-run adds nothing new |
+| Arrange | Places the labels of the chosen networks clear of each other and inside their viewports; locked labels stay |
+| Reset | Puts the labels of the chosen networks back where their style places them; locked labels stay |
+
+| Setting (`labels`) | Default | Meaning |
+|---|---|---|
+| `layouts` | `*` | Which layouts (sheets); wildcards, `!` to leave out |
+| `networks` | `*` | Networks whose labels may move; the others stay and count as obstacles |
+| `maxDistance`, `gap`, `margin` | as saved in Annotation Studio | Longest leader, clear space round a label, space inside the viewport edge (paper mm) |
+| `ruleSet` | the only one | Which `labelRules` set Add uses |
+
+Viewport scales and twists are never changed. On tile 124 sheet 102054 Arrange brings the problems from 30 to about 7; it
+is not yet clean on crowded sheets.
+
 ## Pavement (both commands)
 
 Each pavement kind is a surface that covers exactly its paved area (a data reference is fine). The first one listed wins where
