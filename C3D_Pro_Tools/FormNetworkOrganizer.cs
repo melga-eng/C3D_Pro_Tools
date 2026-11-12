@@ -109,7 +109,7 @@ namespace C3DProTools
                 int i = _grid.Rows.Add(ticked.Contains(n.Name), n.Name, n.Pipes, n.Structures, n.Copies, n.Sizes, n.Reference ? "Data shortcut" : n.Empty ? "Empty" : "");
                 _grid.Rows[i].Tag = n;
                 if (n.Reference) { _grid.Rows[i].ReadOnly = true; _grid.Rows[i].DefaultCellStyle.ForeColor = StyleUi.Muted; }
-                else if (n.Copies > 0) _grid.Rows[i].Cells["Copies"].Style.ForeColor = Color.Firebrick;
+                else if (n.Copies > 0) _grid.Rows[i].Cells["Copies"].Style.ForeColor = StyleUi.Danger;
             }
             _cbTarget.Items.Clear();
             foreach (NetworkSummary n in _networks.Where(x => !x.Reference)) _cbTarget.Items.Add(n.Name);

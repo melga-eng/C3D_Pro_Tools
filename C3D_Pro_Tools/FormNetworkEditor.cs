@@ -584,11 +584,11 @@ namespace C3DProTools
                 DataGridViewRow row = _swapGrid.Rows[i];
                 row.Tag = g;
                 row.Cells["networks"].ToolTipText = string.Join("\n", g.Networks.Take(30));
-                if (g.Problem != null) row.Cells["gets"].Style.ForeColor = Color.Firebrick;
+                if (g.Problem != null) row.Cells["gets"].Style.ForeColor = StyleUi.Danger;
                 // A size far from the current one (more than a quarter wider or narrower inside) is worth a second look.
                 else if (!double.IsNaN(g.ToChange) && g.Width > 0 && Math.Abs(g.ToChange) > 0.25 * g.Width)
                 {
-                    row.Cells["gets"].Style.ForeColor = Color.DarkOrange;
+                    row.Cells["gets"].Style.ForeColor = StyleUi.PillColors("Review").fore;
                     row.Cells["gets"].ToolTipText = $"{g.ToSize}\nInside {g.Width * 1000:0} mm now; this size is {g.ToChange * 1000:+0;-0} mm. The family may have no closer size.";
                 }
                 else if (g.Target == null) row.DefaultCellStyle.ForeColor = StyleUi.Muted;
@@ -1590,22 +1590,22 @@ namespace C3DProTools
                 OperationStatus.Succeeded => (
                     "Success",
                     $"Successfully split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces.",
-                    Color.FromArgb(21, 128, 61),
+                    StyleUi.PillColors("Exact").fore,
                     MessageBoxIcon.Information),
                 OperationStatus.PartiallySucceeded => (
                     "Partial Success",
                     $"Partially succeeded: split {r.PipesSplit} pipe(s) into {r.PiecesTotal} pieces; {r.Items.Count - r.PipesSplit} pipe(s) were not split.",
-                    Color.FromArgb(180, 83, 9),
+                    StyleUi.PillColors("Review").fore,
                     MessageBoxIcon.Warning),
                 OperationStatus.RolledBack => (
                     "Rolled Back",
                     "Rolled back: all split operations failed and were undone. The drawing was restored to its original state.",
-                    Color.FromArgb(185, 28, 28),
+                    StyleUi.Danger,
                     MessageBoxIcon.Warning),
                 OperationStatus.Rejected => (
                     "Rejected",
                     "Rejected: nothing was split. The request was invalid or the drawing did not match.",
-                    Color.FromArgb(190, 18, 60),
+                    StyleUi.Danger,
                     MessageBoxIcon.Warning),
                 OperationStatus.NoChange => (
                     "No Change",
