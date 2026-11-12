@@ -25,6 +25,9 @@ the defaults below. Example for the tile 124 drawing:
 }
 ```
 
+The first line of every run says where the settings came from. If it says `defaults: ... has no "networks" section`, the
+file is there but the section is missing, so add it.
+
 Names take wildcards (`*`, `?`), several separated by commas; a name starting with `!` is left out. When the command asks for
 alignments or networks, press Enter to use the file's value or type others for this run only.
 
