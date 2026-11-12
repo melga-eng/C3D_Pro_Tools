@@ -47,6 +47,8 @@ namespace C3DProTools
         public double Margin = 1.0;
         /// <summary>The elevation range is rounded outward to whole steps of this (m).</summary>
         public double DatumIncrement = 1.0;
+        /// <summary>Keep each view's own elevation range; only widen one that cuts off its profiles or parts.</summary>
+        public bool ElevationOnlyWhenCut;
         public string TopPrefix = "TOP - ";
     }
 
@@ -518,7 +520,21 @@ namespace C3DProTools
             if (o.Elevation && FitRange(tr, view, roleIds.Values.Where(x => !x.IsNull), view.StationStart, view.StationEnd, out double lo, out double hi, surfaces.Parts))
             {
                 (double min, double max) = ProfileViewMath.DatumRange(lo, hi, o.Margin, o.DatumIncrement);
-                if (view.ElevationRangeMode != ElevationRangeType.UserSpecified || Math.Abs(view.ElevationMin - min) > 1e-6 || Math.Abs(view.ElevationMax - max) > 1e-6)
+                bool userRange = view.ElevationRangeMode == ElevationRangeType.UserSpecified;
+                if (o.ElevationOnlyWhenCut)
+                {
+                    // A range set by hand is kept; it is only widened (never narrowed) where it cuts something off.
+                    if (userRange && (lo < view.ElevationMin - 1e-6 || hi > view.ElevationMax + 1e-6))
+                    {
+                        // Only the side that cuts moves, to the next whole datum step (no extra margin).
+                        (double cutMin, double cutMax) = ProfileViewMath.DatumRange(lo, hi, 0, o.DatumIncrement);
+                        double newMin = lo < view.ElevationMin - 1e-6 ? cutMin : view.ElevationMin;
+                        double newMax = hi > view.ElevationMax + 1e-6 ? cutMax : view.ElevationMax;
+                        Change("Elevation range", $"{view.ElevationMin:0.##} – {view.ElevationMax:0.##} (cuts off {lo:0.##} – {hi:0.##})", $"{newMin:0.##} – {newMax:0.##}");
+                        if (write) try { ProfileCreation.SetElevationRangeExact(view, newMin, newMax); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
+                    }
+                }
+                else if (!userRange || Math.Abs(view.ElevationMin - min) > 1e-6 || Math.Abs(view.ElevationMax - max) > 1e-6)
                 {
                     Change("Elevation range", $"{view.ElevationMin:0.##} – {view.ElevationMax:0.##}{(view.ElevationRangeMode == ElevationRangeType.Automatic ? " (automatic)" : "")}", $"{min:0.##} – {max:0.##}");
                     if (write) try { ProfileCreation.SetElevationRange(view, lo, hi, o.Margin, o.DatumIncrement); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
@@ -756,7 +772,12 @@ namespace C3DProTools
                     foreach (Point3d pt in new[] { pipe.StartPoint, pipe.EndPoint })
                         if (InRange(al, pt, s0, s1)) { Add(pt.Z - half); Add(pt.Z + half); }
                 }
-                else if (obj is Structure st && InRange(al, st.Location, s0, s1)) { try { Add(st.SumpElevation); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
+                else if (obj is Structure st && InRange(al, st.Location, s0, s1))
+                {
+                    // Bottom and top: a structure standing above the range is cut off, and its label with it.
+                    try { Add(st.SumpElevation); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { Add(st.RimElevation); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
                 else if (obj is PressurePipe pp)
                 {
                     double half = 0;

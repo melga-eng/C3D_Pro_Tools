@@ -221,7 +221,12 @@ namespace C3DProTools
         public static void SetElevationRange(ProfileView view, double lowest, double highest, double margin, double increment = 1.0)
         {
             (double min, double max) = ProfileViewMath.DatumRange(lowest, highest, margin, increment);
+            SetElevationRangeExact(view, min, max);
+        }
 
+        /// <summary>The view's elevation range set to exactly these levels (no margin, no rounding).</summary>
+        public static void SetElevationRangeExact(ProfileView view, double min, double max)
+        {
             view.ElevationRangeMode = ElevationRangeType.UserSpecified;
             // Order matters: the view rejects a minimum above its current maximum (and vice versa).
             if (min < view.ElevationMax) { view.ElevationMin = min; view.ElevationMax = max; }
