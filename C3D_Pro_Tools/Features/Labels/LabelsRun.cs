@@ -42,6 +42,8 @@ namespace C3DProTools.Features.Labels
         public List<string> DraggedStyles { get; set; }
         public List<string> SlideStyles { get; set; }
         public List<string> KeepClearNetworks { get; set; }
+        /// <summary>When set, each viewport's arrangement is written there as a case file (to replay it in the unit tests).</summary>
+        public string ExportFolder { get; set; } = "";
 
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions
         {
@@ -96,6 +98,7 @@ namespace C3DProTools.Features.Labels
             DraggedStyles = new HashSet<string>(DraggedStyles ?? saved.DraggedStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
             SlideStyles = new HashSet<string>(SlideStyles ?? saved.SlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
             KeepClearNetworks = new HashSet<string>(KeepClearNetworks ?? saved.KeepClearNetworks ?? new List<string>(), StringComparer.OrdinalIgnoreCase),
+            ExportFolder = string.IsNullOrWhiteSpace(ExportFolder) ? null : ExportFolder,
         };
     }
 
