@@ -56,6 +56,19 @@ namespace C3DProTools.ProfileTool
         /// <summary>Elevation ranges: Widen (default: keep each view's range, widen only one that cuts something off), Fit (refit every view), Leave.</summary>
         public string MatchElevation { get; set; } = "Widen";
 
+        /// <summary>
+        /// Split: a view longer than this (m of stations) is split into parts of this length (the last one takes the rest),
+        /// placed one under another below it, each with its own level range and the long view's style, bands, parts and labels.
+        /// The long view stays. A view whose first part already exists is left alone.
+        /// </summary>
+        public double SplitLength { get; set; } = 450;
+        /// <summary>Part names: {AlignmentName} {ViewName} {n} {StartSta} {EndSta}.</summary>
+        public string SplitName { get; set; } = "{AlignmentName} (Part-{n})";
+        /// <summary>Space (drawing units) between the long view and the parts, and between parts.</summary>
+        public double SplitGap { get; set; } = 30;
+        /// <summary>A last part shorter than this (m) is joined to the one before it.</summary>
+        public double SplitMinLast { get; set; } = 100;
+
         /// <summary>Role rules with this preset's surface names over the saved ones; null when the preset names none.</summary>
         public ProfileRoleRules RoleRules()
         {
@@ -117,7 +130,7 @@ namespace C3DProTools.ProfileTool
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nProfile views") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Top", "Match", "Dims", "Pavement", "All" }) kw.Keywords.Add(k);
+            foreach (string k in new[] { "Report", "Top", "Match", "Split", "Dims", "Pavement", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -156,6 +169,8 @@ namespace C3DProTools.ProfileTool
                 bool doMatch = mode == "Match" || (mode == "All" && (s.MatchTemplate.Length > 0 || s.MatchSourceView.Length > 0));
                 TopStep(doc, civil, s, doTop, log);
                 if (doMatch || mode == "Report") MatchStep(doc, civil, s, doMatch, log);
+                // Split before Dims and Pavement, so the new parts get their DIMs and pavement labels in the same run.
+                if (mode == "Split" || mode == "All" || mode == "Report") SplitStep(doc, civil, s, mode == "Split" || mode == "All", log);
                 DimStep(doc, s, doDims, log);
                 PavementStep(doc, civil, s, mode == "Pavement" || mode == "All", log);
             }
@@ -205,6 +220,59 @@ namespace C3DProTools.ProfileTool
         /// Marks where each view's alignment enters and leaves each pavement (from the pavement surfaces) with a station-elevation
         /// label on the proposed ground; the tool's earlier pavement labels in the view are replaced, hand-made ones stay.
         /// </summary>
+        private static void SplitStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
+        {
+            if (s.SplitLength <= 0) { log.AppendLine("Split: off (splitLength is 0)."); return; }
+            Database db = doc.Database;
+            ProfileRoleRules rules = s.RoleRules() ?? ProfileViewToolsSettings.Load().Rules ?? new ProfileRoleRules();
+            var o = new SplitOptions
+            {
+                Length = s.SplitLength, Round = 0, Overlap = 0, MinLast = Math.Max(0, s.SplitMinLast), Below = true, Gap = Math.Max(0, s.SplitGap),
+                NamePattern = s.SplitName, TrimParts = true, CopyLabels = true, FitElevation = true, DatumIncrement = 1.0, Margin = 1.0,
+                Rules = rules,
+            };
+            // Long views of the chosen alignments; one whose first part already exists was split before.
+            var todo = new List<(ObjectId id, string name, List<SplitPart> parts)>();
+            int already = 0;
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                var names = new HashSet<string>(ProfileViewMatch.AllViews(tr, db).Select(id => ((ProfileView)tr.GetObject(id, OpenMode.ForRead)).Name), StringComparer.OrdinalIgnoreCase);
+                var surfaces = new ProfileViewMatch.Surfaces(tr, civil);
+                foreach (ObjectId aid in civil.GetAlignmentIds())
+                {
+                    if (!(tr.GetObject(aid, OpenMode.ForRead) is Alignment al) || !s.Includes(al.Name)) continue;
+                    foreach (ObjectId vid in al.GetProfileViewIds())
+                    {
+                        var v = (ProfileView)tr.GetObject(vid, OpenMode.ForRead);
+                        if (v.StationEnd - v.StationStart <= s.SplitLength + 0.5) continue;
+                        List<SplitPart> parts = ProfileViewSplit.Plan(tr, v, o, surfaces);
+                        if (parts.Count < 2) continue;
+                        if (names.Contains(parts[0].Name)) { already++; continue; }
+                        todo.Add((vid, v.Name, parts));
+                    }
+                }
+                tr.Commit();
+            }
+            log.AppendLine($"Split ({s.SplitLength:0.##} m parts named \"{s.SplitName}\"): {todo.Count} long views to split into {todo.Sum(t => t.parts.Count)} parts" +
+                           (already > 0 ? $", {already} split before (left alone)" : "") + ".");
+            foreach (var t in todo)
+                log.AppendLine($"  {t.name}: " + string.Join("; ", t.parts.Select(p => $"{p.Name} {p.S0:0.###}-{p.S1:0.###} levels {p.Low:0.#}-{p.High:0.#}")));
+            if (!write || todo.Count == 0) return;
+            int made = 0;
+            foreach (var t in todo)
+            {
+                var notes = new List<string>();
+                try
+                {
+                    List<SplitPart> done = ProfileViewSplit.Apply(db, civil, t.id, t.parts, o, notes);
+                    made += done.Count(p => !p.ViewId.IsNull);
+                }
+                catch (System.Exception ex) { notes.Add($"failed: {ex.Message}"); }
+                foreach (string n in notes) log.AppendLine($"  {t.name}: {n}");
+            }
+            log.AppendLine($"Split: {made} parts made.");
+        }
+
         private static void PavementStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
         {
             PavementSettings ps = PavementSettings.Load(doc.Name, out string problem);
