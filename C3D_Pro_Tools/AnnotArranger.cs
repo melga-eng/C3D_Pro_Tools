@@ -560,8 +560,8 @@ namespace C3DProTools
             for (int i = 0; i < 16; i++)
             {
                 double a = i * Math.PI / 8, dx = r * Math.Cos(a), dy = r * Math.Sin(a);
-                LRect? box = Placed(tr, label, it, v, paperPerUnit, (it.Anchor.X + dx, it.Anchor.Y + dy), out _);
-                if (box.HasValue) shape.Samples.Add((a, box.Value));
+                LRect? box = Placed(tr, label, it, v, paperPerUnit, (it.Anchor.X + dx, it.Anchor.Y + dy), out LabelOutline got);
+                if (box.HasValue) shape.Samples.Add((a, box.Value, Relative(got, (it.Anchor.X + dx, it.Anchor.Y + dy))));
             }
             return shape;
         }
@@ -571,6 +571,10 @@ namespace C3DProTools
         /// gives the text at the first set depends on where the label was before; the second set is always the same for the same
         /// place (measured on tile 124: the first set flipped structure labels at the same place either way).
         /// </summary>
+        /// <summary>The measured text outline relative to the leader end.</summary>
+        private static List<(double X, double Y)> Relative(LabelOutline got, (double X, double Y) end) =>
+            got?.Hull.Select(p => (p.X - end.X, p.Y - end.Y)).ToList();
+
         private static LRect? Placed(Transaction tr, CLabel label, Item it, SheetViewport v, double paperPerUnit, (double X, double Y) end, out LabelOutline got)
         {
             got = null;
@@ -798,7 +802,7 @@ namespace C3DProTools
                 if (plan.Spot.HasValue)
                 {
                     if (plan.Spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(live, plan.Spot.Value.Anchor, it.Key);
-                    LabelLayout.Claim(live, plan.Spot.Value.Box, plan.Start, plan.Spot.Value.End, it.Key);
+                    LabelLayout.Claim(live, plan.Spot.Value, plan.Start, it.Key);
                 }
             // Planned labels first: one put back where it was would block the planned places of those after it. What is left
             // gets one more try at the end, around where everything actually went.
@@ -838,7 +842,7 @@ namespace C3DProTools
                     {
                         if (fallback == null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
                             fallback = (spot.Value, spot.Value.End);
-                        plan.Shape.Learn(spot.Value.End.X - start.X, spot.Value.End.Y - start.Y, rel.Value);
+                        plan.Shape.Learn(spot.Value.End.X - start.X, spot.Value.End.Y - start.Y, rel.Value, Relative(got, spot.Value.End));
                         continue;
                     }
                     live = others;

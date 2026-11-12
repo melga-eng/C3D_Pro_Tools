@@ -233,6 +233,7 @@ namespace C3DProTools.ProfileTool
             };
             // Long views of the chosen alignments; one whose first part already exists was split before.
             var todo = new List<(ObjectId id, string name, List<SplitPart> parts)>();
+            var partly = new List<string>();
             int already = 0;
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
@@ -247,14 +248,19 @@ namespace C3DProTools.ProfileTool
                         if (v.StationEnd - v.StationStart <= s.SplitLength + 0.5) continue;
                         List<SplitPart> parts = ProfileViewSplit.Plan(tr, v, o, surfaces);
                         if (parts.Count < 2) continue;
-                        if (names.Contains(parts[0].Name)) { already++; continue; }
+                        // All parts there: split before. Only some: an earlier split stopped part way; left for the user to
+                        // finish or delete (a second set of parts would be named "(2)").
+                        int existing = parts.Count(p => names.Contains(p.Name));
+                        if (existing == parts.Count) { already++; continue; }
+                        if (existing > 0) { partly.Add($"{v.Name} ({existing} of {parts.Count} parts there: {string.Join(", ", parts.Where(p => !names.Contains(p.Name)).Select(p => p.Name))} missing)"); continue; }
                         todo.Add((vid, v.Name, parts));
                     }
                 }
                 tr.Commit();
             }
             log.AppendLine($"Split ({s.SplitLength:0.##} m parts named \"{s.SplitName}\"): {todo.Count} long views to split into {todo.Sum(t => t.parts.Count)} parts" +
-                           (already > 0 ? $", {already} split before (left alone)" : "") + ".");
+                           (already > 0 ? $", {already} split before (left alone)" : "") +
+                           (partly.Count > 0 ? $", {partly.Count} only partly split (left alone; delete their parts and run Split again): {string.Join("; ", partly)}" : "") + ".");
             foreach (var t in todo)
                 log.AppendLine($"  {t.name}: " + string.Join("; ", t.parts.Select(p => $"{p.Name} {p.S0:0.###}-{p.S1:0.###} levels {p.Low:0.#}-{p.High:0.#}")));
             if (!write || todo.Count == 0) return;

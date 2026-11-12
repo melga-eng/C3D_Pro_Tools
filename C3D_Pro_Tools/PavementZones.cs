@@ -39,19 +39,24 @@ namespace C3DProTools
     internal static class PavementZones
     {
         /// <summary>
-        /// Inside the area and at least <paramref name="band"/> from its edge: the point and every point on circles of that
-        /// radius and half of it (every 15°) are inside. Off by at most 1.5 % of the band along a straight edge.
+        /// Inside the area and at least <paramref name="band"/> from its edge (outer edge or a hole): the point and every point on
+        /// rings 2 m apart out to that radius (every 11.25°) are inside, the outer ring first. Along a straight edge it is off by
+        /// at most 0.5 % of the band; a hole or notch smaller than about 3 m across within the band can be missed.
         /// </summary>
         public static bool InsideBy(Func<double, double, bool> inside, double x, double y, double band)
         {
             if (!inside(x, y)) return false;
             if (band <= 0) return true;
-            foreach (double r in new[] { band, band / 2 })
-                for (int i = 0; i < 24; i++)
+            int rings = Math.Max(1, (int)Math.Ceiling(band / 2.0));
+            for (int k = rings; k >= 1; k--)
+            {
+                double r = band * k / rings;
+                for (int i = 0; i < 32; i++)
                 {
-                    double a = i * Math.PI / 12;
+                    double a = i * Math.PI / 16;
                     if (!inside(x + r * Math.Cos(a), y + r * Math.Sin(a))) return false;
                 }
+            }
             return true;
         }
 

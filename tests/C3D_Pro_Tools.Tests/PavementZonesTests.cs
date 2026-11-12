@@ -19,6 +19,10 @@ namespace C3D_Pro_Tools.Tests
             Assert.False(PavementZones.InsideBy(Surface, 84, 0, 16.5));
             Assert.False(PavementZones.InsideBy(Surface, -5, 0, 16.5));
             Assert.True(PavementZones.InsideBy(Surface, 5, 0, 0));
+
+            // A 1 m hole 4 m away is within the band (review case).
+            bool Holed(double x, double y) => Surface(x, y) && (x - 54) * (x - 54) + y * y > 1;
+            Assert.False(PavementZones.InsideBy(Holed, 50, 0, 16.5));
         }
 
         [Fact]

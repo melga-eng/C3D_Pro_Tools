@@ -150,7 +150,8 @@ namespace C3DProTools
         public LabelObstacles WithoutLeaders()
         {
             LabelObstacles c = new LabelObstacles();
-            foreach (Item it in _items) if (it.Group != ObstacleGroup.Leader) c.Add(it);
+            // Leader lines go; the reserved labelled points stay (a label covering one hides where another label points).
+            foreach (Item it in _items) if (it.Group != ObstacleGroup.Leader || it.Kind == LabelLayout.AnchorKind) c.Add(it);
             c._placed.AddRange(_placed);
             return c;
         }
@@ -230,30 +231,41 @@ namespace C3DProTools
         /// from the anchor). When there are any, the box of the nearest angle is used and the right/left guess is not: Civil 3D
         /// picks the side of turned text by its own rule, which only measuring shows.
         /// </summary>
-        public List<(double Angle, LRect Box)> Samples = new List<(double Angle, LRect Box)>();
+        /// <remarks>
+        /// Each sample also keeps the text's outline (convex, relative to the leader end; null when not measured): text turned
+        /// with its pipe fills only a slim slanted strip of its box, so planning with the box alone wastes most of the room.
+        /// </remarks>
+        public List<(double Angle, LRect Box, List<(double X, double Y)> Hull)> Samples = new List<(double Angle, LRect Box, List<(double X, double Y)> Hull)>();
+
+        private int Nearest(double dx, double dy)
+        {
+            double a = Math.Atan2(dy, dx), g = double.MaxValue;
+            int best = 0;
+            for (int i = 0; i < Samples.Count; i++)
+            {
+                double d = Math.Abs(Math.IEEERemainder(a - Samples[i].Angle, 2 * Math.PI));
+                if (d < g) { g = d; best = i; }
+            }
+            return best;
+        }
 
         /// <summary>The box for a leader ending (dx, dy) from the anchor, the text to the right or left of its end.</summary>
         public LRect BoxFor(double dx, double dy, bool right)
         {
-            if (Samples.Count > 0)
-            {
-                double a = Math.Atan2(dy, dx);
-                double Gap(double b) => Math.Abs(Math.IEEERemainder(a - b, 2 * Math.PI));
-                LRect best = Samples[0].Box;
-                double g = double.MaxValue;
-                foreach ((double angle, LRect box) in Samples) if (Gap(angle) < g) { g = Gap(angle); best = box; }
-                return best;
-            }
+            if (Samples.Count > 0) return Samples[Nearest(dx, dy)].Box;
             if (dy >= 0) return right ? (UpRight ?? Right) : (UpLeft ?? Left);
             return right ? (DownRight ?? Right) : (DownLeft ?? Left);
         }
 
+        /// <summary>The text's outline (relative to the leader end) for a leader at (dx, dy); null when only boxes are known.</summary>
+        public List<(double X, double Y)> HullFor(double dx, double dy) => Samples.Count > 0 ? Samples[Nearest(dx, dy)].Hull : null;
+
         /// <summary>Records what the drawing showed for a leader at (dx, dy): replaces a sample within 3° of it, else adds one.</summary>
-        public void Learn(double dx, double dy, LRect box)
+        public void Learn(double dx, double dy, LRect box, List<(double X, double Y)> hull = null)
         {
             double a = Math.Atan2(dy, dx);
             Samples.RemoveAll(s => Math.Abs(Math.IEEERemainder(a - s.Angle, 2 * Math.PI)) < 3 * Math.PI / 180);
-            Samples.Add((a, box));
+            Samples.Add((a, box, hull));
         }
     }
 
@@ -268,6 +280,14 @@ namespace C3DProTools
         /// <summary>Where the leader starts, and the ratio along its pipe, when the label slides there (null: its own anchor).</summary>
         public (double X, double Y) Anchor;
         public double? Ratio;
+        /// <summary>The text's exact outline here (convex; null: the box is the outline).</summary>
+        public List<(double X, double Y)> Hull;
+        /// <summary>What the text covers: its outline when measured, else its box.</summary>
+        public IReadOnlyList<(double X, double Y)> Outline => Hull ?? Box.Corners();
+        /// <summary>The text covers the point.</summary>
+        public bool Covers((double X, double Y) p) => Hull != null ? !LabelLayout.Separated(Hull, new[] { p, p }, 0) : Box.Contains(p);
+        /// <summary>The outline moved to a leader end: <paramref name="relative"/> plus (x, y); null stays null.</summary>
+        public static List<(double X, double Y)> At(List<(double X, double Y)> relative, double x, double y) => relative?.Select(p => (p.X + x, p.Y + y)).ToList();
         public override string ToString() => $"dir {Direction} end ({End.X:0.0}, {End.Y:0.0}) cost {Cost:0.00}" + (Ratio.HasValue ? $" at ratio {Ratio:0.00}" : "");
     }
 
@@ -445,9 +465,13 @@ namespace C3DProTools
                     foreach (bool right in ix > 0 ? new[] { true } : ix < 0 ? new[] { false } : new[] { true, false })
                     {
                         LRect box = shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
-                        if (box.Contains(a)) continue;
+                        LabelSpot spot = new LabelSpot { Box = box, Hull = LabelSpot.At(shape.HullFor(dx, dy), end.X, end.Y), End = end, Anchor = a, Direction = direction };
+                        if (spot.Covers(a)) continue;
                         double sideCost = Math.Abs(o.X) > 0.3 ? (right == (o.X > 0) ? 0 : 0.1) : (right ? 0 : 0.05);
-                        spots.Add(new LabelSpot { Box = box, End = end, Anchor = a, Direction = direction, Cost = cost + sideCost });
+                        spot.Cost = cost + sideCost;
+                        spots.Add(spot);
+                        // Measured shapes do not depend on the side guess: one spot per leader end.
+                        if (shape.Samples.Count > 0) break;
                     }
                 }
             return spots.OrderBy(sp => sp.Cost).ToList();
@@ -471,12 +495,13 @@ namespace C3DProTools
                             double length = Math.Sqrt(dx * dx + dy * dy);
                             if (length < rules.MinLeader || length > rules.MaxDistance) continue;
                             var box = relative.Offset(x, y);
-                            if (box.Contains(a)) continue;
+                            var hull = LabelSpot.At(shape.HullFor(0, up ? 1 : -1), x, y);
+                            if (new LabelSpot { Box = box, Hull = hull }.Covers(a)) continue;
                             double off = OffAxis(dx, dy);
                             double ol = Math.Sqrt(outward.X * outward.X + outward.Y * outward.Y);
                             double inward = ol > 1e-9 ? Math.Max(0, -(dx * outward.X + dy * outward.Y) / (length * ol)) : 0;
                             double sideCost = Math.Abs(outward.X) > 0.3 ? (right == (outward.X > 0) ? 0 : 0.1) : (right ? 0 : 0.05);
-                            yield return new LabelSpot { Box = box, End = (x, y), Anchor = a, Direction = off > 1e-9 ? 3 : Math.Abs(dx) < 1e-9 ? (dy > 0 ? 0 : 1) : 2,
+                            yield return new LabelSpot { Box = box, Hull = hull, End = (x, y), Anchor = a, Direction = off > 1e-9 ? 3 : Math.Abs(dx) < 1e-9 ? (dy > 0 ? 0 : 1) : 2,
                                 Cost = length / rules.MaxDistance + rules.SlantCost * off / 45 +
                                     ((rules.PreferUp ? dy < 0 : dy > 0) ? rules.OtherWayCost : 0) + 0.4 * inward + sideCost };
                         }
@@ -503,14 +528,14 @@ namespace C3DProTools
             double reach = rules.MaxDistance;
             var stacks = StackSpots(obstacles, a, shape, rules, outward);
             if (staticObstacles != null) stacks = stacks.Where(s =>
-                staticObstacles.Blocker(s.Box, rules.Gap, networks, own) == null && !staticObstacles.LeaderCrossesText(a, s.End, own));
+                staticObstacles.Blocker(s.Outline, rules.Gap, networks, own) == null && !staticObstacles.LeaderCrossesText(a, s.End, own));
             int skipFirst = staticObstacles?.Count ?? 0;
             foreach (LabelSpot s in (candidates ?? Spots(a, shape, rules, outward)).Concat(stacks).OrderBy(s => s.Cost))
             {
                 if (best.HasValue && s.Cost - rules.AlignBonus >= best.Value.Cost) break;
                 if (skip != null && skip.Any(k => Math.Abs(k.End.X - s.End.X) < 1e-6 && Math.Abs(k.End.Y - s.End.Y) < 1e-6 && Math.Abs(k.Box.MinX - s.Box.MinX) < 1e-6)) continue;
                 if (inArea != null && !inArea(s.Box)) continue;
-                if (obstacles.Blocker(s.Box, rules.Gap, networks, own, skipFirst: skipFirst) != null) continue;
+                if (obstacles.Blocker(s.Outline, rules.Gap, networks, own, skipFirst: skipFirst) != null) continue;
                 if (obstacles.LeaderCrossesText(a, s.End, own, skipFirst)) continue;
                 double cost = s.Cost + rules.CrossingCost * obstacles.LeaderCrossings(a, s.End, own) - (obstacles.LinesUp(s.Box, reach) ? rules.AlignBonus : 0);
                 if (unplaced != null)
@@ -523,7 +548,7 @@ namespace C3DProTools
                         if (d < scale) cost += rules.OcclusionCost * (1 - d / scale);
                     }
                 }
-                if (!best.HasValue || cost < best.Value.Cost) best = new LabelSpot { Box = s.Box, End = s.End, Anchor = a, Direction = s.Direction, Cost = cost };
+                if (!best.HasValue || cost < best.Value.Cost) best = new LabelSpot { Box = s.Box, Hull = s.Hull, End = s.End, Anchor = a, Direction = s.Direction, Cost = cost };
             }
             return best;
         }
@@ -539,6 +564,13 @@ namespace C3DProTools
         public const string AnchorKind = "labelled point";
 
         /// <summary>Records a placed dragged label: its text and its leader become obstacles for the labels after it.</summary>
+        public static void Claim(LabelObstacles obstacles, LabelSpot spot, (double X, double Y) anchor, string label)
+        {
+            obstacles.AddPolygon(spot.Outline, ObstacleGroup.Text, "label", part: label);
+            obstacles.AddSegment(anchor, spot.End, ObstacleGroup.Leader, "leader", part: label);
+            obstacles.Placed(spot.Box, label);
+        }
+
         public static void Claim(LabelObstacles obstacles, LRect box, (double X, double Y) anchor, (double X, double Y) end, string label)
         {
             obstacles.AddRect(box, ObstacleGroup.Text, "label", part: label);
@@ -592,7 +624,7 @@ namespace C3DProTools
         {
             if (!p.Spot.HasValue) return;
             if (p.Spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(o, p.Spot.Value.Anchor, p.Key);
-            LabelLayout.Claim(o, p.Spot.Value.Box, p.Start, p.Spot.Value.End, p.Key);
+            LabelLayout.Claim(o, p.Spot.Value, p.Start, p.Key);
         }
 
         private static int Crossings(List<PlanLabel> labels)
@@ -634,7 +666,7 @@ namespace C3DProTools
                     }
                     else spots = LabelLayout.Spots(anchor, l.Shape, r, l.OutwardVec)
                         .Where(s => (l.InArea == null || l.InArea(s.Box)) &&
-                            l.StaticObstacles.Blocker(s.Box, r.Gap, l.Networks, l.Key) == null &&
+                            l.StaticObstacles.Blocker(s.Outline, r.Gap, l.Networks, l.Key) == null &&
                             !l.StaticObstacles.LeaderCrossesText(anchor, s.End, l.Key)).ToList();
                     l.Candidates[key] = spots;
                 }
@@ -694,7 +726,7 @@ namespace C3DProTools
                     {
                         var r = Copy(rules, entry.Key.Up);
                         var edges = LabelLayout.StackSpots(obstacles, (entry.Key.X, entry.Key.Y), l.Shape, r, l.OutwardVec)
-                            .Where(s => (l.InArea == null || l.InArea(s.Box)) && baseObs.Blocker(s.Box, r.Gap, l.Networks, l.Key) == null &&
+                            .Where(s => (l.InArea == null || l.InArea(s.Box)) && baseObs.Blocker(s.Outline, r.Gap, l.Networks, l.Key) == null &&
                                 !baseObs.LeaderCrossesText(s.Anchor, s.End, l.Key));
                         l.Candidates[entry.Key] = entry.Value.Concat(edges).OrderBy(s => s.Cost).ToList();
                     }
@@ -877,8 +909,15 @@ namespace C3DProTools
 
         private static bool Compatible(LabelSpot a, LabelSpot b, double gap)
         {
-            if (a.Box.Grow(gap).Overlaps(b.Box)) return false;
-            if (a.Box.Hits(b.Anchor, b.End) || b.Box.Hits(a.Anchor, a.End)) return false;
+            if (a.Hull == null && b.Hull == null)
+            {
+                if (a.Box.Grow(gap).Overlaps(b.Box)) return false;
+                if (a.Box.Hits(b.Anchor, b.End) || b.Box.Hits(a.Anchor, a.End)) return false;
+                return true;
+            }
+            // Measured outlines: the texts apart by the gap, and neither leader through the other's text.
+            if (!LabelLayout.Separated(a.Outline, b.Outline, gap)) return false;
+            if (!LabelLayout.Separated(a.Outline, new[] { b.Anchor, b.End }, 0) || !LabelLayout.Separated(b.Outline, new[] { a.Anchor, a.End }, 0)) return false;
             return true;
         }
 
@@ -963,7 +1002,7 @@ namespace C3DProTools
                     foreach (LabelSpot sa in At(others, a, oldA.Value, oldB.Value.End, rules))
                     {
                         LabelObstacles o = others.Clone();
-                        LabelLayout.Claim(o, sa.Box, sa.Ratio.HasValue ? sa.Anchor : a.Anchor, sa.End, a.Key);
+                        LabelLayout.Claim(o, sa, sa.Ratio.HasValue ? sa.Anchor : a.Anchor, a.Key);
                         foreach (LabelSpot sb in At(o, b, oldB.Value, oldA.Value.End, rules)) tries.Add((sa, sb));
                     }
                     foreach ((PlanLabel first, PlanLabel second) in new[] { (a, b), (b, a) })
@@ -1036,13 +1075,15 @@ namespace C3DProTools
             foreach (bool right in dx > 1e-9 ? new[] { true } : dx < -1e-9 ? new[] { false } : new[] { true, false })
             {
                 LRect box = l.Shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
-                if (box.Contains(start) || (l.InArea != null && !l.InArea(box))) continue;
-                if (o.Blocker(box, rules.Gap, l.Networks, l.Key) != null) continue;
-                yield return new LabelSpot
+                LabelSpot spot = new LabelSpot
                 {
-                    Box = box, End = end, Anchor = start, Ratio = from.Ratio, Direction = 3,
+                    Box = box, Hull = LabelSpot.At(l.Shape.HullFor(dx, dy), end.X, end.Y), End = end, Anchor = start, Ratio = from.Ratio, Direction = 3,
                     Cost = length / rules.MaxDistance + rules.SlantCost * LabelLayout.OffAxis(dx, dy) / 45
                 };
+                if (spot.Covers(start) || (l.InArea != null && !l.InArea(box))) continue;
+                if (o.Blocker(spot.Outline, rules.Gap, l.Networks, l.Key) != null) continue;
+                yield return spot;
+                if (l.Shape.Samples.Count > 0) yield break;
             }
         }
     }

@@ -124,7 +124,8 @@ duct type (type B under taxiway fails; type A where B is asked is only noted); `
 
 `edgeBand` (m) is a strip along the inside of the surface's edge that the cover check does not hold to that zone's rule:
 the taxiway surface includes its 10.5 m shoulder and 6 m blast pad, so 16.5. There the next zone or unpaved applies (a duct
-meeting the taxiway rule passes too). The profile view labels still mark the surface edge. A zone may set `maxCover`; without
+meeting the taxiway rule passes too); a hole in the surface counts as an edge, but one smaller than about 3 m across may be
+missed. The profile view labels still mark the surface edge. A zone may set `maxCover`; without
 it the general `coverMax` (in `networks`; 6 m on this project) applies. The labels use the styles `startLabelStyle` / `endLabelStyle` when set (a zone
 may set its own); otherwise the tool makes "C3DPRO Start Of Road Pavement" and so on from the drawing's station-elevation style
 (`baseLabelStyle`), reading "Start Of Road Pavement / CH:76.184". The duct type comes from the duct name (IC-124-IC3A-06 is A)
