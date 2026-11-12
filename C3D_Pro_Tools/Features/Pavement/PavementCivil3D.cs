@@ -70,7 +70,8 @@ namespace C3DProTools.Features.Pavement
         public const string RegApp = "C3DPRO_PAVEMENT";
 
         /// <summary>One "is this point paved by zone i" test per zone; a zone whose surface is not in the drawing gets null and is named in <paramref name="missing"/>.</summary>
-        public static List<Func<double, double, bool>> Tests(Transaction tr, CivilDocument civil, PavementSettings s, List<string> missing)
+        /// <param name="edgeBands">For the cover check: a zone's <see cref="PavementZone.EdgeBand"/> along the inside of its edge does not count as that zone.</param>
+        public static List<Func<double, double, bool>> Tests(Transaction tr, CivilDocument civil, PavementSettings s, List<string> missing, bool edgeBands = false)
         {
             var byName = new Dictionary<string, Surface>(StringComparer.OrdinalIgnoreCase);
             foreach (ObjectId id in civil.GetSurfaceIds())
@@ -79,12 +80,14 @@ namespace C3DProTools.Features.Pavement
             foreach (PavementZone z in s.Zones)
             {
                 if (!byName.TryGetValue((z.Surface ?? "").Trim(), out Surface surface)) { missing.Add(z.Surface); tests.Add(null); continue; }
-                tests.Add((x, y) =>
+                bool On(double x, double y)
                 {
                     // Outside the surface (or in one of its holes) there is no elevation: not paved.
                     try { double e = surface.FindElevationAtXY(x, y); return !double.IsNaN(e); }
                     catch (System.Exception) { return false; }
-                });
+                }
+                double band = edgeBands ? Math.Max(0, z.EdgeBand) : 0;
+                tests.Add(band > 0 ? (x, y) => PavementZones.InsideBy(On, x, y, band) : On);
             }
             return tests;
         }

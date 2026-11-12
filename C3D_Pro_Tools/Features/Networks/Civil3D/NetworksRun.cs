@@ -285,7 +285,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (pav.Any)
                 {
                     var missing = new List<string>();
-                    pavTests = Pavement.PavementCivil3D.Tests(tr, civil, pav, missing);
+                    pavTests = Pavement.PavementCivil3D.Tests(tr, civil, pav, missing, edgeBands: true);
                     if (missing.Count > 0) log.AppendLine($"Cover: pavement surfaces not in the drawing, left out: {string.Join(", ", missing)}.");
                     if (pav.Unpaved.MinCover > 0) o.MinCover = pav.Unpaved.MinCover;
                 }
@@ -318,7 +318,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 }
                 tr.Abort();
                 string limits = pav.Any
-                    ? string.Join(", ", pav.Zones.Select(z => $"{z.Name} {z.MinCover:0.00} m{(z.DuctType.Length > 0 ? " type " + z.DuctType : "")}")) +
+                    ? string.Join(", ", pav.Zones.Select(z => $"{z.Name} {z.MinCover:0.00} m{(z.DuctType.Length > 0 ? " type " + z.DuctType : "")}{(z.EdgeBand > 0 ? $" ({z.EdgeBand:0.##} m edge band excepted)" : "")}")) +
                       $", {pav.Unpaved.Name} {o.MinCover:0.00} m{(pav.Unpaved.DuctType.Length > 0 ? " type " + pav.Unpaved.DuctType : "")}; max {s.CoverMax:0.00} m"
                     : $"{s.CoverMin:0.00}–{s.CoverMax:0.00} m";
                 log.AppendLine($"Cover check ({limits} to the top of the encasement on {surface.Name}, slope up to {s.CoverMaxSlope:0.#} %, " +

@@ -8,6 +8,20 @@ namespace C3D_Pro_Tools.Tests
     public class PavementZonesTests
     {
         [Fact]
+        public void EdgeBandLeavesTheShoulderOut()
+        {
+            // A taxiway surface 0..100 m across (shoulders included); 16.5 m inside each edge is not taxiway for the cover check.
+            bool Surface(double x, double y) => x >= 0 && x <= 100 && y >= -1000 && y <= 1000;
+            Assert.False(PavementZones.InsideBy(Surface, 10, 0, 16.5));
+            Assert.False(PavementZones.InsideBy(Surface, 16.2, 0, 16.5));
+            Assert.True(PavementZones.InsideBy(Surface, 16.8, 0, 16.5));
+            Assert.True(PavementZones.InsideBy(Surface, 50, 0, 16.5));
+            Assert.False(PavementZones.InsideBy(Surface, 84, 0, 16.5));
+            Assert.False(PavementZones.InsideBy(Surface, -5, 0, 16.5));
+            Assert.True(PavementZones.InsideBy(Surface, 5, 0, 0));
+        }
+
+        [Fact]
         public void FindsEachEdgeToTheTolerance()
         {
             // Taxiway (1) from 20.37 to 55.81, road (2) from 55.81 to 70.12, unpaved elsewhere.

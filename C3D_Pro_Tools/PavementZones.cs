@@ -15,6 +15,12 @@ namespace C3DProTools
         public double MaxCover { get; set; }
         /// <summary>The duct type letter required here ("A" = reinforced); empty = any.</summary>
         public string DuctType { get; set; } = "";
+        /// <summary>
+        /// Width (m) along the inside of the surface's edge where this zone's cover and duct type are not required (a taxiway
+        /// surface that includes its 10.5 m shoulder and 6 m blast pad: 16.5). The cover check takes the next zone or unpaved
+        /// there; the pavement edge labels in profile views stay at the surface edge.
+        /// </summary>
+        public double EdgeBand { get; set; }
         /// <summary>Station-elevation label styles for its edges in profile views; empty = the pavement section's defaults.</summary>
         public string StartLabelStyle { get; set; } = "";
         public string EndLabelStyle { get; set; } = "";
@@ -32,6 +38,23 @@ namespace C3DProTools
     /// <summary>Pure geometry of pavement zones along a station range (no Autodesk types), so it is unit tested.</summary>
     internal static class PavementZones
     {
+        /// <summary>
+        /// Inside the area and at least <paramref name="band"/> from its edge: the point and every point on circles of that
+        /// radius and half of it (every 15°) are inside. Off by at most 1.5 % of the band along a straight edge.
+        /// </summary>
+        public static bool InsideBy(Func<double, double, bool> inside, double x, double y, double band)
+        {
+            if (!inside(x, y)) return false;
+            if (band <= 0) return true;
+            foreach (double r in new[] { band, band / 2 })
+                for (int i = 0; i < 24; i++)
+                {
+                    double a = i * Math.PI / 12;
+                    if (!inside(x + r * Math.Cos(a), y + r * Math.Sin(a))) return false;
+                }
+            return true;
+        }
+
         /// <summary>
         /// The runs of each kind between <paramref name="s0"/> and <paramref name="s1"/>: sampled every <paramref name="step"/>,
         /// each change of kind then found to within <paramref name="tolerance"/> by halving. <paramref name="kindAt"/> gives the

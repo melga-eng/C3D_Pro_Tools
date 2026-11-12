@@ -800,13 +800,25 @@ namespace C3DProTools
                     if (plan.Spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(live, plan.Spot.Value.Anchor, it.Key);
                     LabelLayout.Claim(live, plan.Spot.Value.Box, plan.Start, plan.Spot.Value.End, it.Key);
                 }
-            foreach ((Item it, PlanLabel plan) in plans)
+            // Planned labels first: one put back where it was would block the planned places of those after it. What is left
+            // gets one more try at the end, around where everything actually went.
+            List<(Item it, PlanLabel plan)> left = new List<(Item it, PlanLabel plan)>();
+            foreach ((Item it, PlanLabel plan) in plans.Where(p => p.plan.Spot.HasValue).Concat(plans.Where(p => !p.plan.Spot.HasValue)))
+                if (!TryPlace(it, plan, false)) left.Add((it, plan));
+            foreach ((Item it, PlanLabel plan) in left) TryPlace(it, plan, true);
+            return report;
+
+            bool TryPlace(Item it, PlanLabel plan, bool last)
             {
                 CLabel label = (CLabel)tr.GetObject(it.Info.Id, OpenMode.ForWrite);
                 LabelObstacles others = live.Without(new[] { it.Key });
                 List<LabelSpot> tried = new List<LabelSpot>();
-                LabelSpot? spot = plan.Spot;
+                LabelSpot? spot = last ? null : plan.Spot;
                 bool done = false;
+                // Second best: a tried place clear of every label, text, part and the viewport edge that only covers another
+                // label's leader line. Better than putting the label back where it overlaps labels.
+                LabelObstacles noLeaders = others.WithoutLeaders();
+                (LabelSpot spot, (double X, double Y) end)? fallback = null;
                 for (int attempt = 0; attempt < 8 && !done; attempt++)
                 {
                     if (attempt > 0 || !spot.HasValue)
@@ -824,6 +836,8 @@ namespace C3DProTools
                     Trace($"  {it.Key} try {attempt} {spot.Value} planned {spot.Value.Box} got {LRect.Around(got.Hull)} problem '{ProblemIn(others, it, got.Hull, true)}' leaderX {others.LeaderCrossesText(start, got.Location, it.Key)}");
                     if (bad)
                     {
+                        if (fallback == null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
+                            fallback = (spot.Value, spot.Value.End);
                         plan.Shape.Learn(spot.Value.End.X - start.X, spot.Value.End.Y - start.Y, rel.Value);
                         continue;
                     }
@@ -836,15 +850,35 @@ namespace C3DProTools
                     Record(it, got.Hull, start, got.Location, 1);
                     done = true;
                 }
+                if (!done && fallback.HasValue)
+                {
+                    LabelSpot fs = fallback.Value.spot;
+                    bool ratioOk = true;
+                    if (fs.Ratio.HasValue) try { SetRatio(label, fs.Ratio.Value); } catch (Exception) { ratioOk = false; }
+                    (double X, double Y) start = fs.Ratio.HasValue ? fs.Anchor : it.Anchor;
+                    LabelOutline got = null; if (ratioOk) Placed(tr, label, it, v, paperPerUnit, fallback.Value.end, out got);
+                    if (got != null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
+                    {
+                        live = others;
+                        if (fs.Ratio.HasValue) LabelLayout.ReserveAnchor(live, start, it.Key);
+                        live.AddPolygon(got.Hull, ObstacleGroup.Text, "label", part: it.Key);
+                        live.AddSegment(start, got.Location, ObstacleGroup.Leader, "leader", part: it.Key);
+                        live.Placed(LRect.Around(got.Hull), it.Key);
+                        report.Moved++;
+                        Record(it, got.Hull, start, got.Location, 1);
+                        report.Issues.Add(new ArrangeIssue { LabelId = it.Info.Id, Sheet = sheet.Layout, Where = it.Info.Anchor, Text = "Placed clear of labels and text, but over another label's leader" });
+                        done = true;
+                    }
+                }
                 if (!done)
                 {
                     Restore(label, it);
                     live = others;
                     ClaimAsIs(it, live);
-                    Unresolved(it, "No clear place within the longest leader; put back as it was");
+                    if (last) Unresolved(it, "No clear place within the longest leader; put back as it was");
                 }
+                return done;
             }
-            return report;
         }
 
         /// <summary>

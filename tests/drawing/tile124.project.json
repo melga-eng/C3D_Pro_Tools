@@ -1,4 +1,4 @@
-{
+﻿{
     "profileViews":  {
                          "alignments":  "ICT-ALI-124*",
                          "matchTemplate":  "ICT_PROFILE_VIEW_SETTINGS",
@@ -8,7 +8,8 @@
     "networks":  {
                      "networks":  "*",
                      "surface":  "CE_PROP-CONT-NCRD",
-                     "fitFace":  "InnerWall"
+                     "fitFace":  "InnerWall",
+                     "coverMax":  6
                  },
     "pavement":  {
                      "zones":  [
@@ -16,7 +17,8 @@
                                        "surface":  "KSIA_TAXIWAY-PAVEMENT",
                                        "name":  "Taxiway Pavement",
                                        "minCover":  1.5,
-                                       "ductType":  "A"
+                                       "ductType":  "A",
+                                       "edgeBand":  16.5
                                    },
                                    {
                                        "surface":  "KSIA_ROAD-AIRSIDE",
