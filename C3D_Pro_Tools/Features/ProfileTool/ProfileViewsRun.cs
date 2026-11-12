@@ -104,13 +104,7 @@ namespace C3DProTools.ProfileTool
             }
         }
 
-        public bool Includes(string alignment)
-        {
-            string[] parts = (Alignments ?? "*").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length == 0) return true;
-            return parts.Any(p => Regex.IsMatch(alignment ?? "", "^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$",
-                RegexOptions.IgnoreCase));
-        }
+        public bool Includes(string alignment) => NamePatterns.Matches(Alignments, alignment);
     }
 
     public sealed class ProfileViewsRun
@@ -137,8 +131,21 @@ namespace C3DProTools.ProfileTool
             if (ar.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(ar.StringResult)) s.Alignments = ar.StringResult.Trim();
 
+            string nameNote, typed;
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+            {
+                var names = new List<string>();
+                foreach (ObjectId id in CivilDocument.GetCivilDocument(doc.Database).GetAlignmentIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Alignment al) names.Add(al.Name);
+                typed = s.Alignments;
+                s.Alignments = NamePatterns.Widen(s.Alignments, names, "alignment", out nameNote);
+                tr.Commit();
+            }
+            if (nameNote != null && !PresetPrompt.Continue(ed, nameNote, mode != "Report")) return;
+
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{s.Alignments}\", settings from {source}");
+            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{typed}\", settings from {source}");
+            if (nameNote != null) log.AppendLine(nameNote);
             try
             {
                 // Offsets, spacings and clearances are metres; a drawing in other units would be fitted with wrong tolerances.

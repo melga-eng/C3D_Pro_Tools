@@ -78,14 +78,7 @@ namespace C3DProTools.Features.Labels
         }
 
         /// <summary>Comma-separated wildcards, a leading ! leaves a name out.</summary>
-        public static bool Matches(string patterns, string name)
-        {
-            string[] parts = (patterns ?? "*").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            bool Match(string p) => Regex.IsMatch(name ?? "", "^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$", RegexOptions.IgnoreCase);
-            if (parts.Where(p => p.StartsWith("!")).Any(p => Match(p.Substring(1)))) return false;
-            string[] include = parts.Where(p => !p.StartsWith("!")).ToArray();
-            return include.Length == 0 || include.Any(Match);
-        }
+        public static bool Matches(string patterns, string name) => NamePatterns.Matches(patterns, name);
 
         public ArrangeOptions Options(AnnotationSettings saved) => new ArrangeOptions
         {
@@ -129,8 +122,26 @@ namespace C3DProTools.Features.Labels
             if (nr.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(nr.StringResult)) s.Networks = nr.StringResult.Trim();
 
+            string layoutNote, networkNote, typedLayouts = s.Layouts, typedNetworks = s.Networks;
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
+            {
+                var layouts = new List<string>();
+                var dict = (DBDictionary)tr.GetObject(doc.Database.LayoutDictionaryId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry e in dict) if (!string.Equals(e.Key, "Model", StringComparison.OrdinalIgnoreCase)) layouts.Add(e.Key);
+                s.Layouts = NamePatterns.Widen(s.Layouts, layouts, "layout", out layoutNote);
+                var networks = new List<string>();
+                foreach (ObjectId id in CivilDocument.GetCivilDocument(doc.Database).GetPipeNetworkIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Network net) networks.Add(net.Name);
+                s.Networks = NamePatterns.Widen(s.Networks, networks, "network", out networkNote);
+                tr.Commit();
+            }
+            string notes = string.Join(" ", new[] { layoutNote, networkNote }.Where(n => n != null));
+            if (notes.Length > 0 && !PresetPrompt.Continue(ed, notes, mode != "Report")) return;
+
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{s.Layouts}\", networks \"{s.Networks}\", settings from {source}");
+            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{typedLayouts}\", networks \"{typedNetworks}\", settings from {source}");
+            if (layoutNote != null) log.AppendLine(layoutNote);
+            if (networkNote != null) log.AppendLine(networkNote);
             try
             {
                 if (mode == "Report" || mode == "Add") Add(doc, s, mode == "Add", log);
