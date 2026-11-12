@@ -25,6 +25,8 @@ namespace C3DProTools
     internal sealed class MergeResult
     {
         public int Moved, Deleted, Reconnected, Connected, NetworksDeleted;
+        /// <summary>Pipes that could not be moved onto the structure that stays (they are left disconnected).</summary>
+        public int ReconnectFailed;
         public ObjectId TargetId = ObjectId.Null;
         public string TargetName = "";
         public readonly List<string> Log = new List<string>();
@@ -38,7 +40,7 @@ namespace C3DProTools
     internal static class NetworkOrganizer
     {
         /// <summary>How much the drawing uses each part: its labels (plan and profile) and the profile views it is drawn in.</summary>
-        private static Dictionary<ObjectId, int> LabelCounts(Transaction tr, Database db)
+        public static Dictionary<ObjectId, int> LabelCounts(Transaction tr, Database db)
         {
             Dictionary<ObjectId, int> count = new Dictionary<ObjectId, int>();
             foreach (LabelInfo l in AnnotLabels.Scan(tr, db))
@@ -120,9 +122,10 @@ namespace C3DProTools
         }
 
         /// <summary>The plan of a merge of <paramref name="networks"/> into <paramref name="target"/> (null: a new network), with each row's part id.</summary>
-        public static List<(MergeRow row, ObjectId id, ObjectId network)> Plan(Transaction tr, Database db, IEnumerable<ObjectId> networks, ObjectId target)
+        public static List<(MergeRow row, ObjectId id, ObjectId network)> Plan(Transaction tr, Database db, IEnumerable<ObjectId> networks, ObjectId target,
+            Dictionary<ObjectId, int> labels = null)
         {
-            var parts = Parts(tr, networks, target, LabelCounts(tr, db));
+            var parts = Parts(tr, networks, target, labels ?? LabelCounts(tr, db));
             Dictionary<MergePart, (ObjectId id, ObjectId net)> byPart = parts.ToDictionary(p => p.part, p => (p.id, p.network));
             return NetworkMerge.Plan(parts.Select(p => p.part).ToList()).Select(r => (r, byPart[r.Part].id, byPart[r.Part].net)).ToList();
         }
@@ -197,7 +200,7 @@ namespace C3DProTools
                                 NetworkEditOps.ConnectEnd(pipe, end, kv.Value);
                                 result.Reconnected++;
                             }
-                            catch (Exception ex) { result.Log.Add($"{pipe.Name}: could not be connected to the structure that stays ({ex.Message})."); }
+                            catch (Exception ex) { result.ReconnectFailed++; result.Log.Add($"{pipe.Name}: could not be connected to the structure that stays ({ex.Message})."); }
                             if (!pipe.StartPoint.IsEqualTo(s)) pipe.StartPoint = s;
                             if (!pipe.EndPoint.IsEqualTo(e)) pipe.EndPoint = e;
                         }
