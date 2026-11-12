@@ -131,18 +131,20 @@ namespace C3DProTools.ProfileTool
             if (ar.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(ar.StringResult)) s.Alignments = ar.StringResult.Trim();
 
-            string nameNote;
+            string nameNote, typed;
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var names = new List<string>();
                 foreach (ObjectId id in CivilDocument.GetCivilDocument(doc.Database).GetAlignmentIds())
                     if (tr.GetObject(id, OpenMode.ForRead) is Alignment al) names.Add(al.Name);
+                typed = s.Alignments;
                 s.Alignments = NamePatterns.Widen(s.Alignments, names, "alignment", out nameNote);
                 tr.Commit();
             }
+            if (nameNote != null && !PresetPrompt.Continue(ed, nameNote, mode != "Report")) return;
 
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{s.Alignments}\", settings from {source}");
+            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{typed}\", settings from {source}");
             if (nameNote != null) log.AppendLine(nameNote);
             try
             {

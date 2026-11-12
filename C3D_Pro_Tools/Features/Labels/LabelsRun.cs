@@ -122,7 +122,7 @@ namespace C3DProTools.Features.Labels
             if (nr.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(nr.StringResult)) s.Networks = nr.StringResult.Trim();
 
-            string layoutNote, networkNote;
+            string layoutNote, networkNote, typedLayouts = s.Layouts, typedNetworks = s.Networks;
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var layouts = new List<string>();
@@ -135,9 +135,11 @@ namespace C3DProTools.Features.Labels
                 s.Networks = NamePatterns.Widen(s.Networks, networks, "network", out networkNote);
                 tr.Commit();
             }
+            string notes = string.Join(" ", new[] { layoutNote, networkNote }.Where(n => n != null));
+            if (notes.Length > 0 && !PresetPrompt.Continue(ed, notes, mode != "Report")) return;
 
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{s.Layouts}\", networks \"{s.Networks}\", settings from {source}");
+            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{typedLayouts}\", networks \"{typedNetworks}\", settings from {source}");
             if (layoutNote != null) log.AppendLine(layoutNote);
             if (networkNote != null) log.AppendLine(networkNote);
             try

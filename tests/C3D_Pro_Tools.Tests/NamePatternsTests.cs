@@ -5,7 +5,7 @@ namespace C3D_Pro_Tools.Tests
 {
     public class NamePatternsTests
     {
-        private static readonly string[] Alignments = { "ICT-ALI-124-1-89-01", "ICT-ALI-124-1-89-02", "ICT-ALI-125-2-01" };
+        private static readonly string[] Alignments = { "ICT-ALI-124-1-89-01", "ICT-ALI-124-1-89-02", "ICT-ALI-125-2-01", "ICT-ALI-1124-01" };
 
         [Fact]
         public void KeepsPatternsThatMatch()
@@ -15,23 +15,21 @@ namespace C3D_Pro_Tools.Tests
         }
 
         [Fact]
-        public void WidensAMissingPrefix()
+        public void WidensAMissingPrefixToWholeNameParts()
         {
-            // The user typed 124*; the drawing's names carry ICT-ALI- in front.
+            // The user typed 124*; the names carry ICT-ALI- in front. Tile 1124 must not be caught.
             string used = NamePatterns.Widen("124*", Alignments, "alignment", out string note);
-            Assert.Equal("*124*", used);
-            Assert.Contains("2 found", note);
-            Assert.True(NamePatterns.Matches(used, "ICT-ALI-124-1-89-01"));
+            Assert.Equal("ICT-ALI-124-1-89-01,ICT-ALI-124-1-89-02", used);
+            Assert.Contains("using the 2", note);
+            Assert.False(NamePatterns.Matches(used, "ICT-ALI-1124-01"));
             Assert.False(NamePatterns.Matches(used, "ICT-ALI-125-2-01"));
         }
 
         [Fact]
         public void KeepsExclusionsWhenWidening()
         {
-            string used = NamePatterns.Widen("12*,!*-02", Alignments, "alignment", out _);
-            Assert.Equal("*12*,!*-02", used);
-            Assert.True(NamePatterns.Matches(used, "ICT-ALI-124-1-89-01"));
-            Assert.False(NamePatterns.Matches(used, "ICT-ALI-124-1-89-02"));
+            string used = NamePatterns.Widen("124*,!*-02", Alignments, "alignment", out _);
+            Assert.Equal("ICT-ALI-124-1-89-01", used);
         }
 
         [Fact]

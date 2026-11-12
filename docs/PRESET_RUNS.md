@@ -29,7 +29,11 @@ The first line of every run says where the settings came from. If it says `defau
 file is there but the section is missing, so add it.
 
 Names take wildcards (`*`, `?`), several separated by commas; a name starting with `!` is left out. When the command asks for
-alignments or networks, press Enter to use the file's value or type others for this run only.
+alignments, networks or layouts, press Enter to use the file's value or type others for this run only.
+
+You may leave out a name's prefix: when `124*` matches nothing, the tool takes the names that have a part starting with 124
+(`ICT-ALI-124-1-89-01`, not `ICT-ALI-1124-01`), lists them, and before a step that changes the drawing asks `Continue` (Enter
+is Yes). If still nothing matches, it lists some of the drawing's names.
 
 ## C3DPROPV: profile views
 

@@ -114,7 +114,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             if (nr.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(nr.StringResult)) s.Networks = nr.StringResult.Trim();
 
-            string nameNote;
+            string nameNote, typed = s.Networks;
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var names = new List<string>();
@@ -123,9 +123,10 @@ namespace C3DProTools.Features.Networks.Civil3D
                 s.Networks = NamePatterns.Widen(s.Networks, names, "network", out nameNote);
                 tr.Commit();
             }
+            if (nameNote != null && !PresetPrompt.Continue(ed, nameNote, mode != "Report" && mode != "Cover")) return;
 
             var log = new StringBuilder();
-            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{s.Networks}\", settings from {source}");
+            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{typed}\", settings from {source}");
             if (nameNote != null) log.AppendLine(nameNote);
             try
             {

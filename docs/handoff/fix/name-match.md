@@ -1,0 +1,5 @@
+- Branch: fix/name-match (merged to main).
+- What changed: C3DPROPV/C3DPRONET/C3DPROLBL share NamePatterns; a filter that matches nothing (user typed `124*` for ICT-ALI-124-...) is retried as the start of a name part, listed, and writing steps ask Continue (Enter = Yes). `!` now also works for alignments.
+- Why: the user's Pavement run on TEST DRAWING with `124*` matched 0 views and looked like "the tool is not working".
+- Checked: 720 unit tests; tests/drawing/pv-pavement-short-name.scr (37 labels) and net-report-short-name.scr on TEST DRAWING.dwg, both PASS. Codex end review: one finding (widening caught ICT-1124), fixed.
+- Not done: no live check in the user's session.
