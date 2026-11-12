@@ -790,11 +790,6 @@ namespace C3DProTools
             })).ToList();
             if (!string.IsNullOrEmpty(o.ExportFolder)) Export(o, sheet, v, obstacles, plans.Select(p => (p.plan, p.it.Region)).ToList());
             LabelPlanner.Plan(obstacles, plans.Select(p => p.plan).ToList(), rules);
-            string traceFile = Environment.GetEnvironmentVariable("C3DPRO_ARRANGE_TRACE");
-            void Trace(string line) { if (!string.IsNullOrEmpty(traceFile)) try { System.IO.File.AppendAllText(traceFile, line + Environment.NewLine); } catch (Exception) { } }
-            Trace($"== {sheet.Layout}: {plans.Count} to drag, planned {plans.Count(p => p.plan.Spot.HasValue)}");
-            foreach ((Item it, PlanLabel plan) in plans)
-                Trace($"  {it.Key} anchor ({it.Anchor.X:0.0},{it.Anchor.Y:0.0}) R {shapes[it].Right} L {shapes[it].Left} UR {shapes[it].UpRight} DR {shapes[it].DownRight} plan {(plan.Spot.HasValue ? plan.Spot.Value + " box " + plan.Spot.Value.Box : "none")}");
 
             // The plan as obstacles; each label's planned place is swapped for where Civil 3D actually puts it.
             LabelObstacles live = obstacles.Clone();
@@ -837,7 +832,6 @@ namespace C3DProTools
                     LRect? rel = Placed(tr, label, it, v, paperPerUnit, spot.Value.End, out LabelOutline got);
                     if (rel == null) break;
                     bool bad = ProblemIn(others, it, got.Hull, true).Length > 0 || others.LeaderCrossesText(start, got.Location, it.Key);
-                    Trace($"  {it.Key} try {attempt} {spot.Value} planned {spot.Value.Box} got {LRect.Around(got.Hull)} problem '{ProblemIn(others, it, got.Hull, true)}' leaderX {others.LeaderCrossesText(start, got.Location, it.Key)}");
                     if (bad)
                     {
                         if (fallback == null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
