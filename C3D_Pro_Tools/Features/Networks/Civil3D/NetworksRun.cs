@@ -102,7 +102,9 @@ namespace C3DProTools.Features.Networks.Civil3D
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nNetworks") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Rims", "Fit", "Repair", "Duplicates", "Cover", "All" }) kw.Keywords.Add(k);
+            // Each option its own short form: R is Report, I Rims, P Repair (Report, Rims and Repair all start with R).
+            foreach ((string k, string shown) in new[] { ("Report", "Report"), ("Rims", "rIms"), ("Fit", "Fit"), ("Repair", "rePair"), ("Duplicates", "Duplicates"), ("Cover", "Cover"), ("All", "All") })
+                kw.Keywords.Add(k, shown, shown);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;

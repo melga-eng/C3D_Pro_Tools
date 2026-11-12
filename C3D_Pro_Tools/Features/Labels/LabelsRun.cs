@@ -107,7 +107,8 @@ namespace C3DProTools.Features.Labels
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nLabels") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Add", "Arrange", "Reset" }) kw.Keywords.Add(k);
+            // Each option its own short form: A is Add, AR Arrange, S Reset (A alone ran Add when Arrange was meant).
+            foreach ((string k, string shown) in new[] { ("Report", "Report"), ("Add", "Add"), ("Arrange", "ARrange"), ("Reset", "reSet") }) kw.Keywords.Add(k, shown, shown);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;

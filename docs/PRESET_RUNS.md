@@ -5,6 +5,8 @@ your drawing. Ribbon: **C3D Pro Tools → Preset Runs**.
 
 Always start with **Report**: it changes nothing and tells you what each step would do. Every other step is one UNDO.
 
+Short forms: type the capital letters shown in the prompt. C3DPROLBL: `A` Add, `AR` Arrange, `S` Reset. C3DPRONET: `R` Report, `I` Rims, `P` Repair, `F` Fit, `D` Duplicates, `C` Cover. Enter is Report.
+
 ## The settings file
 
 `C3DPro.project.json` in the same folder as the drawing. Only the settings you want to change need to be there; the rest use
