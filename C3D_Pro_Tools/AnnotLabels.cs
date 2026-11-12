@@ -11,8 +11,6 @@ using Entity = Autodesk.AutoCAD.DatabaseServices.Entity;
 
 namespace C3DProTools
 {
-    internal enum LabelKind { PlanPipe, PlanStructure, ProfilePipe, ProfileStructure }
-
     /// <summary>A network label in the drawing: what it labels, where it is anchored and where its text sits.</summary>
     internal sealed class LabelInfo
     {
@@ -448,6 +446,16 @@ namespace C3DProTools
                 if (mode == ExistingLabels.SkipLabelled && have.Count > 0) { r.Skipped++; continue; }
                 if (mode == ExistingLabels.Replace)
                 {
+                    List<LabelSetItem> missing = items.Where(i => Style(i).IsNull).ToList();
+                    if (missing.Count > 0)
+                    {
+                        foreach (LabelSetItem item in missing)
+                        {
+                            r.Failed++;
+                            r.Errors.Add($"{((Part)part).Name}: Label style \"{item.Style}\" is not in this drawing; existing labels kept.");
+                        }
+                        continue;
+                    }
                     foreach (LabelInfo l in have.Where(l => items.Any(i => i.Kind == l.Kind)))
                     {
                         try { tr.GetObject(l.Id, OpenMode.ForWrite).Erase(); r.Removed++; } catch (Exception ex) { r.Errors.Add(ex.Message); }
@@ -459,23 +467,32 @@ namespace C3DProTools
                 if (items.Any(i => i.Kind == LabelKind.ProfilePipe || i.Kind == LabelKind.ProfileStructure))
                     try { views = ((Part)part).GetProfileViewsDisplayingMe(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
 
-                // A part gets as many labels of a style as the set has (two end labels of one style, for example); those already
-                // there count.
-                Dictionary<string, int> made = new Dictionary<string, int>();
+                // Each existing label can satisfy one requested position only.
+                List<AnnotLabelPosition> positions = have.Select(l =>
+                {
+                    double? ratio = null;
+                    if (l.IsPipe)
+                    {
+                        try
+                        {
+                            DBObject label = tr.GetObject(l.Id, OpenMode.ForRead);
+                            ratio = label is PipeLabel pl ? pl.Ratio : label is PipeProfileLabel ppl ? ppl.Ratio : (double?)null;
+                        }
+                        catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    }
+                    return new AnnotLabelPosition(l.Kind, l.Style, l.ViewId.Handle.ToString(), ratio);
+                }).ToList();
                 foreach (LabelSetItem item in items)
                 {
                     ObjectId styleId = Style(item);
                     if (styleId.IsNull) { r.Errors.Add($"Label style \"{item.Style}\" is not in this drawing."); r.Failed++; continue; }
                     bool profile = item.Kind == LabelKind.ProfilePipe || item.Kind == LabelKind.ProfileStructure;
                     IEnumerable<ObjectId> targets = profile ? views.Cast<ObjectId>().Where(v => !v.IsNull).Distinct() : new[] { ObjectId.Null };
-                    int need = items.Count(i => i.Kind == item.Kind && i.Style == item.Style);
                     foreach (ObjectId viewId in targets)
                     {
-                        string key = $"{item.Kind}|{item.Style}|{viewId.Handle}";
-                        int already = have.Count(l => l.Kind == item.Kind && l.Style == item.Style && (!profile || l.ViewId == viewId));
-                        made.TryGetValue(key, out int done);
-                        if (already + done >= need) { r.Skipped++; continue; }
-                        made[key] = done + 1;
+                        if (AnnotLabelRules.TakeExisting(positions, new AnnotLabelPosition(item.Kind, item.Style,
+                            viewId.Handle.ToString(), Math.Max(0, Math.Min(1, item.Ratio)))))
+                        { r.Skipped++; continue; }
                         try
                         {
                             ObjectId viewPart = ObjectId.Null;

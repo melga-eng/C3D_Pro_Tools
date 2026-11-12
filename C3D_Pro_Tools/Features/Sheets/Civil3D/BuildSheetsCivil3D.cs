@@ -94,7 +94,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 LabelKind kind = r.Select.Kind == TargetKind.Structure
                     ? (profileSheet ? LabelKind.ProfileStructure : LabelKind.PlanStructure)
                     : (profileSheet ? LabelKind.ProfilePipe : LabelKind.PlanPipe);
-                foreach (string style in r.LabelStyles) o.DraggedStyles.Add(FormAnnotationStudio.StyleKey(kind, style.Trim()));
+                foreach (string style in r.LabelStyles) o.DraggedStyles.Add(AnnotLabelRules.StyleKey(kind, style.Trim()));
             }
 
             AnnotScene scene = AnnotScene.Read(tr, db, civil, o.AvoidModelText, o.Profile);
