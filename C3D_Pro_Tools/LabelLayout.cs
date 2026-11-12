@@ -28,6 +28,7 @@ namespace C3DProTools
         public bool Contains((double X, double Y) p) => p.X >= MinX && p.X <= MaxX && p.Y >= MinY && p.Y <= MaxY;
         public bool Inside(LRect o) => MinX >= o.MinX && MaxX <= o.MaxX && MinY >= o.MinY && MaxY <= o.MaxY;
         public List<(double X, double Y)> Corners() => new List<(double X, double Y)> { (MinX, MinY), (MaxX, MinY), (MaxX, MaxY), (MinX, MaxY) };
+        public override string ToString() => $"[{MinX:0.0},{MinY:0.0} {MaxX:0.0},{MaxY:0.0}]";
 
         /// <summary>True when the segment crosses the box or lies in it.</summary>
         public bool Hits((double X, double Y) a, (double X, double Y) b) => !LabelLayout.Separated(Corners(), new[] { a, b }, 0);
@@ -191,11 +192,35 @@ namespace C3DProTools
         public LRect Right, Left;
         public LRect? UpRight, UpLeft, DownRight, DownLeft;
 
+        /// <summary>
+        /// Measured in the drawing: the text box (relative to the leader end) with the leader pointing at each angle (radians,
+        /// from the anchor). When there are any, the box of the nearest angle is used and the right/left guess is not: Civil 3D
+        /// picks the side of turned text by its own rule, which only measuring shows.
+        /// </summary>
+        public List<(double Angle, LRect Box)> Samples = new List<(double Angle, LRect Box)>();
+
         /// <summary>The box for a leader ending (dx, dy) from the anchor, the text to the right or left of its end.</summary>
         public LRect BoxFor(double dx, double dy, bool right)
         {
+            if (Samples.Count > 0)
+            {
+                double a = Math.Atan2(dy, dx);
+                double Gap(double b) => Math.Abs(Math.IEEERemainder(a - b, 2 * Math.PI));
+                LRect best = Samples[0].Box;
+                double g = double.MaxValue;
+                foreach ((double angle, LRect box) in Samples) if (Gap(angle) < g) { g = Gap(angle); best = box; }
+                return best;
+            }
             if (dy >= 0) return right ? (UpRight ?? Right) : (UpLeft ?? Left);
             return right ? (DownRight ?? Right) : (DownLeft ?? Left);
+        }
+
+        /// <summary>Records what the drawing showed for a leader at (dx, dy): replaces a sample within 3° of it, else adds one.</summary>
+        public void Learn(double dx, double dy, LRect box)
+        {
+            double a = Math.Atan2(dy, dx);
+            Samples.RemoveAll(s => Math.Abs(Math.IEEERemainder(a - s.Angle, 2 * Math.PI)) < 3 * Math.PI / 180);
+            Samples.Add((a, box));
         }
     }
 

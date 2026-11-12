@@ -1,4 +1,4 @@
-using Autodesk.AutoCAD.DatabaseServices;
+﻿using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.Civil;
 using Autodesk.Civil.ApplicationServices;
@@ -553,7 +553,31 @@ namespace C3DProTools
             // Above and below the anchor, on both sides: Civil 3D may join the leader to the text elsewhere below it.
             LRect? upRight = Rel(25, 15), upLeft = Rel(-25, 15), downRight = Rel(25, -15), downLeft = Rel(-25, -15);
             if (upRight == null || upLeft == null) return null;
-            return new DraggedShape { Right = upRight.Value, Left = upLeft.Value, UpRight = upRight, UpLeft = upLeft, DownRight = downRight, DownLeft = downLeft };
+            DraggedShape shape = new DraggedShape { Right = upRight.Value, Left = upLeft.Value, UpRight = upRight, UpLeft = upLeft, DownRight = downRight, DownLeft = downLeft };
+            // Then all round, every 22.5°: which side the text takes depends on the leader's angle to the text, not only on left or
+            // right (pipe labels turned with their pipe), and is only repeatable once the label has been put there (see Place).
+            const double r = 30;
+            for (int i = 0; i < 16; i++)
+            {
+                double a = i * Math.PI / 8, dx = r * Math.Cos(a), dy = r * Math.Sin(a);
+                LRect? box = Placed(tr, label, it, v, paperPerUnit, (it.Anchor.X + dx, it.Anchor.Y + dy), out _);
+                if (box.HasValue) shape.Samples.Add((a, box.Value));
+            }
+            return shape;
+        }
+
+        /// <summary>
+        /// Puts the leader end at a paper position and returns the text box relative to that position. Set twice: the side Civil 3D
+        /// gives the text at the first set depends on where the label was before; the second set is always the same for the same
+        /// place (measured on tile 124: the first set flipped structure labels at the same place either way).
+        /// </summary>
+        private static LRect? Placed(Transaction tr, CLabel label, Item it, SheetViewport v, double paperPerUnit, (double X, double Y) end, out LabelOutline got)
+        {
+            got = null;
+            if (!SetLocation(label, it, v, end) || !SetLocation(label, it, v, end)) return null;
+            got = Measure(tr, label, it, v, paperPerUnit);
+            if (got == null || got.Hull.Count < 2) return null;
+            return LRect.Around(got.Hull).Offset(-end.X, -end.Y);
         }
 
         private static ArrangeReport ArrangeViewport(Transaction tr, SheetInfo sheet, SheetViewport v, List<LabelInfo> labels, AnnotScene scene, ArrangeOptions o,
@@ -762,6 +786,11 @@ namespace C3DProTools
             })).ToList();
             if (!string.IsNullOrEmpty(o.ExportFolder)) Export(o, sheet, v, obstacles, plans.Select(p => (p.plan, p.it.Region)).ToList());
             LabelPlanner.Plan(obstacles, plans.Select(p => p.plan).ToList(), rules);
+            string traceFile = Environment.GetEnvironmentVariable("C3DPRO_ARRANGE_TRACE");
+            void Trace(string line) { if (!string.IsNullOrEmpty(traceFile)) try { System.IO.File.AppendAllText(traceFile, line + Environment.NewLine); } catch (Exception) { } }
+            Trace($"== {sheet.Layout}: {plans.Count} to drag, planned {plans.Count(p => p.plan.Spot.HasValue)}");
+            foreach ((Item it, PlanLabel plan) in plans)
+                Trace($"  {it.Key} anchor ({it.Anchor.X:0.0},{it.Anchor.Y:0.0}) R {shapes[it].Right} L {shapes[it].Left} UR {shapes[it].UpRight} DR {shapes[it].DownRight} plan {(plan.Spot.HasValue ? plan.Spot.Value + " box " + plan.Spot.Value.Box : "none")}");
 
             // The plan as obstacles; each label's planned place is swapped for where Civil 3D actually puts it.
             LabelObstacles live = obstacles.Clone();
@@ -778,7 +807,7 @@ namespace C3DProTools
                 List<LabelSpot> tried = new List<LabelSpot>();
                 LabelSpot? spot = plan.Spot;
                 bool done = false;
-                for (int attempt = 0; attempt < 5 && !done; attempt++)
+                for (int attempt = 0; attempt < 8 && !done; attempt++)
                 {
                     if (attempt > 0 || !spot.HasValue)
                         spot = LabelPlanner.ChooseFor(others, plan, rules, null, tried);
@@ -787,19 +816,16 @@ namespace C3DProTools
                     // Slid along its pipe: the ratio first, so its anchor is where the leader starts.
                     if (spot.Value.Ratio.HasValue) try { SetRatio(label, spot.Value.Ratio.Value); } catch (Exception) { continue; }
                     (double X, double Y) start = spot.Value.Ratio.HasValue ? spot.Value.Anchor : it.Anchor;
-                    if (!SetLocation(label, it, v, spot.Value.End)) break;
-                    // Where Civil 3D actually put it: it must be clear there too. Off by a little: moved once by the difference.
-                    LabelOutline got = Measure(tr, label, it, v, paperPerUnit);
-                    if (got == null) break;
-                    bool Bad(LabelOutline g) => ProblemIn(others, it, g.Hull, true).Length > 0 || others.LeaderCrossesText(start, g.Location, it.Key);
-                    if (Bad(got))
+                    // Where Civil 3D actually put it: it must be clear there too. Drawn otherwise than planned: that shape is
+                    // learnt for this leader direction and the next place is chosen with it.
+                    LRect? rel = Placed(tr, label, it, v, paperPerUnit, spot.Value.End, out LabelOutline got);
+                    if (rel == null) break;
+                    bool bad = ProblemIn(others, it, got.Hull, true).Length > 0 || others.LeaderCrossesText(start, got.Location, it.Key);
+                    Trace($"  {it.Key} try {attempt} {spot.Value} planned {spot.Value.Box} got {LRect.Around(got.Hull)} problem '{ProblemIn(others, it, got.Hull, true)}' leaderX {others.LeaderCrossesText(start, got.Location, it.Key)}");
+                    if (bad)
                     {
-                        LRect actual = LRect.Around(got.Hull);
-                        double errX = spot.Value.Box.Center.X - actual.Center.X, errY = spot.Value.Box.Center.Y - actual.Center.Y;
-                        if (Math.Abs(errX) <= 0.2 && Math.Abs(errY) <= 0.2) continue;
-                        if (!SetLocation(label, it, v, (spot.Value.End.X + errX, spot.Value.End.Y + errY))) continue;
-                        got = Measure(tr, label, it, v, paperPerUnit);
-                        if (got == null || Bad(got)) continue;
+                        plan.Shape.Learn(spot.Value.End.X - start.X, spot.Value.End.Y - start.Y, rel.Value);
+                        continue;
                     }
                     live = others;
                     if (spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(live, start, it.Key);
