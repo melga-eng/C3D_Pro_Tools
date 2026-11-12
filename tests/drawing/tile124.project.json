@@ -1,4 +1,4 @@
-﻿{
+{
     "profileViews":  {
                          "alignments":  "ICT-ALI-124*",
                          "matchTemplate":  "ICT_PROFILE_VIEW_SETTINGS",
@@ -35,7 +35,8 @@
                  },
     "labels":  {
                    "layouts":  "*102054",
-                   "networks":  "ICT-*"
+                   "networks":  "ICT-*",
+                   "maxDistance":  100
                },
     "labelRules":  [
                        {

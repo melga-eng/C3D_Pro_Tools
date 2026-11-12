@@ -1,0 +1,80 @@
+﻿{
+    "profileViews":  {
+                         "alignments":  "ICT-ALI-124*",
+                         "matchTemplate":  "ICT_PROFILE_VIEW_SETTINGS",
+                         "existingSurface":  "COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED",
+                         "proposedSurface":  "CE_PROP-CONT-NCRD"
+                     },
+    "networks":  {
+                     "networks":  "*",
+                     "surface":  "CE_PROP-CONT-NCRD",
+                     "fitFace":  "InnerWall",
+                     "coverMax":  6
+                 },
+    "pavement":  {
+                     "zones":  [
+                                   {
+                                       "surface":  "KSIA_TAXIWAY-PAVEMENT",
+                                       "name":  "Taxiway Pavement",
+                                       "minCover":  1.5,
+                                       "ductType":  "A",
+                                       "edgeBand":  16.5
+                                   },
+                                   {
+                                       "surface":  "KSIA_ROAD-AIRSIDE",
+                                       "name":  "Road Pavement",
+                                       "minCover":  0.64,
+                                       "ductType":  "B"
+                                   }
+                               ],
+                     "unpaved":  {
+                                     "name":  "Unpaved",
+                                     "minCover":  0.6,
+                                     "ductType":  "B"
+                                 }
+                 },
+    "labels":  {
+                   "layouts":  "*102054",
+                   "networks":  "ICT-*"
+               },
+    "labelRules":  [
+                       {
+                           "name":  "KSIA ICT tile 124 (test)",
+                           "version":  1,
+                           "rules":  [
+                                         {
+                                             "id":  "ict.plan.manhole",
+                                             "view":  "Plan",
+                                             "select":  {
+                                                            "kind":  "Structure",
+                                                            "networkPattern":  "ICT-TILE-124"
+                                                        },
+                                             "labelStyles":  [
+                                                                 "KSIA_Description Only_Northing_Easting"
+                                                             ],
+                                             "at":  "Insertion",
+                                             "every":  "PerPart",
+                                             "leader":  true,
+                                             "side":  "Alternate",
+                                             "priority":  2
+                                         },
+                                         {
+                                             "id":  "ict.plan.joint",
+                                             "view":  "Plan",
+                                             "select":  {
+                                                            "kind":  "Joint",
+                                                            "networkPattern":  "ICT-TILE-124"
+                                                        },
+                                             "labelStyles":  [
+                                                                 "KSIA_START [NE]"
+                                                             ],
+                                             "at":  "EachJoint",
+                                             "every":  "PerPart",
+                                             "leader":  true,
+                                             "side":  "Alternate",
+                                             "priority":  3
+                                         }
+                                     ]
+                       }
+                   ]
+}
