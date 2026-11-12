@@ -15,6 +15,12 @@ namespace C3DProTools
         public double MaxCover { get; set; }
         /// <summary>The duct type letter required here ("A" = reinforced); empty = any.</summary>
         public string DuctType { get; set; } = "";
+        /// <summary>
+        /// Width (m) along the inside of the surface's edge where this zone's cover and duct type are not required (a taxiway
+        /// surface that includes its 10.5 m shoulder and 6 m blast pad: 16.5). The cover check takes the next zone or unpaved
+        /// there; the pavement edge labels in profile views stay at the surface edge.
+        /// </summary>
+        public double EdgeBand { get; set; }
         /// <summary>Station-elevation label styles for its edges in profile views; empty = the pavement section's defaults.</summary>
         public string StartLabelStyle { get; set; } = "";
         public string EndLabelStyle { get; set; } = "";
@@ -32,6 +38,28 @@ namespace C3DProTools
     /// <summary>Pure geometry of pavement zones along a station range (no Autodesk types), so it is unit tested.</summary>
     internal static class PavementZones
     {
+        /// <summary>
+        /// Inside the area and at least <paramref name="band"/> from its edge (outer edge or a hole): the point and every point on
+        /// rings 2 m apart out to that radius (every 11.25°) are inside, the outer ring first. Along a straight edge it is off by
+        /// at most 0.5 % of the band; a hole or notch smaller than about 3 m across within the band can be missed.
+        /// </summary>
+        public static bool InsideBy(Func<double, double, bool> inside, double x, double y, double band)
+        {
+            if (!inside(x, y)) return false;
+            if (band <= 0) return true;
+            int rings = Math.Max(1, (int)Math.Ceiling(band / 2.0));
+            for (int k = rings; k >= 1; k--)
+            {
+                double r = band * k / rings;
+                for (int i = 0; i < 32; i++)
+                {
+                    double a = i * Math.PI / 16;
+                    if (!inside(x + r * Math.Cos(a), y + r * Math.Sin(a))) return false;
+                }
+            }
+            return true;
+        }
+
         /// <summary>
         /// The runs of each kind between <paramref name="s0"/> and <paramref name="s1"/>: sampled every <paramref name="step"/>,
         /// each change of kind then found to within <paramref name="tolerance"/> by halving. <paramref name="kindAt"/> gives the

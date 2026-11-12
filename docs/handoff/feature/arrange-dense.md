@@ -1,4 +1,5 @@
-﻿Branch feature/arrange-dense (Codex planner + Claude fallback; NOT merged).
-Changed: LabelLayout column candidates, forward checking, cached checks (replay 48 s to 12 s, 33/33 placed offline, crossings 5 to 7); AnnotArranger second-best place over a leader.
-Checked: ArrangeCaseTests on the 102054 case; lbl-arrange.scr on the TEST DRAWING copy gives 6 unplaced, 8 problems (main gives 7 and 7-8): no gain on the drawing.
-Cause found: the gap is between the planned box and where Civil 3D draws a dragged label (leader attachment), not the search. Next: measure the dragged shape per style before planning, or plan with the measured Probe shapes.
+Branch: feature/arrange-dense; no git commands, commits, branch changes, or promotion.
+Changed LabelLayout.cs: per-plan static candidate cache, separate text/leader spatial grids, exact column candidates, constrained-first bounded forward checking and crossing repairs; greedy ordering had consumed otherwise valid positions.
+Checked sheet 102054 JSON: Release baseline 30/33, 5 crossings, 47.92 s; final 33/33, 7 crossings, 11.66 s; Debug replay 24.88 s, all 28 label/replay tests pass including viewport, 150 mm, text and overlap checks; plugin build passes with SDK lookup workaround.
+Full suite: 715/716 passed; existing logger file-existence test cannot write LocalAppData in sandbox. graphify update failed loading parser DLL (access denied).
+NOT COMPLETE / do not release: fewer-than-5-crossings target unmet (7 is worse than baseline 5); no Civil 3D drawing-copy or visual check; ArrangeCaseTests asserts all 33 placed and clean geometry, not crossing improvement. Temporary .planner-check files remain because automatic approval review blocked cleanup.

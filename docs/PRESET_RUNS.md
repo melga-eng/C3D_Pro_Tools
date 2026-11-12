@@ -42,8 +42,10 @@ is Yes). If still nothing matches, it lists some of the drawing's names.
 | Report | TOP status per alignment, what Match would change, the DIMs each view would get, the drawing's surfaces |
 | Top | Refits each TOP profile that no longer follows its ducts (`createMissingTop: true` also creates missing ones) |
 | Match | Applies a Profile View Tools template (`matchTemplate`) or a finished view (`matchSourceView`) to the views |
+| Split | Splits each view longer than `splitLength` into parts one under another below it (the long view stays); a view whose first part exists is left alone |
 | Dims | Draws cover and clearance DIMs; replaces the tool's own DIMs of an earlier run, never hand-drawn ones |
-| All | Top, Match, Dims |
+| Pavement | Labels each start and end of pavement in the views, from the `pavement` section below |
+| All | Top, Match, Split, Dims, Pavement |
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -52,7 +54,9 @@ is Yes). If still nothing matches, it lists some of the drawing's names.
 | `matchTemplate` / `matchSourceView` | none | What Match copies from |
 | `matchOthers` | `Hide` | Profiles with no role: `Hide`, `Leave` or `Delete` (Delete only when both surfaces are found) |
 | `matchElevation` | `Widen` | Level ranges: `Widen` keeps each view's own range and only widens the side that cuts off a profile, duct or structure; `Fit` refits every view; `Leave` never touches them |
-| Pavement (step) | — | Labels each start and end of pavement in the views (station-elevation labels on the proposed ground), from the `pavement` section below; a re-run replaces the tool's own labels |
+| `splitLength` | 450 | Part length (m of stations); 0 turns Split off |
+| `splitName` | `{AlignmentName} (Part-{n})` | Part names; also `{ViewName}`, `{StartSta}`, `{EndSta}` |
+| `splitGap`, `splitMinLast` | 30, 100 | Space between views (m); a last part shorter than this joins the one before |
 | `topPattern` | `TOP` | Text that marks a TOP profile name |
 | `createMissingTop`, `topStyle`, `topLabelSet`, `topLayer`, `topNameTemplate` | off | For creating missing TOP profiles |
 | `dims` | as Profile DIMs | `dimStyle`, `layer`, `cover`, `clearance`, `minSpacingM`, `majorGradeChangePct`, ... |
@@ -111,15 +115,18 @@ duct type (type B under taxiway fails; type A where B is asked is only noted); `
 ```json
 "pavement": {
   "zones": [
-    { "surface": "KSIA_TAXIWAY-PAVEMENT", "name": "Taxiway Pavement", "minCover": 1.50, "ductType": "A" },
+    { "surface": "KSIA_TAXIWAY-PAVEMENT", "name": "Taxiway Pavement", "minCover": 1.50, "ductType": "A", "edgeBand": 16.5 },
     { "surface": "KSIA_ROAD-AIRSIDE", "name": "Road Pavement", "minCover": 0.64, "ductType": "B" }
   ],
   "unpaved": { "name": "Unpaved", "minCover": 0.60, "ductType": "B" }
 }
 ```
 
-A zone may set `maxCover`; without it the general `coverMax` applies, except under a zone whose minimum is already at or
-above it (taxiway), where there is no maximum. The labels use the styles `startLabelStyle` / `endLabelStyle` when set (a zone
+`edgeBand` (m) is a strip along the inside of the surface's edge that the cover check does not hold to that zone's rule:
+the taxiway surface includes its 10.5 m shoulder and 6 m blast pad, so 16.5. There the next zone or unpaved applies (a duct
+meeting the taxiway rule passes too); a hole in the surface counts as an edge, but one smaller than about 3 m across may be
+missed. The profile view labels still mark the surface edge. A zone may set `maxCover`; without
+it the general `coverMax` (in `networks`; 6 m on this project) applies. The labels use the styles `startLabelStyle` / `endLabelStyle` when set (a zone
 may set its own); otherwise the tool makes "C3DPRO Start Of Road Pavement" and so on from the drawing's station-elevation style
 (`baseLabelStyle`), reading "Start Of Road Pavement / CH:76.184". The duct type comes from the duct name (IC-124-IC3A-06 is A)
 or, failing that, from "Reinforcement" in its size.

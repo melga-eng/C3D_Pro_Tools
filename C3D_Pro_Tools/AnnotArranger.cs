@@ -553,7 +553,35 @@ namespace C3DProTools
             // Above and below the anchor, on both sides: Civil 3D may join the leader to the text elsewhere below it.
             LRect? upRight = Rel(25, 15), upLeft = Rel(-25, 15), downRight = Rel(25, -15), downLeft = Rel(-25, -15);
             if (upRight == null || upLeft == null) return null;
-            return new DraggedShape { Right = upRight.Value, Left = upLeft.Value, UpRight = upRight, UpLeft = upLeft, DownRight = downRight, DownLeft = downLeft };
+            DraggedShape shape = new DraggedShape { Right = upRight.Value, Left = upLeft.Value, UpRight = upRight, UpLeft = upLeft, DownRight = downRight, DownLeft = downLeft };
+            // Then all round, every 22.5°: which side the text takes depends on the leader's angle to the text, not only on left or
+            // right (pipe labels turned with their pipe), and is only repeatable once the label has been put there (see Place).
+            const double r = 30;
+            for (int i = 0; i < 16; i++)
+            {
+                double a = i * Math.PI / 8, dx = r * Math.Cos(a), dy = r * Math.Sin(a);
+                LRect? box = Placed(tr, label, it, v, paperPerUnit, (it.Anchor.X + dx, it.Anchor.Y + dy), out LabelOutline got);
+                if (box.HasValue) shape.Samples.Add((a, box.Value, Relative(got, (it.Anchor.X + dx, it.Anchor.Y + dy))));
+            }
+            return shape;
+        }
+
+        /// <summary>
+        /// Puts the leader end at a paper position and returns the text box relative to that position. Set twice: the side Civil 3D
+        /// gives the text at the first set depends on where the label was before; the second set is always the same for the same
+        /// place (measured on tile 124: the first set flipped structure labels at the same place either way).
+        /// </summary>
+        /// <summary>The measured text outline relative to the leader end.</summary>
+        private static List<(double X, double Y)> Relative(LabelOutline got, (double X, double Y) end) =>
+            got?.Hull.Select(p => (p.X - end.X, p.Y - end.Y)).ToList();
+
+        private static LRect? Placed(Transaction tr, CLabel label, Item it, SheetViewport v, double paperPerUnit, (double X, double Y) end, out LabelOutline got)
+        {
+            got = null;
+            if (!SetLocation(label, it, v, end) || !SetLocation(label, it, v, end)) return null;
+            got = Measure(tr, label, it, v, paperPerUnit);
+            if (got == null || got.Hull.Count < 2) return null;
+            return LRect.Around(got.Hull).Offset(-end.X, -end.Y);
         }
 
         private static ArrangeReport ArrangeViewport(Transaction tr, SheetInfo sheet, SheetViewport v, List<LabelInfo> labels, AnnotScene scene, ArrangeOptions o,
@@ -769,16 +797,28 @@ namespace C3DProTools
                 if (plan.Spot.HasValue)
                 {
                     if (plan.Spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(live, plan.Spot.Value.Anchor, it.Key);
-                    LabelLayout.Claim(live, plan.Spot.Value.Box, plan.Start, plan.Spot.Value.End, it.Key);
+                    LabelLayout.Claim(live, plan.Spot.Value, plan.Start, it.Key);
                 }
-            foreach ((Item it, PlanLabel plan) in plans)
+            // Planned labels first: one put back where it was would block the planned places of those after it. What is left
+            // gets one more try at the end, around where everything actually went.
+            List<(Item it, PlanLabel plan)> left = new List<(Item it, PlanLabel plan)>();
+            foreach ((Item it, PlanLabel plan) in plans.Where(p => p.plan.Spot.HasValue).Concat(plans.Where(p => !p.plan.Spot.HasValue)))
+                if (!TryPlace(it, plan, false)) left.Add((it, plan));
+            foreach ((Item it, PlanLabel plan) in left) TryPlace(it, plan, true);
+            return report;
+
+            bool TryPlace(Item it, PlanLabel plan, bool last)
             {
                 CLabel label = (CLabel)tr.GetObject(it.Info.Id, OpenMode.ForWrite);
                 LabelObstacles others = live.Without(new[] { it.Key });
                 List<LabelSpot> tried = new List<LabelSpot>();
-                LabelSpot? spot = plan.Spot;
+                LabelSpot? spot = last ? null : plan.Spot;
                 bool done = false;
-                for (int attempt = 0; attempt < 5 && !done; attempt++)
+                // Second best: a tried place clear of every label, text, part and the viewport edge that only covers another
+                // label's leader line. Better than putting the label back where it overlaps labels.
+                LabelObstacles noLeaders = others.WithoutLeaders();
+                (LabelSpot spot, (double X, double Y) end)? fallback = null;
+                for (int attempt = 0; attempt < 8 && !done; attempt++)
                 {
                     if (attempt > 0 || !spot.HasValue)
                         spot = LabelPlanner.ChooseFor(others, plan, rules, null, tried);
@@ -787,19 +827,17 @@ namespace C3DProTools
                     // Slid along its pipe: the ratio first, so its anchor is where the leader starts.
                     if (spot.Value.Ratio.HasValue) try { SetRatio(label, spot.Value.Ratio.Value); } catch (Exception) { continue; }
                     (double X, double Y) start = spot.Value.Ratio.HasValue ? spot.Value.Anchor : it.Anchor;
-                    if (!SetLocation(label, it, v, spot.Value.End)) break;
-                    // Where Civil 3D actually put it: it must be clear there too. Off by a little: moved once by the difference.
-                    LabelOutline got = Measure(tr, label, it, v, paperPerUnit);
-                    if (got == null) break;
-                    bool Bad(LabelOutline g) => ProblemIn(others, it, g.Hull, true).Length > 0 || others.LeaderCrossesText(start, g.Location, it.Key);
-                    if (Bad(got))
+                    // Where Civil 3D actually put it: it must be clear there too. Drawn otherwise than planned: that shape is
+                    // learnt for this leader direction and the next place is chosen with it.
+                    LRect? rel = Placed(tr, label, it, v, paperPerUnit, spot.Value.End, out LabelOutline got);
+                    if (rel == null) break;
+                    bool bad = ProblemIn(others, it, got.Hull, true).Length > 0 || others.LeaderCrossesText(start, got.Location, it.Key);
+                    if (bad)
                     {
-                        LRect actual = LRect.Around(got.Hull);
-                        double errX = spot.Value.Box.Center.X - actual.Center.X, errY = spot.Value.Box.Center.Y - actual.Center.Y;
-                        if (Math.Abs(errX) <= 0.2 && Math.Abs(errY) <= 0.2) continue;
-                        if (!SetLocation(label, it, v, (spot.Value.End.X + errX, spot.Value.End.Y + errY))) continue;
-                        got = Measure(tr, label, it, v, paperPerUnit);
-                        if (got == null || Bad(got)) continue;
+                        if (fallback == null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
+                            fallback = (spot.Value, spot.Value.End);
+                        plan.Shape.Learn(spot.Value.End.X - start.X, spot.Value.End.Y - start.Y, rel.Value, Relative(got, spot.Value.End));
+                        continue;
                     }
                     live = others;
                     if (spot.Value.Ratio.HasValue) LabelLayout.ReserveAnchor(live, start, it.Key);
@@ -810,15 +848,35 @@ namespace C3DProTools
                     Record(it, got.Hull, start, got.Location, 1);
                     done = true;
                 }
+                if (!done && fallback.HasValue)
+                {
+                    LabelSpot fs = fallback.Value.spot;
+                    bool ratioOk = true;
+                    if (fs.Ratio.HasValue) try { SetRatio(label, fs.Ratio.Value); } catch (Exception) { ratioOk = false; }
+                    (double X, double Y) start = fs.Ratio.HasValue ? fs.Anchor : it.Anchor;
+                    LabelOutline got = null; if (ratioOk) Placed(tr, label, it, v, paperPerUnit, fallback.Value.end, out got);
+                    if (got != null && ProblemIn(noLeaders, it, got.Hull, true).Length == 0 && !noLeaders.LeaderCrossesText(start, got.Location, it.Key))
+                    {
+                        live = others;
+                        if (fs.Ratio.HasValue) LabelLayout.ReserveAnchor(live, start, it.Key);
+                        live.AddPolygon(got.Hull, ObstacleGroup.Text, "label", part: it.Key);
+                        live.AddSegment(start, got.Location, ObstacleGroup.Leader, "leader", part: it.Key);
+                        live.Placed(LRect.Around(got.Hull), it.Key);
+                        report.Moved++;
+                        Record(it, got.Hull, start, got.Location, 1);
+                        report.Issues.Add(new ArrangeIssue { LabelId = it.Info.Id, Sheet = sheet.Layout, Where = it.Info.Anchor, Text = "Placed clear of labels and text, but over another label's leader" });
+                        done = true;
+                    }
+                }
                 if (!done)
                 {
                     Restore(label, it);
                     live = others;
                     ClaimAsIs(it, live);
-                    Unresolved(it, "No clear place within the longest leader; put back as it was");
+                    if (last) Unresolved(it, "No clear place within the longest leader; put back as it was");
                 }
+                return done;
             }
-            return report;
         }
 
         /// <summary>

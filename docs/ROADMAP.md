@@ -25,9 +25,9 @@ Days are working days and are targets: what the drawing tests find decides the r
 | Release | Days | Tools | Accepted when |
 |---|---|---|---|
 | **0. Foundation** | 1–2 | Background test bench (done), new agent rules (done), product map (done), new visual design chosen (Direction 2, Drafting Vellum, 2026-11-11) | You picked a design; a test runs without you |
-| **1. Profile views** (done in C3DPROPV except Split, 2026-11-11; Match keeps hand-set level ranges and the Pavement step labels pavement edges, 2026-11-12) | 3–4 | Profile Manager, TOP Fit, Match, Split, Profile DIMs, and one run that chains them for selected alignments | Tile 124 profile sheet 434132 matches your submitted PDF |
-| **2. Networks** (C3DPRONET: Repair, Rims, Fit released 2026-11-12, your yes; Duplicates and the Cover check with pavement zones from surfaces built and drawing-tested 2026-11-12, waiting for your check. Split, Swap and Networks from Feature Lines stay in the Network Editor: each needs per-job choices) | 5–6 | Network Editor (split, merge, swap, fit, conduits, rim to surface), Organizer, Repair, Networks from Feature Lines, Cover Designer | Each passes on the ICT network copy with your rules (cover 0.60, dry/dry 0.30, slope 7 %) |
-| **3. Labels** (C3DPROLBL Report / Add / Arrange / Reset on main 2026-11-12. Add and Reset pass; Arrange on 102054 leaves 2 overlaps and 6 labels over another leader. The planner work on feature/arrange-dense places all 33 offline but not yet on the drawing, so it is not merged) | 7–8 | Add labels, Arrange, Reset, Rename | A tile 124 plan sheet: no overlaps, every label inside its viewport |
+| **1. Profile views** (C3DPROPV: your yes on sheet 434132 and the pavement labels, 2026-11-12; Split step built from your 124-1 example, 2026-11-12: same stations, levels differ by 1 m; profile labels still to be arranged, release 3) | 3–4 | Profile Manager, TOP Fit, Match, Split, Profile DIMs, and one run that chains them for selected alignments | Tile 124 profile sheet 434132 matches your submitted PDF |
+| **2. Networks** (C3DPRONET: Repair, Rims, Fit, Duplicates released 2026-11-12, your yes; Cover check with pavement zones, taxiway edge band 16.5 m excepted and max cover 6 m, 2026-11-12: 1 type B duct left under taxiway. Split, Swap, Networks from Feature Lines and Cover Designer ship as they are in their forms, your call) | 5–6 | Network Editor (split, merge, swap, fit, conduits, rim to surface), Organizer, Repair, Networks from Feature Lines, Cover Designer | Each passes on the ICT network copy with your rules (cover 0.60, dry/dry 0.30, slope 7 %) |
+| **3. Labels** (C3DPROLBL Report / Add / Arrange / Reset. Arrange now measures each label all round, sets each place twice and plans with the labels' true outlines: on 102054, 3 labels without a clear place, 4 + 2 problems (from 28 + 3 before); with leaders up to 100 mm, 1 + 2. Not yet clean. Profile labels and Rename not started) | 7–8 | Add labels, Arrange, Reset, Rename | A tile 124 plan sheet: no overlaps, every label inside its viewport |
 | **4. Sheets and standards** | 9–10 | Sheet Manager, Build Sheets with the palette, Style tools, Drawing Cleaner, Navisworks Importer | Tile 124 sheets built in one run; cleaned copy opens correctly |
 
 ## Who works on what, in parallel
@@ -61,3 +61,4 @@ Tests always run on copies.
 - Issues list
 - Other networks' rule sets (MV, LV, fence lighting, navaids, MET)
 - Quantities
+
