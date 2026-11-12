@@ -219,6 +219,15 @@ namespace C3DProTools.Features.Networks.Civil3D
                     try
                     {
                         MergeResult r = NetworkOrganizer.Merge(one, civil, new List<ObjectId> { n.id }, n.id, null, new List<ObjectId>(), delete, false, false, doc.Editor);
+                        // A pipe left disconnected from the structure that stays: the whole network's step is undone.
+                        if (r.ReconnectFailed > 0)
+                        {
+                            one.Abort();
+                            failed++;
+                            lines.Add($"    {n.name}: nothing deleted: {r.ReconnectFailed} pipes could not be moved onto the structure that stays.");
+                            foreach (string l in r.Log) lines.Add($"    {l}");
+                            continue;
+                        }
                         one.Commit();
                         deleted += r.Deleted; reconnected += r.Reconnected;
                         foreach (string l in r.Log) lines.Add($"    {l}");
@@ -273,7 +282,8 @@ namespace C3DProTools.Features.Networks.Civil3D
                     List<CoverJob> jobs;
                     try { jobs = CoverJobs.FromNetwork(tr, n.id, setup.Gap, setup.CenterTolerance, false); }
                     catch (System.Exception ex) { errors++; failing.Add($"  {n.name}: routes could not be read ({ex.Message})"); continue; }
-                    var batch = new HashSet<ObjectId>(n.pipes);
+                    // Only each route's own pipes are left out of its crossings (Prepare adds them): other routes of the same network count.
+                    var batch = new HashSet<ObjectId>();
                     foreach (CoverJob job in jobs)
                     {
                         routes++;

@@ -468,7 +468,7 @@ namespace C3DProTools
                 DataGridViewRow row = _grid.Rows[i];
                 row.Tag = r;
                 row.Cells[CSource].ToolTipText = r.Kind;
-                if (r.Error != null) row.DefaultCellStyle.ForeColor = Color.FromArgb(185, 28, 28);
+                if (r.Error != null) row.DefaultCellStyle.ForeColor = StyleUi.Danger;
                 else if (!r.Use) row.DefaultCellStyle.ForeColor = StyleUi.Muted;
                 if (r.Part != null) row.Cells[CPart].ToolTipText = "This line's own part.";
                 row.Selected = selected.Contains(r.SourceId);

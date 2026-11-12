@@ -25,6 +25,8 @@ namespace C3DProTools
     internal sealed class MergeResult
     {
         public int Moved, Deleted, Reconnected, Connected, NetworksDeleted;
+        /// <summary>Pipes that could not be moved onto the structure that stays (they are left disconnected).</summary>
+        public int ReconnectFailed;
         public ObjectId TargetId = ObjectId.Null;
         public string TargetName = "";
         public readonly List<string> Log = new List<string>();
@@ -198,7 +200,7 @@ namespace C3DProTools
                                 NetworkEditOps.ConnectEnd(pipe, end, kv.Value);
                                 result.Reconnected++;
                             }
-                            catch (Exception ex) { result.Log.Add($"{pipe.Name}: could not be connected to the structure that stays ({ex.Message})."); }
+                            catch (Exception ex) { result.ReconnectFailed++; result.Log.Add($"{pipe.Name}: could not be connected to the structure that stays ({ex.Message})."); }
                             if (!pipe.StartPoint.IsEqualTo(s)) pipe.StartPoint = s;
                             if (!pipe.EndPoint.IsEqualTo(e)) pipe.EndPoint = e;
                         }
