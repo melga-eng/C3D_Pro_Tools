@@ -45,6 +45,13 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void OnlyLabelOfItsStyleMatchesWhereverItWasSlid()
+        {
+            var existing = new List<AnnotLabelPosition> { new AnnotLabelPosition(LabelKind.PlanPipe, "Name", "0", 0.31) };
+            Assert.True(AnnotLabelRules.TakeExisting(existing, new AnnotLabelPosition(LabelKind.PlanPipe, "Name", "0", null)));
+        }
+
+        [Fact]
         public void StructuresIgnoreRatioButRespectProfileView()
         {
             var label = new AnnotLabelPosition(LabelKind.ProfileStructure, "Style", "V1", null);

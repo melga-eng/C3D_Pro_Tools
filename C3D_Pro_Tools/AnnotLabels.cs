@@ -490,8 +490,11 @@ namespace C3DProTools
                     IEnumerable<ObjectId> targets = profile ? views.Cast<ObjectId>().Where(v => !v.IsNull).Distinct() : new[] { ObjectId.Null };
                     foreach (ObjectId viewId in targets)
                     {
+                        // Position matters only when the set has several labels of this style (two end labels, say); the
+                        // only one of its style counts wherever it sits, since Arrange may have slid it along the pipe.
+                        bool several = items.Count(i => i.Kind == item.Kind && i.Style == item.Style) > 1;
                         if (AnnotLabelRules.TakeExisting(positions, new AnnotLabelPosition(item.Kind, item.Style,
-                            viewId.Handle.ToString(), Math.Max(0, Math.Min(1, item.Ratio)))))
+                            viewId.Handle.ToString(), several ? Math.Max(0, Math.Min(1, item.Ratio)) : (double?)null)))
                         { r.Skipped++; continue; }
                         try
                         {
