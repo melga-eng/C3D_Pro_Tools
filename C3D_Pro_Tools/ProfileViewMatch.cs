@@ -531,7 +531,7 @@ namespace C3DProTools
                         double newMin = lo < view.ElevationMin - 1e-6 ? cutMin : view.ElevationMin;
                         double newMax = hi > view.ElevationMax + 1e-6 ? cutMax : view.ElevationMax;
                         Change("Elevation range", $"{view.ElevationMin:0.##} – {view.ElevationMax:0.##} (cuts off {lo:0.##} – {hi:0.##})", $"{newMin:0.##} – {newMax:0.##}");
-                        if (write) try { ProfileCreation.SetElevationRange(view, newMin, newMax, 0, o.DatumIncrement); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
+                        if (write) try { ProfileCreation.SetElevationRangeExact(view, newMin, newMax); } catch (Exception ex) { log.Add($"{vn}: elevation range: {ex.Message}"); }
                     }
                 }
                 else if (!userRange || Math.Abs(view.ElevationMin - min) > 1e-6 || Math.Abs(view.ElevationMax - max) > 1e-6)
