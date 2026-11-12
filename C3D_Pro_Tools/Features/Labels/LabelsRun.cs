@@ -267,7 +267,7 @@ namespace C3DProTools.Features.Labels
                 {
                     ArrangeReport c = Check("check");
                     tr.Abort();
-                    log.AppendLine($"Labels: {c.Checked} label checks on {sheets.Count} layouts: {c.Problems} with a problem (overlap or outside the viewport), {c.Unmeasured} could not be measured{lockedNote}. Changes nothing.");
+                    log.AppendLine($"Labels: {c.Checked} label checks on {sheets.Count} layouts: {Split(c)}, {c.Unmeasured} could not be measured{lockedNote}. Changes nothing.");
                     return;
                 }
 
@@ -285,8 +285,16 @@ namespace C3DProTools.Features.Labels
                 ArrangeReport after = Check("after");
                 tr.Commit();
                 log.AppendLine($"Arrange: {total.Checked} labels on {sheets.Count} layouts: moved {total.Moved}, without a clear place {total.Unresolved}, could not be measured {total.Unmeasured}.");
-                log.AppendLine($"After arranging: {after.Problems} label problems left on these layouts (listed){lockedNote}.");
+                log.AppendLine($"After arranging: {Split(after)} (listed){lockedNote}.");
             }
+        }
+
+        /// <summary>The problems split by weight: over a label, text, part or the viewport edge, and only over another label's leader line.</summary>
+        private static string Split(ArrangeReport r)
+        {
+            int leaders = r.Issues.Count(i => i.Text == "Covers a leader");
+            int other = r.Problems - leaders;
+            return $"{other} overlapping a label, text or part or cut by the viewport edge, {leaders} only over another label's leader line";
         }
 
         /// <summary>"label 2A3F (KSIA_START [NE]) on IC-124-IC3A-06" for the report.</summary>
