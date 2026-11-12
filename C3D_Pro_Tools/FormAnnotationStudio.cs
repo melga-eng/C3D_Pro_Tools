@@ -231,7 +231,6 @@ namespace C3DProTools
         }
 
         /// <summary>The key a style's placement is kept under: its kind and name (two kinds may share a style name).</summary>
-        internal static string StyleKey(LabelKind kind, string style) => kind + ":" + style;
 
         /// <summary>The element a label kind labels, as the style list shows it.</summary>
         private static string ElementOf(LabelKind k) =>
@@ -259,13 +258,13 @@ namespace C3DProTools
             HashSet<string> dragged = new HashSet<string>(_s.DraggedStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             HashSet<string> known = new HashSet<string>(_s.KnownStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             HashSet<string> fromSets = new HashSet<string>((_s.LabelSets ?? new List<LabelSet>()).SelectMany(s => s.Items).Concat(_s.LabelRows ?? new List<LabelSetItem>())
-                .Where(i => i.Dragged).Select(i => StyleKey(i.Kind, i.Style)), StringComparer.OrdinalIgnoreCase);
+                .Where(i => i.Dragged).Select(i => AnnotLabelRules.StyleKey(i.Kind, i.Style)), StringComparer.OrdinalIgnoreCase);
             _gridStyles.Rows.Clear();
             HashSet<string> slides = new HashSet<string>(_s.SlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             HashSet<string> knownSlides = new HashSet<string>(_s.KnownSlideStyles ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             foreach ((LabelKind kind, string style, int labels, int draggedNow, int alongPipe) in scan.Styles)
             {
-                string key = StyleKey(kind, style);
+                string key = AnnotLabelRules.StyleKey(kind, style);
                 bool isDragged = known.Contains(key) ? dragged.Contains(key) : fromSets.Contains(key) || draggedNow * 2 > labels;
                 bool pipe = kind == LabelKind.PlanPipe || kind == LabelKind.ProfilePipe;
                 // Off for end labels (most of the style's labels at a pipe end), on for labels along the pipe, unless chosen before.
