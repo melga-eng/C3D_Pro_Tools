@@ -41,6 +41,8 @@ namespace C3DProTools
                 // The least clear distance to each crossing pipe along this pipe (a skewed one spans several stations).
                 Dictionary<RouteCrossing, double> leastClear = new Dictionary<RouteCrossing, double>();
                 (double shortfall, string zone, double required) worstCover = (0, null, 0);
+                // The most cover over the allowed maximum (a zone's own, or the general one), with where it applies.
+                (double excess, string zone, double allowed, double cover) worstMax = (0, null, 0, 0);
                 for (int r = sec.FirstRecord; r <= sec.LastRecord; r++)
                 {
                     RouteRecord rec = route.Records[r];
@@ -51,6 +53,9 @@ namespace C3DProTools
                     CoverZone zone = route.ZoneAt(rec.S);
                     double required = zone?.MinCover ?? o.MinCover;
                     if (required - cover > worstCover.shortfall + Tolerance) worstCover = (required - cover, zone?.Label, required);
+                    double allowedMax = zone == null || zone.MaxCover == 0 ? o.MaxCover : zone.MaxCover;
+                    if (!double.IsNaN(allowedMax) && cover - allowedMax > worstMax.excess + Tolerance)
+                        worstMax = (cover - allowedMax, zone != null && zone.MaxCover != 0 ? zone.Label : null, allowedMax, cover);
 
                     foreach (CrossingLevel level in rec.Crossings)
                     {
@@ -73,7 +78,8 @@ namespace C3DProTools
 
                 if (worstCover.zone != null) issues.Add($"Cover below the {worstCover.zone} minimum ({worstCover.required - worstCover.shortfall:0.000} m < {worstCover.required:0.00} m)");
                 else if (min < o.MinCover - Tolerance) issues.Add($"Cover below min ({min:0.00} m)");
-                if (max > o.MaxCover + Tolerance) issues.Add($"Cover above max ({max:0.00} m)");
+                if (worstMax.zone != null) issues.Add($"Cover above the {worstMax.zone} maximum ({worstMax.cover:0.00} m > {worstMax.allowed:0.00} m)");
+                else if (worstMax.excess > 0) issues.Add($"Cover above max ({worstMax.cover:0.00} m)");
 
                 (double minSlope, double maxSlope) = rules.SlopesFor(sec.InnerHeight, o.MinSlope, o.MaxSlope);
                 double slope = p.Slope;

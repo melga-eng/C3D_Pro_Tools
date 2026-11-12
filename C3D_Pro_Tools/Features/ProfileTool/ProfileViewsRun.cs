@@ -13,6 +13,11 @@ using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.DatabaseServices.Styles;
 using C3DProTools.Features.Sheets.Application;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
+using C3DProTools.Features.Pavement;
+using Alignment = Autodesk.Civil.DatabaseServices.Alignment;
+using ProfileView = Autodesk.Civil.DatabaseServices.ProfileView;
+using StationElevationLabel = Autodesk.Civil.DatabaseServices.StationElevationLabel;
+using Surface = Autodesk.Civil.DatabaseServices.Surface;
 
 [assembly: CommandClass(typeof(C3DProTools.ProfileTool.ProfileViewsRun))]
 
@@ -118,7 +123,7 @@ namespace C3DProTools.ProfileTool
             Editor ed = doc.Editor;
 
             var kw = new PromptKeywordOptions("\nProfile views") { AllowNone = true };
-            foreach (string k in new[] { "Report", "Top", "Match", "Dims", "All" }) kw.Keywords.Add(k);
+            foreach (string k in new[] { "Report", "Top", "Match", "Dims", "Pavement", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -145,6 +150,7 @@ namespace C3DProTools.ProfileTool
                 TopStep(doc, civil, s, doTop, log);
                 if (doMatch || mode == "Report") MatchStep(doc, civil, s, doMatch, log);
                 DimStep(doc, s, doDims, log);
+                PavementStep(doc, civil, s, mode == "Pavement" || mode == "All", log);
             }
             catch (System.Exception ex)
             {
@@ -186,6 +192,111 @@ namespace C3DProTools.ProfileTool
             if (!s.CreateMissingTop) { log.AppendLine($"TOP: {missing.Count} alignments have no TOP profile; set createMissingTop to create them."); return; }
             if (!ResolveCreate(doc, civil, s, out TopProfileCivil.CreateTopOptions o, out string why)) { log.AppendLine($"TOP: not created: {why}"); return; }
             log.AppendLine("TOP " + TopProfileCivil.Create(doc, missing, o).Summary("created"));
+        }
+
+        /// <summary>
+        /// Marks where each view's alignment enters and leaves each pavement (from the pavement surfaces) with a station-elevation
+        /// label on the proposed ground; the tool's earlier pavement labels in the view are replaced, hand-made ones stay.
+        /// </summary>
+        private static void PavementStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
+        {
+            PavementSettings ps = PavementSettings.Load(doc.Name, out string problem);
+            if (problem != null) { log.AppendLine($"Pavement: {problem}"); return; }
+            if (!ps.Any) { if (write) log.AppendLine("Pavement: no pavement surfaces set (pavement.zones in the project file)."); return; }
+            Database db = doc.Database;
+            using (write ? doc.LockDocument() : null)
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                var missing = new List<string>();
+                List<Func<double, double, bool>> tests = PavementCivil3D.Tests(tr, civil, ps, missing);
+                if (missing.Count > 0) log.AppendLine($"Pavement: surfaces not in the drawing, left out: {string.Join(", ", missing)}.");
+                Surface proposed = null;
+                foreach (ObjectId id in civil.GetSurfaceIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Surface sf && string.Equals(sf.Name, s.ProposedSurface ?? "", StringComparison.OrdinalIgnoreCase)) proposed = sf;
+
+                // The styles, by zone (its own) or the section's; all must exist before anything is written.
+                // A style named in the settings must exist; with none named, the tool's own is used (made from the base style).
+                var styles = new Dictionary<(int, bool), ObjectId>();
+                var badStyles = new List<string>();
+                var toMake = new List<string>();
+                List<string> available = PavementCivil3D.StationElevationStyleNames(tr, civil);
+                ObjectId baseStyle = PavementCivil3D.StationElevationStyle(tr, civil, ps.BaseLabelStyle is { Length: > 0 } bn ? bn : available.FirstOrDefault());
+                for (int k = 1; k <= ps.Zones.Count; k++)
+                    foreach (bool start in new[] { true, false })
+                    {
+                        PavementZone z = ps.Zones[k - 1];
+                        string name = start ? (z.StartLabelStyle is { Length: > 0 } a ? a : ps.StartLabelStyle) : (z.EndLabelStyle is { Length: > 0 } b ? b : ps.EndLabelStyle);
+                        ObjectId id;
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            id = PavementCivil3D.StationElevationStyle(tr, civil, name);
+                            if (id.IsNull) badStyles.Add($"\"{name}\"");
+                        }
+                        else
+                        {
+                            string own = PavementCivil3D.OwnStyleName(z, start);
+                            id = PavementCivil3D.StationElevationStyle(tr, civil, own);
+                            if (id.IsNull && baseStyle.IsNull) badStyles.Add($"{own}: no station-elevation style to make it from");
+                            else if (id.IsNull && !write) toMake.Add(own);
+                            else if (id.IsNull) id = PavementCivil3D.EnsureEdgeStyle(tr, civil, baseStyle, own, $"{(start ? "Start" : "End")} Of {z.Name}");
+                        }
+                        styles[(k, start)] = id;
+                    }
+                if (toMake.Count > 0)
+                    log.AppendLine($"Pavement: the label styles {string.Join(", ", toMake)} will be made from \"{(ps.BaseLabelStyle is { Length: > 0 } b2 ? b2 : available.FirstOrDefault())}\" (or set pavement.startLabelStyle / endLabelStyle).");
+                ObjectId marker = PavementCivil3D.Marker(tr, civil, ps.MarkerStyle);
+
+                int views = 0, edges = 0, made = 0, replaced = 0, failed = 0;
+                foreach (ObjectId aid in civil.GetAlignmentIds())
+                {
+                    if (!(tr.GetObject(aid, OpenMode.ForRead) is Alignment al) || !s.Includes(al.Name)) continue;
+                    foreach (ObjectId vid in al.GetProfileViewIds())
+                    {
+                        if (!(tr.GetObject(vid, OpenMode.ForRead) is ProfileView v)) continue;
+                        views++;
+                        List<PavementRun> runs = PavementCivil3D.AlongAlignment(al, v.StationStart, v.StationEnd, tests, ps.Step);
+                        var found = PavementCivil3D.Edges(runs, v.StationStart, v.StationEnd);
+                        edges += found.Count;
+                        if (found.Count > 0 || write)
+                            log.AppendLine($"  {v.Name}: " + (found.Count == 0 ? "no pavement edge" :
+                                string.Join(", ", found.Select(e => $"{(e.start ? "start" : "end")} of {ps.Of(e.kind).Name} {e.station:0.000}"))));
+                        if (!write || badStyles.Count > 0) continue;
+
+                        using Transaction one = tr.TransactionManager.StartTransaction();
+                        try
+                        {
+                            foreach (ObjectId old in PavementCivil3D.EarlierLabels(one, db, vid)) { one.GetObject(old, OpenMode.ForWrite).Erase(); replaced++; }
+                            foreach (var e in found)
+                            {
+                                double elevation = v.ElevationMax;
+                                if (proposed != null)
+                                {
+                                    double x = 0, y = 0;
+                                    try { al.PointLocation(e.station, 0, ref x, ref y); elevation = proposed.FindElevationAtXY(x, y); }
+                                    catch (System.Exception) { elevation = v.ElevationMax; }
+                                }
+                                ObjectId id = StationElevationLabel.Create(vid, styles[(e.kind, e.start)], marker, e.station, elevation);
+                                PavementCivil3D.Tag(one, db, one.GetObject(id, OpenMode.ForWrite));
+                                made++;
+                            }
+                            one.Commit();
+                        }
+                        catch (System.Exception ex)
+                        {
+                            one.Abort();
+                            failed++;
+                            log.AppendLine($"    {v.Name}: no pavement labels ({ex.Message}).");
+                        }
+                    }
+                }
+                if (badStyles.Count > 0)
+                    log.AppendLine($"Pavement: label styles not found ({string.Join("; ", badStyles.Distinct())}); " +
+                                   $"set pavement.startLabelStyle / endLabelStyle to one of: {string.Join(", ", PavementCivil3D.StationElevationStyleNames(tr, civil))}." +
+                                   (write ? " Nothing was labelled." : ""));
+                log.AppendLine($"Pavement: {views} profile views, {edges} pavement edges" +
+                               (write && badStyles.Count == 0 ? $"; labelled {made}, earlier tool labels replaced {replaced}, views failed {failed}." : "."));
+                if (write && badStyles.Count == 0) tr.Commit(); else tr.Abort();
+            }
         }
 
         private static bool ResolveCreate(Document doc, CivilDocument civil, ProfileViewsSettings s, out TopProfileCivil.CreateTopOptions o, out string why)

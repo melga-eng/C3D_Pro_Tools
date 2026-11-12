@@ -1,13 +1,34 @@
 {
-  "profileViews": {
-    "alignments": "ICT-ALI-124*",
-    "matchTemplate": "ICT_PROFILE_VIEW_SETTINGS",
-    "existingSurface": "COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED",
-    "proposedSurface": "CE_PROP-CONT-NCRD"
-  },
-  "networks": {
-    "networks": "*",
-    "surface": "CE_PROP-CONT-NCRD",
-    "fitFace": "InnerWall"
-  }
+    "profileViews":  {
+                         "alignments":  "ICT-ALI-124*",
+                         "matchTemplate":  "ICT_PROFILE_VIEW_SETTINGS",
+                         "existingSurface":  "COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED",
+                         "proposedSurface":  "CE_PROP-CONT-NCRD"
+                     },
+    "networks":  {
+                     "networks":  "*",
+                     "surface":  "CE_PROP-CONT-NCRD",
+                     "fitFace":  "InnerWall"
+                 },
+    "pavement":  {
+                     "zones":  [
+                                   {
+                                       "surface":  "KSIA_TAXIWAY-PAVEMENT",
+                                       "name":  "Taxiway Pavement",
+                                       "minCover":  1.5,
+                                       "ductType":  "A"
+                                   },
+                                   {
+                                       "surface":  "KSIA_ROAD-AIRSIDE",
+                                       "name":  "Road Pavement",
+                                       "minCover":  0.64,
+                                       "ductType":  "B"
+                                   }
+                               ],
+                     "unpaved":  {
+                                     "name":  "Unpaved",
+                                     "minCover":  0.6,
+                                     "ductType":  "B"
+                                 }
+                 }
 }

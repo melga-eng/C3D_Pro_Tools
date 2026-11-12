@@ -48,6 +48,7 @@ alignments or networks, press Enter to use the file's value or type others for t
 | `matchTemplate` / `matchSourceView` | none | What Match copies from |
 | `matchOthers` | `Hide` | Profiles with no role: `Hide`, `Leave` or `Delete` (Delete only when both surfaces are found) |
 | `matchElevation` | `Widen` | Level ranges: `Widen` keeps each view's own range and only widens the side that cuts off a profile, duct or structure; `Fit` refits every view; `Leave` never touches them |
+| Pavement (step) | — | Labels each start and end of pavement in the views (station-elevation labels on the proposed ground), from the `pavement` section below; a re-run replaces the tool's own labels |
 | `topPattern` | `TOP` | Text that marks a TOP profile name |
 | `createMissingTop`, `topStyle`, `topLabelSet`, `topLayer`, `topNameTemplate` | off | For creating missing TOP profiles |
 | `dims` | as Profile DIMs | `dimStyle`, `layer`, `cover`, `clearance`, `minSpacingM`, `majorGradeChangePct`, ... |
@@ -63,7 +64,9 @@ surface is not found (it would erase earlier cover DIMs and draw none). Both com
 | Repair | Rebuilds pipes that dropped out of their network's member list |
 | Rims | Sets structure rims to `surface` (+ `aboveSurface`) |
 | Fit | Trims or extends straight pipe ends to their structures' `fitFace` (InnerWall, OuterWall, Center), connecting loose ends inside a structure |
-| All | Repair, Rims, Fit |
+| Duplicates | Deletes true copies inside each network (same place, levels, family and size); copies with labels or profile views stay |
+| Cover | Checks cover, slope, crossings and duct type along every route; changes nothing |
+| All | Repair, Duplicates, Rims, Fit, Cover |
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -75,6 +78,28 @@ surface is not found (it would erase earlier cover DIMs and draw none). Both com
 | `fitBoxLength`, `fitBoxWidth` | 0 | Both above 0: fit to a box of that size instead of the structure's own |
 | `fitMaxMove` | 3.0 | An end that would move more than this (m) is left alone: its structure connection is wrong |
 | `connectLooseEnds` | true | Connect pipe ends lying inside a structure |
+
+## Pavement (both commands)
+
+Each pavement kind is a surface that covers exactly its paved area (a data reference is fine). The first one listed wins where
+two overlap; everywhere else is unpaved. `C3DPRONET Cover` checks each duct against the cover of the pavement over it and its
+duct type (type B under taxiway fails; type A where B is asked is only noted); `C3DPROPV Pavement` labels the edges.
+
+```json
+"pavement": {
+  "zones": [
+    { "surface": "KSIA_TAXIWAY-PAVEMENT", "name": "Taxiway Pavement", "minCover": 1.50, "ductType": "A" },
+    { "surface": "KSIA_ROAD-AIRSIDE", "name": "Road Pavement", "minCover": 0.64, "ductType": "B" }
+  ],
+  "unpaved": { "name": "Unpaved", "minCover": 0.60, "ductType": "B" }
+}
+```
+
+A zone may set `maxCover`; without it the general `coverMax` applies, except under a zone whose minimum is already at or
+above it (taxiway), where there is no maximum. The labels use the styles `startLabelStyle` / `endLabelStyle` when set (a zone
+may set its own); otherwise the tool makes "C3DPRO Start Of Road Pavement" and so on from the drawing's station-elevation style
+(`baseLabelStyle`), reading "Start Of Road Pavement / CH:76.184". The duct type comes from the duct name (IC-124-IC3A-06 is A)
+or, failing that, from "Reinforcement" in its size.
 
 Each run writes its full report to `%TEMP%\C3DPROPV-<step>.txt` or `%TEMP%\C3DPRONET-<step>.txt`; the command line shows the
 summary and the file path.
