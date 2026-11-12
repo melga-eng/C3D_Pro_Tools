@@ -10,6 +10,27 @@
                      "surface":  "CE_PROP-CONT-NCRD",
                      "fitFace":  "InnerWall"
                  },
+    "pavement":  {
+                     "zones":  [
+                                   {
+                                       "surface":  "KSIA_TAXIWAY-PAVEMENT",
+                                       "name":  "Taxiway Pavement",
+                                       "minCover":  1.5,
+                                       "ductType":  "A"
+                                   },
+                                   {
+                                       "surface":  "KSIA_ROAD-AIRSIDE",
+                                       "name":  "Road Pavement",
+                                       "minCover":  0.64,
+                                       "ductType":  "B"
+                                   }
+                               ],
+                     "unpaved":  {
+                                     "name":  "Unpaved",
+                                     "minCover":  0.6,
+                                     "ductType":  "B"
+                                 }
+                 },
     "labels":  {
                    "layouts":  "*102054",
                    "networks":  "ICT-*"
