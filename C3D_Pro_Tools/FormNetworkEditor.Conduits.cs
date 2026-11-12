@@ -39,7 +39,7 @@ namespace C3DProTools
         private readonly TextBox _txtConBottom = ToolUi.Number(0.25, 60);
         private readonly TextBox _txtConShift = ToolUi.Number(0, 60);
         private readonly CheckBox _chkAllowOutside = ToolUi.Check("Allow conduits outside encasement edge (warn instead of blocking)");
-        private readonly Panel _conSection = new DoubleBufferedPanel { Width = 420, Height = 240, BackColor = Color.White, Margin = new Padding(0, 4, 0, 4) };
+        private readonly Panel _conSection = new DoubleBufferedPanel { Width = 420, Height = 240, BackColor = StyleUi.Panel, Margin = new Padding(0, 4, 0, 4) };
         private readonly Label _lblConCheck = ToolUi.Note("");
 
         // Part Chooser
@@ -518,12 +518,12 @@ namespace C3DProTools
                 if (Math.Abs(od - stated) > ConduitLimits.SizeMatchToleranceM)
                 {
                     text += $" (Differs from template design OD of {Math.Round(stated * 1000):0} mm)";
-                    _lblPartDiameter.ForeColor = Color.FromArgb(180, 83, 9);
+                    _lblPartDiameter.ForeColor = StyleUi.PillColors("Review").fore;
                 }
                 else
                 {
                     text += $" (Matches template design OD)";
-                    _lblPartDiameter.ForeColor = Color.FromArgb(21, 128, 61);
+                    _lblPartDiameter.ForeColor = StyleUi.PillColors("Exact").fore;
                 }
             }
             else
@@ -590,7 +590,7 @@ namespace C3DProTools
                     checkText += ". Choose the conduit part to check that they fit.";
                 }
                 _lblConCheck.Text = checkText;
-                _lblConCheck.ForeColor = fit.ConduitsOutside > 0 ? Color.Firebrick : StyleUi.Muted;
+                _lblConCheck.ForeColor = fit.ConduitsOutside > 0 ? StyleUi.Danger : StyleUi.Muted;
             }
         }
 
@@ -623,11 +623,11 @@ namespace C3DProTools
             if (_encWidth > 0 && _encHeight > 0)
             {
                 PointF tl = P(-_encWidth / 2, _encHeight / 2);
-                using (Brush fill = new HatchBrush(System.Drawing.Drawing2D.HatchStyle.DottedGrid, Color.Gainsboro, Color.White))
+                using (Brush fill = new HatchBrush(System.Drawing.Drawing2D.HatchStyle.DottedGrid, StyleUi.Border, StyleUi.Panel))
                     g.FillRectangle(fill, tl.X, tl.Y, (float)(_encWidth * scale), (float)(_encHeight * scale));
-                using (Pen pen = new Pen(Color.DimGray, 1.5f))
+                using (Pen pen = new Pen(StyleUi.Muted, 1.5f))
                     g.DrawRectangle(pen, tl.X, tl.Y, (float)(_encWidth * scale), (float)(_encHeight * scale));
-                using (Pen axis = new Pen(Color.LightGray) { DashStyle = DashStyle.Dash })
+                using (Pen axis = new Pen(StyleUi.Border) { DashStyle = DashStyle.Dash })
                 {
                     g.DrawLine(axis, P(minX, 0), P(maxX, 0));
                     g.DrawLine(axis, P(0, minY), P(0, maxY));
@@ -641,9 +641,9 @@ namespace C3DProTools
                 bool outside = _encWidth > 0 && (Math.Abs(c.AcrossM) + rr > _encWidth / 2 + 1e-6 || Math.Abs(c.UpM) + rr > _encHeight / 2 + 1e-6);
                 PointF pt = P(c.AcrossM - r, c.UpM + r);
                 float size = (float)(drawD * scale);
-                using (Brush fill = new SolidBrush(outside ? Color.MistyRose : Color.White))
+                using (Brush fill = new SolidBrush(outside ? StyleUi.PillColors("Failed").back : StyleUi.Panel))
                     g.FillEllipse(fill, pt.X, pt.Y, size, size);
-                using (Pen pen = new Pen(outside ? Color.Firebrick : StyleUi.Accent, 1.5f) { DashStyle = d > 0 ? DashStyle.Solid : DashStyle.Dash })
+                using (Pen pen = new Pen(outside ? StyleUi.Danger : StyleUi.Accent, 1.5f) { DashStyle = d > 0 ? DashStyle.Solid : DashStyle.Dash })
                     g.DrawEllipse(pen, pt.X, pt.Y, size, size);
             }
         }
@@ -1005,7 +1005,7 @@ namespace C3DProTools
                 if (reqIssues.Count > 0)
                 {
                     _lblErrConGeneral.Text = string.Join("\n", reqIssues.Select(i => "• " + i.Message));
-                    _lblErrConGeneral.ForeColor = anyApplicable ? Color.FromArgb(180, 83, 9) : StyleUi.Danger;
+                    _lblErrConGeneral.ForeColor = anyApplicable ? StyleUi.PillColors("Review").fore : StyleUi.Danger;
                     _lblErrConGeneral.Visible = true;
                     UpdateConduitWrapping();
                 }
