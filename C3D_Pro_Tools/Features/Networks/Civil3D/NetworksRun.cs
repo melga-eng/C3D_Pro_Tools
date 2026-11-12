@@ -54,17 +54,22 @@ namespace C3DProTools.Features.Networks.Civil3D
             PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true,
         };
 
-        public static NetworksSettings Load(string drawingPath, out string problem)
+        public static NetworksSettings Load(string drawingPath, out string problem, out string source)
         {
             problem = null;
             string file = ProjectSettings.PathFor(drawingPath);
+            source = "defaults (no " + ProjectSettings.FileName + " beside the drawing)";
             if (!File.Exists(file)) return new NetworksSettings();
             try
             {
                 using JsonDocument d = JsonDocument.Parse(File.ReadAllText(file));
                 foreach (JsonProperty p in d.RootElement.EnumerateObject())
                     if (string.Equals(p.Name, "networks", StringComparison.OrdinalIgnoreCase))
+                    {
+                        source = file;
                         return p.Value.Deserialize<NetworksSettings>(Json) ?? new NetworksSettings();
+                    }
+                source = $"defaults: {file} has no \"networks\" section";
                 return new NetworksSettings();
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
@@ -94,21 +99,21 @@ namespace C3DProTools.Features.Networks.Civil3D
             if (doc == null) return;
             Editor ed = doc.Editor;
 
-            var kw = new PromptKeywordOptions("\nNetworks [Report/Rims/Fit/Repair/All] <Report>: ") { AllowNone = true };
+            var kw = new PromptKeywordOptions("\nNetworks") { AllowNone = true };
             foreach (string k in new[] { "Report", "Rims", "Fit", "Repair", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
             string mode = string.IsNullOrEmpty(kr.StringResult) ? "Report" : kr.StringResult;
 
-            NetworksSettings s = NetworksSettings.Load(doc.Name, out string problem);
+            NetworksSettings s = NetworksSettings.Load(doc.Name, out string problem, out string source);
             if (problem != null) { ed.WriteMessage($"\n{problem}\n"); return; }
             PromptResult nr = ed.GetString(new PromptStringOptions($"\nNetworks (wildcards, comma separated) <{s.Networks}>: ") { AllowSpaces = true });
             if (nr.Status != PromptStatus.OK) return;
             if (!string.IsNullOrWhiteSpace(nr.StringResult)) s.Networks = nr.StringResult.Trim();
 
             var log = new StringBuilder();
-            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{s.Networks}\"");
+            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{s.Networks}\", settings from {source}");
             try
             {
                 if (ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
@@ -203,9 +208,11 @@ namespace C3DProTools.Features.Networks.Civil3D
                                (s.AboveSurface != 0 ? $" {s.AboveSurface:+0.###;-0.###} m" : "") + "; " +
                                string.Join(", ", plan.GroupBy(r => r.Check).Where(g => g.Key != RimCheck.Adjust).Select(g => $"{g.Count()} {Words(g.Key)}")) +
                                (refs > 0 ? $"; {refs} reference networks left out" : "") + ".");
-                foreach (RimToSurface.Row r in plan.Where(r => r.Check == RimCheck.BelowSump || r.Check == RimCheck.BelowPipe).Take(10))
+                foreach (RimToSurface.Row r in plan.Where(r => r.Check == RimCheck.BelowSump || r.Check == RimCheck.BelowPipe))
                     log.AppendLine($"  {r.Name} ({r.Network}): {Words(r.Check)}; rim {r.Rim:F3}, ground {r.Ground:F3}, sump {r.Sump:F3}");
-                foreach (RimToSurface.Row r in chosen.OrderByDescending(r => Math.Abs(r.NewRim - r.Rim)).Take(10))
+                foreach (RimToSurface.Row r in tooFar)
+                    log.AppendLine($"  {r.Name} ({r.Network}): left alone, rim {r.Rim:F3} -> {r.NewRim:F3} ({r.NewRim - r.Rim:+0.000;-0.000})");
+                foreach (RimToSurface.Row r in chosen.OrderByDescending(r => Math.Abs(r.NewRim - r.Rim)))
                     log.AppendLine($"  {r.Name} ({r.Network}): rim {r.Rim:F3} -> {r.NewRim:F3} ({r.NewRim - r.Rim:+0.000;-0.000})");
                 if (!write || chosen.Count == 0) { tr.Abort(); return; }
                 RimToSurface.Outcome o = RimToSurface.Apply(tr, chosen, surfaceId, s.AboveSurface, s.FollowSurface, doc.Editor);
@@ -235,17 +242,21 @@ namespace C3DProTools.Features.Networks.Civil3D
                 List<ManholeAdjustment> plan = NetworkEditOps.PlanFit(tr, pipes, face, s.ConnectLooseEnds, s.FitBoxLength, s.FitBoxWidth, s.FitMaxMove);
                 List<ManholeAdjustment> chosen = plan.Where(a => a.Actionable &&
                     (Math.Abs(a.StartChange) >= s.FitMinMove || Math.Abs(a.EndChange) >= s.FitMinMove || a.ConnectStart || a.ConnectEnd)).ToList();
-                int notActionable = plan.Count(a => !a.Actionable);
+                // Duct pieces between two joints have no structure at either end: nothing to fit, not a problem.
+                int betweenJoints = plan.Count(a => !a.Actionable && a.Note == "Not at a structure");
+                int notActionable = plan.Count(a => !a.Actionable) - betweenJoints;
+                int already = plan.Count - chosen.Count - betweenJoints - notActionable;
                 log.AppendLine($"Fit to {face}{(s.FitBoxLength > 0 && s.FitBoxWidth > 0 ? $" box {s.FitBoxLength}x{s.FitBoxWidth} m" : "")}: " +
-                               $"{plan.Count} straight pipes, {chosen.Count} {(write ? "fitted" : "to fit")}, {notActionable} cannot be fitted, " +
-                               $"{chosen.Count(a => a.ConnectStart || a.ConnectEnd)} with loose ends to connect.");
-                foreach (ManholeAdjustment a in chosen.OrderByDescending(a => Math.Max(Math.Abs(a.StartChange), Math.Abs(a.EndChange))).Take(10))
+                               $"{plan.Count} straight pipes: {chosen.Count} {(write ? "fitted" : "to fit")} " +
+                               $"({chosen.Count(a => a.ConnectStart || a.ConnectEnd)} of them connect a loose end), {already} already fit, " +
+                               $"{betweenJoints} between joints (no structure, nothing to do), {notActionable} cannot be fitted.");
+                foreach (ManholeAdjustment a in chosen.OrderByDescending(a => Math.Max(Math.Abs(a.StartChange), Math.Abs(a.EndChange))))
                     log.AppendLine($"  {a.Name}: start {a.StartChange:+0.000;-0.000} m, end {a.EndChange:+0.000;-0.000} m{(a.ConnectStart || a.ConnectEnd ? ", connects a loose end" : "")}");
                 List<ManholeAdjustment> wrongConnection = plan.Where(a => !a.Actionable && a.Note.Contains("check the connection")).ToList();
                 if (wrongConnection.Count > 0)
                     log.AppendLine($"Fit: {wrongConnection.Count} pipes are connected to a structure far from their end and are left alone; check: " +
                                    string.Join(", ", wrongConnection.Take(12).Select(a => a.Name)) + ".");
-                foreach (var g in plan.Where(a => !a.Actionable).GroupBy(a => a.Note.Contains("check the connection") ? "connected to a far structure" : a.Note)
+                foreach (var g in plan.Where(a => !a.Actionable && a.Note != "Not at a structure").GroupBy(a => a.Note.Contains("check the connection") ? "connected to a far structure" : a.Note)
                              .OrderByDescending(g => g.Count()).Take(5))
                     log.AppendLine($"  {g.Count()} x cannot fit: {g.Key}");
                 if (!write || chosen.Count == 0) { tr.Abort(); return; }

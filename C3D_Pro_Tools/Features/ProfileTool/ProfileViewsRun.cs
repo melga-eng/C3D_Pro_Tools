@@ -70,10 +70,11 @@ namespace C3DProTools.ProfileTool
         };
 
         /// <summary>The "profileViews" section of C3DPro.project.json beside the drawing; defaults when the file or section is missing.</summary>
-        public static ProfileViewsSettings Load(string drawingPath, out string problem)
+        public static ProfileViewsSettings Load(string drawingPath, out string problem, out string source)
         {
             problem = null;
             string file = ProjectSettings.PathFor(drawingPath);
+            source = "defaults (no " + ProjectSettings.FileName + " beside the drawing)";
             if (!File.Exists(file)) return new ProfileViewsSettings();
             try
             {
@@ -83,8 +84,10 @@ namespace C3DProTools.ProfileTool
                     {
                         ProfileViewsSettings s = p.Value.Deserialize<ProfileViewsSettings>(Json) ?? new ProfileViewsSettings();
                         s.Dims ??= new ProfileDimSettings();
+                        source = file;
                         return s;
                     }
+                source = $"defaults: {file} has no \"profileViews\" section";
                 return new ProfileViewsSettings();
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
@@ -112,14 +115,14 @@ namespace C3DProTools.ProfileTool
             if (doc == null) return;
             Editor ed = doc.Editor;
 
-            var kw = new PromptKeywordOptions("\nProfile views [Report/Top/Match/Dims/All] <Report>: ") { AllowNone = true };
+            var kw = new PromptKeywordOptions("\nProfile views") { AllowNone = true };
             foreach (string k in new[] { "Report", "Top", "Match", "Dims", "All" }) kw.Keywords.Add(k);
             kw.Keywords.Default = "Report";
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
             string mode = string.IsNullOrEmpty(kr.StringResult) ? "Report" : kr.StringResult;
 
-            ProfileViewsSettings s = ProfileViewsSettings.Load(doc.Name, out string problem);
+            ProfileViewsSettings s = ProfileViewsSettings.Load(doc.Name, out string problem, out string source);
             if (problem != null) { ed.WriteMessage($"\n{problem}\n"); return; }
 
             var pr = new PromptStringOptions($"\nAlignments (wildcards, comma separated) <{s.Alignments}>: ") { AllowSpaces = true };
@@ -128,8 +131,7 @@ namespace C3DProTools.ProfileTool
             if (!string.IsNullOrWhiteSpace(ar.StringResult)) s.Alignments = ar.StringResult.Trim();
 
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{s.Alignments}\", settings from " +
-                           (File.Exists(ProjectSettings.PathFor(doc.Name)) ? ProjectSettings.PathFor(doc.Name) : "defaults (no project file)"));
+            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{s.Alignments}\", settings from {source}");
             try
             {
                 // Offsets, spacings and clearances are metres; a drawing in other units would be fitted with wrong tolerances.
