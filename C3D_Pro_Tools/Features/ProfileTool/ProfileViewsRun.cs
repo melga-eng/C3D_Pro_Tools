@@ -48,6 +48,8 @@ namespace C3DProTools.ProfileTool
         public string MatchSourceView { get; set; } = "";
         /// <summary>Profiles in a view with no role: Hide (default), Leave, or Delete (only when both surfaces are found).</summary>
         public string MatchOthers { get; set; } = "Hide";
+        /// <summary>Elevation ranges: Widen (default: keep each view's range, widen only one that cuts something off), Fit (refit every view), Leave.</summary>
+        public string MatchElevation { get; set; } = "Widen";
 
         /// <summary>Role rules with this preset's surface names over the saved ones; null when the preset names none.</summary>
         public ProfileRoleRules RoleRules()
@@ -230,7 +232,9 @@ namespace C3DProTools.ProfileTool
             var o = new MatchOptions
             {
                 ViewStyle = saved.MatchViewStyle, Bands = saved.MatchBands, ProfileStyles = saved.MatchProfileStyles, ProfileLabels = saved.MatchProfileLabels,
-                Elevation = saved.MatchElevation, StylesInView = saved.StylesInView, BandRolesByName = saved.BandRolesByName, CreateMissing = saved.CreateMissing,
+                Elevation = !string.Equals(s.MatchElevation, "Leave", StringComparison.OrdinalIgnoreCase),
+                ElevationOnlyWhenCut = !string.Equals(s.MatchElevation, "Fit", StringComparison.OrdinalIgnoreCase),
+                StylesInView = saved.StylesInView, BandRolesByName = saved.BandRolesByName, CreateMissing = saved.CreateMissing,
                 Others = Enum.TryParse(s.MatchOthers, true, out OtherProfileAction others) ? others : OtherProfileAction.Hide, Margin = saved.Margin, DatumIncrement = saved.DatumIncrement, TopPrefix = saved.TopPrefix,
             };
             var changes = new List<MatchChange>();
@@ -307,6 +311,8 @@ namespace C3DProTools.ProfileTool
                 foreach (string p in problems) log.AppendLine($"Match: {p}.");
                 foreach (var g in changes.GroupBy(c => c.What.Split('"')[0].Trim()).OrderByDescending(g => g.Count()).Take(12))
                     log.AppendLine($"  {g.Count(),4} x {g.Key}");
+                foreach (MatchChange c in changes)
+                    log.AppendLine($"    {c.View}: {c.What}: {c.From} -> {c.To}");
                 foreach (string n in log2.Take(20)) log.AppendLine($"  note: {n}");
             }
         }

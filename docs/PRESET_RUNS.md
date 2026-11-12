@@ -47,6 +47,7 @@ alignments or networks, press Enter to use the file's value or type others for t
 | `existingSurface`, `proposedSurface` | names saved in Profile View Tools | Ground surfaces for bands and cover DIMs |
 | `matchTemplate` / `matchSourceView` | none | What Match copies from |
 | `matchOthers` | `Hide` | Profiles with no role: `Hide`, `Leave` or `Delete` (Delete only when both surfaces are found) |
+| `matchElevation` | `Widen` | Level ranges: `Widen` keeps each view's own range and only widens the side that cuts off a profile, duct or structure; `Fit` refits every view; `Leave` never touches them |
 | `topPattern` | `TOP` | Text that marks a TOP profile name |
 | `createMissingTop`, `topStyle`, `topLabelSet`, `topLayer`, `topNameTemplate` | off | For creating missing TOP profiles |
 | `dims` | as Profile DIMs | `dimStyle`, `layer`, `cover`, `clearance`, `minSpacingM`, `majorGradeChangePct`, ... |
