@@ -52,6 +52,20 @@ namespace C3DProTools
             return null;
         }
 
+        /// <summary>
+        /// The style shows a dragged label as stacked text: Civil 3D then draws it reading level in whatever view shows it
+        /// (checked on a plot of tile 124 sheet 102054: dragged pipe labels of an Object-oriented style plot upright).
+        /// </summary>
+        public static bool StackedWhenDragged(Transaction tr, ObjectId styleId)
+        {
+            try
+            {
+                return tr.GetObject(styleId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.LabelStyle s &&
+                       s.Properties.DraggedStateComponents.DisplayType.Value == Autodesk.Civil.LabelContentDisplayType.StackedText;
+            }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { return false; }
+        }
+
         /// <summary>A DBText's four corners, turned with the text (its extents are an upright box round a turned text).</summary>
         internal static IEnumerable<Point3d> TextCorners(DBText t)
         {
@@ -142,7 +156,8 @@ namespace C3DProTools
                 double angle = Math.Atan2(d.Y, d.X);
                 o.TextAngleDeg = Deg(angle);
                 double off = LabelLayout.OffUpright(angle);
-                if ((orientation == OrientationReferenceType.View || (uprightWhenDragged && o.Dragged)) && Math.Abs(off) > Math.PI / 180)
+                bool upright = orientation == OrientationReferenceType.View || (o.Dragged && (uprightWhenDragged || StackedWhenDragged(tr, label.StyleId)));
+                if (upright && Math.Abs(off) > Math.PI / 180)
                 {
                     paper = LabelLayout.Turn(paper, o.Location, -off);
                     o.CorrectionDeg = -Deg(off);

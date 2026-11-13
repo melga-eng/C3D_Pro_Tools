@@ -222,6 +222,7 @@ namespace C3DProTools.Features.Labels
             Database db = doc.Database;
             CivilDocument civil = CivilDocument.GetCivilDocument(db);
             using (write ? doc.LockDocument() : null)
+            using (ViewTurn turn = mode == "Reset" ? null : new ViewTurn(doc))
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
                 List<SheetInfo> all = AnnotSheets.Read(tr, db);
@@ -249,6 +250,7 @@ namespace C3DProTools.Features.Labels
                 AnnotationSettings saved = AnnotationSettings.Load();
                 ArrangeOptions o = s.Options(saved);
                 o.Only = movable;
+                o.TurnView = turn.Turn;
                 AnnotScene scene = AnnotScene.Read(tr, db, civil, o.AvoidModelText, o.Profile);
                 int lockedShown = AnnotLabels.OnSheets(labels, sheets, s.Plan, s.Profile).Count(l => l.Locked && movable.Contains(l.Id));
 
@@ -295,6 +297,11 @@ namespace C3DProTools.Features.Labels
                 }
                 // Then every layout checked as it now is: a label placed for one layout may be wrong on another that shows it.
                 ArrangeReport after = Check("after");
+                // For checking the tool itself: the outlines it measured, drawn on the sheets, to compare with a plot.
+                string dump = Environment.GetEnvironmentVariable("C3DPRO_DRAW_CHECK");
+                if (!string.IsNullOrEmpty(dump))
+                    File.WriteAllLines(dump, after.Shapes.Select(sh => string.Join(" ", sh.Outline.Select(p => FormattableString.Invariant($"{p.X:0.00},{p.Y:0.00}"))) +
+                        FormattableString.Invariant($" | {sh.Anchor.X:0.00},{sh.Anchor.Y:0.00} | ") + (sh.End.HasValue ? FormattableString.Invariant($"{sh.End.Value.X:0.00},{sh.End.Value.Y:0.00}") : "") + $" | {sh.State}"));
                 tr.Commit();
                 log.AppendLine($"Arrange: {total.Checked} labels on {sheets.Count} layouts: moved {total.Moved}, without a clear place {total.Unresolved}, could not be measured {total.Unmeasured}.");
                 log.AppendLine($"After arranging: {Split(after)} (listed){lockedNote}.");
