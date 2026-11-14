@@ -26,7 +26,9 @@ param(
     [ValidateSet('Debug', 'Release')] [string]$Configuration = 'Debug',
     [int]$TimeoutSeconds = 300,
     [string]$Settings = '',
-    [switch]$KeepResult
+    [switch]$KeepResult,
+    # The plugin reads the settings saved in the drawing (as the product does), not a settings file.
+    [switch]$DrawingSettings
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,7 +50,11 @@ Copy-Item "$pluginOut\*" "$run\bin" -Recurse
 
 # The project settings: -Settings when given, otherwise the file beside the drawing.
 if (-not $Settings) { $Settings = Join-Path (Split-Path $Drawing -Parent) 'C3DPro.project.json' }
-if (Test-Path -LiteralPath $Settings) { Copy-Item -LiteralPath $Settings (Join-Path $run 'C3DPro.project.json') }
+# The plugin reads the copy through C3DPRO_SETTINGS_FILE (the product itself keeps its settings in the drawing). Without a file
+# the test runs on the built-in defaults, never on the settings saved in the drawing or last used on this computer.
+$settingsCopy = Join-Path $run 'C3DPro.project.json'
+if (Test-Path -LiteralPath $Settings) { Copy-Item -LiteralPath $Settings $settingsCopy }
+if ($DrawingSettings) { Remove-Item Env:C3DPRO_SETTINGS_FILE -ErrorAction SilentlyContinue } else { $env:C3DPRO_SETTINGS_FILE = $settingsCopy }
 
 $dll = (Join-Path $run 'bin\C3D_Pro_Tools.dll') -replace '\\', '/'
 $lines = @('SECURELOAD', '0', 'NETLOAD', "`"$dll`"")

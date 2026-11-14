@@ -43,7 +43,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 issues.Add(OperationIssue.Error(settings.LabelRules.Count > 1 ? SheetCodes.RulesAmbiguous : SheetCodes.RulesMissing,
                     settings.LabelRules.Count > 1
                         ? $"{ProjectSettings.FileName} has {settings.LabelRules.Count} rule sets; choose one."
-                        : $"No label rules: add a rule set to {ProjectSettings.PathFor(doc.Name)}."));
+                        : $"No label rules in the C3D Pro settings."));
             return set;
         }
 

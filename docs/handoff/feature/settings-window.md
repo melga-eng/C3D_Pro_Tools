@@ -1,0 +1,4 @@
+Branch: feature/settings-window (merged to main).
+Changed: settings come from the drawing (Xrecord C3DPRO_PROJECT_SETTINGS), else last used (%APPDATA%\C3DProTools\LastProjectSettings.json), else built-in defaults; C3DPRO_SETTINGS_FILE for tests only. C3D Pro Run window (C3DPRORUN, ribbon Pro Run) with Profile views / Networks / Labels / Pavement tabs calling the extracted Execute methods. Pavement labels on the alignment's proposed profile. Edge band switches (cover check on, labels off by default).
+Checked: pv-pavement-501.scr on a 000501 copy (16 labels on the proposed profile); settings saved in the TEST DRAWING copy read back and used (drawing-test -DrawingSettings); lbl-add-profile regression; 734 unit tests. Codex end review: 3 findings (filter ticks, zone label styles, two unpaved minimums), fixed.
+Not done: the window was not opened by anyone (it cannot run headless); the user's live check is the test.

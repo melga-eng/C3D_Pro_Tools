@@ -46,6 +46,8 @@ namespace C3DProTools.ProfileTool
         /// <summary>Surface names for the existing and proposed ground. Empty: the names saved in Profile View Tools.</summary>
         public string ExistingSurface { get; set; } = "";
         public string ProposedSurface { get; set; } = "";
+        /// <summary>The alignment's proposed profile (pavement labels sit on it): its name contains this text, or the proposed surface's name.</summary>
+        public string ProposedProfile { get; set; } = "Proposed";
         public ProfileDimSettings Dims { get; set; } = new ProfileDimSettings();
 
         /// <summary>Match: a Profile View Tools template name, or the name of a finished view in the drawing to copy from.</summary>
@@ -93,12 +95,11 @@ namespace C3DProTools.ProfileTool
         public static ProfileViewsSettings Load(string drawingPath, out string problem, out string source)
         {
             problem = null;
-            string file = ProjectSettings.PathFor(drawingPath);
-            source = "defaults (no " + ProjectSettings.FileName + " beside the drawing)";
-            if (!File.Exists(file)) return new ProfileViewsSettings();
+            string text = Features.Shared.Contracts.SettingsSource.Text(drawingPath, out string file);
+            source = file;
             try
             {
-                using JsonDocument d = JsonDocument.Parse(File.ReadAllText(file));
+                using JsonDocument d = JsonDocument.Parse(text);
                 foreach (JsonProperty p in d.RootElement.EnumerateObject())
                     if (string.Equals(p.Name, "profileViews", StringComparison.OrdinalIgnoreCase))
                     {
@@ -112,7 +113,7 @@ namespace C3DProTools.ProfileTool
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
             {
-                problem = $"{ProjectSettings.FileName} could not be read: {ex.Message}";
+                problem = $"The C3D Pro settings could not be read: {ex.Message}";
                 return new ProfileViewsSettings();
             }
         }
@@ -155,9 +156,14 @@ namespace C3DProTools.ProfileTool
                 tr.Commit();
             }
             if (nameNote != null && !PresetPrompt.Continue(ed, nameNote, mode != "Report")) return;
+            ed.WriteMessage("\n" + RunReport.Write(Execute(doc, s, mode, source, typed, nameNote), "C3DPROPV", mode) + "\n");
+        }
 
+        /// <summary>Runs one step (or Report / All) for the alignments the settings name; returns the report.</summary>
+        internal static string Execute(Document doc, ProfileViewsSettings s, string mode, string source, string typed = null, string nameNote = null)
+        {
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{typed}\", settings from {source}");
+            log.AppendLine($"C3DPROPV {mode} on {Path.GetFileName(doc.Name)}, alignments \"{typed ?? s.Alignments}\", settings from {source}");
             if (nameNote != null) log.AppendLine(nameNote);
             try
             {
@@ -179,12 +185,7 @@ namespace C3DProTools.ProfileTool
                 C3DProLogger.Error("C3DPROPV failed", ex);
                 log.AppendLine($"C3DPROPV failed: {ex.Message}");
             }
-
-            string file = Path.Combine(Path.GetTempPath(), $"C3DPROPV-{mode}.txt");
-            try { File.WriteAllText(file, log.ToString()); } catch (IOException) { file = null; }
-            // The command line gets the summary (unindented lines); the per-alignment detail is in the report file.
-            string[] summary = log.ToString().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0 && l[0] != ' ').ToArray();
-            ed.WriteMessage("\n" + string.Join("\n", summary) + (file != null ? $"\nFull report: {file}" : "") + "\n");
+            return log.ToString();
         }
 
         private static void TopStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
@@ -289,7 +290,7 @@ namespace C3DProTools.ProfileTool
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
                 var missing = new List<string>();
-                List<Func<double, double, bool>> tests = PavementCivil3D.Tests(tr, civil, ps, missing);
+                List<Func<double, double, bool>> tests = PavementCivil3D.Tests(tr, civil, ps, missing, edgeBands: ps.LabelsUseEdgeBand);
                 // A pavement surface that is not there (a reference not loaded) would make its edges vanish and erase their labels.
                 if (missing.Count > 0)
                 {
@@ -337,6 +338,7 @@ namespace C3DProTools.ProfileTool
                 foreach (ObjectId aid in civil.GetAlignmentIds())
                 {
                     if (!(tr.GetObject(aid, OpenMode.ForRead) is Alignment al) || !s.Includes(al.Name)) continue;
+                    Autodesk.Civil.DatabaseServices.Profile proposedProfile = ProposedProfileOf(tr, al, s);
                     foreach (ObjectId vid in al.GetProfileViewIds())
                     {
                         if (!(tr.GetObject(vid, OpenMode.ForRead) is ProfileView v)) continue;
@@ -355,8 +357,12 @@ namespace C3DProTools.ProfileTool
                             foreach (ObjectId old in PavementCivil3D.EarlierLabels(one, db, vid)) { one.GetObject(old, OpenMode.ForWrite).Erase(); replaced++; }
                             foreach (var e in found)
                             {
+                                // On the proposed profile; else on the proposed surface; else the view's top line (reported).
                                 double elevation = double.NaN;
-                                if (proposed != null)
+                                if (proposedProfile != null)
+                                    try { elevation = proposedProfile.ElevationAt(e.station); }
+                                    catch (System.Exception) { elevation = double.NaN; }
+                                if (double.IsNaN(elevation) && proposed != null)
                                 {
                                     double x = 0, y = 0;
                                     try { al.PointLocation(e.station, 0, ref x, ref y); elevation = proposed.FindElevationAtXY(x, y); }
@@ -389,9 +395,20 @@ namespace C3DProTools.ProfileTool
                 log.AppendLine($"Pavement: {views} profile views, {edges} pavement edges" +
                                (write && badStyles.Count == 0 ? $"; labelled {made}, earlier tool labels replaced {replaced}, views failed {failed}." : "."));
                 if (atTop.Count > 0)
-                    log.AppendLine($"Pavement: {atTop.Count} labels are on the view's top line, the proposed surface \"{s.ProposedSurface}\" has no level there: {string.Join(", ", atTop.Take(10))}.");
+                    log.AppendLine($"Pavement: {atTop.Count} labels are on the view's top line: no proposed profile (name containing \"{s.ProposedProfile}\") and no level on the proposed surface \"{s.ProposedSurface}\" there: {string.Join(", ", atTop.Take(10))}.");
                 if (write && badStyles.Count == 0) tr.Commit(); else tr.Abort();
             }
+        }
+
+        /// <summary>The alignment's surface profile whose name contains the proposed profile text or the proposed surface's name; null when none.</summary>
+        private static Autodesk.Civil.DatabaseServices.Profile ProposedProfileOf(Transaction tr, Alignment al, ProfileViewsSettings s)
+        {
+            var keys = new[] { s.ProposedProfile, s.ProposedSurface }.Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => k.Trim()).ToList();
+            if (keys.Count == 0) return null;
+            foreach (ObjectId pid in al.GetProfileIds())
+                if (tr.GetObject(pid, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Profile p && p.ProfileType == Autodesk.Civil.DatabaseServices.ProfileType.EG
+                    && keys.Any(k => p.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)) return p;
+            return null;
         }
 
         private static bool ResolveCreate(Document doc, CivilDocument civil, ProfileViewsSettings s, out TopProfileCivil.CreateTopOptions o, out string why)

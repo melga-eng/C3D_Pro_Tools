@@ -5,6 +5,8 @@ your drawing. Ribbon: **C3D Pro Tools → Preset Runs**.
 
 Always start with **Report**: it changes nothing and tells you what each step would do. Every other step is one UNDO.
 
+**The usual way is the C3D Pro Run window** (ribbon: Pro Run, or `C3DPRORUN`): tabs Profile views, Networks, Labels and Pavement; tick the alignments, networks or sheets, set the values, press a step. Its settings are saved in the drawing itself; a drawing that has none starts from the settings you last used, else from the built-in project defaults. No file beside the drawing is needed. The commands below run the same steps from the command line with the same settings. `C3DPro.project.json` is now only for background drawing tests (`tools\drawing-test.ps1 -Settings`).
+
 Short forms: type the capital letters shown in the prompt. C3DPROLBL: `A` Add, `AR` Arrange, `S` Reset, `N` Rename. C3DPRONET: `R` Report, `I` Rims, `P` Repair, `F` Fit, `D` Duplicates, `C` Cover. Enter is Report.
 
 ## The settings file
