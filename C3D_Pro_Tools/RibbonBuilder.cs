@@ -60,182 +60,21 @@ namespace C3DProTools
                 ribbon.Tabs.Add(customTab);
             }
 
-            RibbonPanelSource panelSource = new RibbonPanelSource { Title = "Pro Tools" };
-            RibbonPanel panel = new RibbonPanel { Source = panelSource };
-            customTab.Panels.Add(panel);
+            // Two panels in the order of the work: model the networks, then produce the drawings. Every other tool stays a
+            // typed command (PRODUCT_MAP.md lists them); the ribbon holds only what is used.
+            RibbonPanelSource model = new RibbonPanelSource { Title = "Model" };
+            customTab.Panels.Add(new RibbonPanel { Source = model });
+            model.Items.Add(Large("Network\nEditor", "NetworkEditor ", "Split, merge, swap, fit and rim tools for pipe networks."));
+            model.Items.Add(Large("Network\nOrganizer", "NetworkOrganizer ", "Organize parts and networks."));
+            model.Items.Add(Large("Networks from\nFeature Lines", "NetworkFromFeatureLines ", "Build pipe networks from feature lines."));
+            model.Items.Add(Large("Profile &\nCover Designer", "ProfileCoverDesigner ", "Set pipe levels along a route for cover, slope and clearances."));
+            model.Items.Add(Large("Navisworks\nImporter", "ImportNavisPipe ", "Import pipes and structures from Navisworks."));
 
-            // --- C3D Pro Run: profile views, networks and labels in one window ---
-            panelSource.Items.Add(new RibbonButton
-            {
-                Text = "Pro\nRun",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "C3DPRORUN ",
-                CommandHandler = new RibbonCommandHandler()
-            });
-
-            // --- 0. Workspace Palette Button ---
-            RibbonButton workspaceButton = new RibbonButton
-            {
-                Text = "Workspace\nPalette",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "C3DProWorkspace ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(workspaceButton);
-            panelSource.Items.Add(new RibbonSeparator());
-
-            // --- 1. Style Manager Button ---
-            RibbonButton styleManagerButton = new RibbonButton
-            {
-                Text = "Style\nManager",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "StyleManager ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(styleManagerButton);
-
-            // --- 2. Navisworks Pipe Importer Button ---
-            RibbonButton navisButton = new RibbonButton
-            {
-                Text = "Navisworks\nImporter",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "ImportNavisPipe ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(navisButton);
-
-            // --- 3. Network Editor Button ---
-            RibbonButton networkEditorButton = new RibbonButton
-            {
-                Text = "Network\nEditor",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "NetworkEditor ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(networkEditorButton);
-
-            // --- 3a. Network Organizer Button ---
-            RibbonButton organizerButton = new RibbonButton
-            {
-                Text = "Network\nOrganizer",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "NetworkOrganizer ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(organizerButton);
-
-            // --- 3b. Networks from Feature Lines Button ---
-            RibbonButton fromLinesButton = new RibbonButton
-            {
-                Text = "Networks from\nFeature Lines",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "NetworkFromFeatureLines ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(fromLinesButton);
-
-            // --- 4. Profile & Cover Designer Button ---
-            RibbonButton designerButton = new RibbonButton
-            {
-                Text = "Profile &\nCover Designer",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "ProfileCoverDesigner ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(designerButton);
-
-            // --- 4a. Profile View Tools Button ---
-            RibbonButton viewToolsButton = new RibbonButton
-            {
-                Text = "Profile View\nTools",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "ProfileViewTools ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(viewToolsButton);
-
-            // --- 4b. Annotation Studio Button ---
-            RibbonButton annotationButton = new RibbonButton
-            {
-                Text = "Annotation\nStudio",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "AnnotationStudio ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(annotationButton);
-
-            // --- 4c. Sheet Manager Button ---
-            RibbonButton sheetsButton = new RibbonButton
-            {
-                Text = "Sheet\nManager",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "SheetManager ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(sheetsButton);
-
-            // --- 5. C3D Drawing Cleaner Button ---
-            RibbonButton cleanerButton = new RibbonButton
-            {
-                Text = "C3D Drawing\nCleaner",
-                ShowText = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                CommandParameter = "C3DDrawingCleaner ",
-                CommandHandler = new RibbonCommandHandler()
-            };
-            panelSource.Items.Add(new RibbonSeparator());
-            panelSource.Items.Add(cleanerButton);
-
-            // --- 6. Batch Tools panel: profiles by surface, TOP profiles on ducts, label style values ---
-            RibbonPanelSource batchSource = new RibbonPanelSource { Title = "Batch Tools" };
-            customTab.Panels.Add(new RibbonPanel { Source = batchSource });
-            batchSource.Items.Add(Large("Profile\nManager", "PROFILEMGR ", "Profiles of every alignment by source surface: delete by surface, create surface profiles on all alignments."));
-            batchSource.Items.Add(new RibbonSeparator());
-            batchSource.Items.Add(Large("Profile Views\n& TOP Fit", "PVMGR ", "Every profile view with its TOP profile: fit TOP profiles to the duct tops, create the missing ones."));
-            batchSource.Items.Add(new RibbonSeparator());
-            batchSource.Items.Add(Large("Label Style\nValues", "STYLEMGR ", "Batch-set label style values (text heights, arrowheads, ...) for styles by category or from labels you pick."));
-            batchSource.Items.Add(new RibbonSeparator());
-            batchSource.Items.Add(Large("Profile\nDIMs", "PROFILEDIMS ", "Draw cover DIMs (duct top to proposed surface, at structure faces and grade breaks) and clearance DIMs (duct to crossing pipes) in profile views."));
-
-            // --- 7. Preset runs: the same steps with no dialog, settings from C3DPro.project.json beside the drawing ---
-            RibbonPanelSource runSource = new RibbonPanelSource { Title = "Preset Runs" };
-            customTab.Panels.Add(new RibbonPanel { Source = runSource });
-            runSource.Items.Add(Large("Profile Views\nRun", "C3DPROPV ", "Report, TOP fit, Match and DIMs for the alignments you name, with the profileViews settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
-            runSource.Items.Add(new RibbonSeparator());
-            runSource.Items.Add(Large("Networks\nRun", "C3DPRONET ", "Report, Repair, Duplicates, rims to surface, fit to structures and the cover check for the networks you name, with the networks and pavement settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
-            runSource.Items.Add(new RibbonSeparator());
-            runSource.Items.Add(Large("Labels\nRun", "C3DPROLBL ", "Report, Add (label rules), Arrange and Reset for the layouts you name, with the labels settings of C3DPro.project.json. Report changes nothing; each other step is one UNDO."));
+            RibbonPanelSource produce = new RibbonPanelSource { Title = "Produce" };
+            customTab.Panels.Add(new RibbonPanel { Source = produce });
+            produce.Items.Add(Large("Pro\nRun", "C3DPRORUN ", "Profile views (TOP fit, match, split, DIMs, pavement labels), network checks and cover, labels (add, arrange, reset, rename) in one window. Settings are saved in the drawing."));
+            produce.Items.Add(Large("Annotation\nStudio", "AnnotationStudio ", "Add labels from label sets, arrange them inside the viewports, reset, rename parts."));
+            produce.Items.Add(Large("Sheet\nManager", "SheetManager ", "List, rename, copy and create layouts by tile and part."));
 
             isBuilt = true;
         }

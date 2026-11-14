@@ -13,6 +13,8 @@ Claude keeps this page current. Last update: 2026-11-12.
 A tool moves to **Released** only when its drawing test passes on a copy of a project drawing and you accept the result.
 Nothing is Released yet, because drawing tests started today.
 
+**Ribbon (2026-11-14, your choice):** Model: Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Navisworks Importer. Produce: Pro Run, Annotation Studio, Sheet Manager. Every other tool below is a typed command only. How to use: [GUIDE.md](GUIDE.md).
+
 ## How the plugin is built
 
 ```
