@@ -35,6 +35,8 @@ namespace C3DProTools
         /// <summary>Position along a pipe (0 = start, 1 = end).</summary>
         public double Ratio { get; set; } = 0.5;
         public bool Dragged { get; set; }
+        /// <summary>Pipe labels: left off a pipe whose start, end or either end is at a manhole.</summary>
+        public SkipAtManhole SkipAtManhole { get; set; } = SkipAtManhole.No;
         public override string ToString() => $"{KindText(Kind)}: {Style}" + (Kind == LabelKind.PlanPipe || Kind == LabelKind.ProfilePipe ? $" at {Ratio:0.##}" : "");
 
         public static string KindText(LabelKind k) =>
@@ -414,6 +416,8 @@ namespace C3DProTools
         internal sealed class ApplyResult
         {
             public int Created, Removed, Skipped, Failed;
+            /// <summary>Pipe labels left out because the pipe starts or ends at a manhole (the row's choice).</summary>
+            public int AtManhole;
             public readonly List<ObjectId> NewIds = new List<ObjectId>();
             public readonly List<string> Errors = new List<string>();
         }
@@ -442,6 +446,15 @@ namespace C3DProTools
                 if (!pipe && !(part is Structure)) continue;
                 List<LabelInfo> have = byPart[partId].ToList();
                 List<LabelSetItem> items = set.Items.Where(i => pipe ? i.Kind == LabelKind.PlanPipe || i.Kind == LabelKind.ProfilePipe : i.Kind == LabelKind.PlanStructure || i.Kind == LabelKind.ProfileStructure).ToList();
+                if (pipe)
+                {
+                    // Rows set to skip a manhole end leave this pipe out when that end is at a structure.
+                    Pipe p = (Pipe)part;
+                    bool atStart = !p.StartStructureId.IsNull, atEnd = !p.EndStructureId.IsNull;
+                    int before = items.Count;
+                    items = items.Where(i => !AnnotLabelRules.LeftOut(i.SkipAtManhole, atStart, atEnd)).ToList();
+                    r.AtManhole += before - items.Count;
+                }
                 if (items.Count == 0) continue;
                 if (mode == ExistingLabels.SkipLabelled && have.Count > 0) { r.Skipped++; continue; }
                 if (mode == ExistingLabels.Replace)

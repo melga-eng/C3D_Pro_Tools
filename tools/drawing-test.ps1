@@ -105,8 +105,15 @@ if ($problems.Count -eq 0) {
     Write-Host "FAIL  ($seconds s)  $(Split-Path $Script -Leaf) on $(Split-Path $Drawing -Leaf)" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "  - $_" }
 }
-Write-Host "Log: $log"
-if ($KeepResult) { Write-Host "Result drawing: $dwg" }
-elseif ($problems.Count -eq 0) { Remove-Item -LiteralPath $dwg -ErrorAction SilentlyContinue }
+if ($KeepResult) { Write-Host "Log: $log"; Write-Host "Result drawing: $dwg" }
+else {
+    # Each run copies the drawing and the plugin (hundreds of MB): keep only the log and the reports, in c3dpro-test-logs.
+    $keep = Join-Path ([IO.Path]::GetTempPath()) ('c3dpro-test-logs\' + (Split-Path $run -Leaf))
+    New-Item -ItemType Directory -Force $keep | Out-Null
+    Copy-Item -LiteralPath $log $keep -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath (Join-Path $run 'iso\Temp') -Filter '*.txt' -ErrorAction SilentlyContinue | Copy-Item -Destination $keep -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $run -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Log and reports: $keep"
+}
 
 exit ([int]($problems.Count -gt 0))

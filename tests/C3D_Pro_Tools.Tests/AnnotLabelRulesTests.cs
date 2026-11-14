@@ -67,5 +67,18 @@ namespace C3DProTools.Tests
         [InlineData(3, "ProfileStructure:Style")]
         public void StyleKeyKeepsItsFormat(int kind, string expected)
             => Assert.Equal(expected, AnnotLabelRules.StyleKey((LabelKind)kind, "Style"));
+
+        [Theory]
+        // skip, start at a manhole, end at a manhole, left out
+        [InlineData(SkipAtManhole.No, true, true, false)]
+        [InlineData(SkipAtManhole.Start, true, false, true)]
+        [InlineData(SkipAtManhole.Start, false, true, false)]
+        [InlineData(SkipAtManhole.End, false, true, true)]
+        [InlineData(SkipAtManhole.End, true, false, false)]
+        [InlineData(SkipAtManhole.Both, true, false, true)]
+        [InlineData(SkipAtManhole.Both, false, true, true)]
+        [InlineData(SkipAtManhole.Both, false, false, false)]
+        internal void LabelIsLeftOutOnlyAtTheChosenManholeEnd(SkipAtManhole skip, bool start, bool end, bool leftOut)
+            => Assert.Equal(leftOut, AnnotLabelRules.LeftOut(skip, start, end));
     }
 }
