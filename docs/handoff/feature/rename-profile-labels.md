@@ -1,0 +1,4 @@
+Branch: feature/rename-profile-labels (merged to main).
+Changed: C3DPROLBL reName runs the Annotation Studio rename (saved templates, all sheets for the sheet number, one question, all or nothing); Add also runs profile label rules (one transaction per view); HandLabels: no rule label where a hand label of the same style is on the part (same view for profile, same sheet for plan).
+Checked: lbl-rename.scr on TEST DRAWING copy (128 renamed, re-run 0); lbl-add-profile.scr with tile124-profile.project.json on 434132 (45 by hand, 4 added, re-run 0); 732 unit tests. Codex end review: 1 finding (view not matched), fixed.
+Not done: the user's project file has no profile rules yet; the saved rename templates (ICT-{sheet}-{type}-{n:00}) differ from the drawing's names (IC-124-IC3A-..), so the user must set the templates before renaming; nobody ran it in the user's session.

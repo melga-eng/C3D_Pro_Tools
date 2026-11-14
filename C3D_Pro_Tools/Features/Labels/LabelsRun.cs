@@ -202,13 +202,14 @@ namespace C3DProTools.Features.Labels
 
             var identity = Networks.Civil3D.DrawingRefs3D.Identity(doc);
             var scene = new Sheets.Civil3D.SheetSceneCivil3D().Read(new Sheets.Contracts.SheetSceneRequest { Drawing = identity }, System.Threading.CancellationToken.None);
+            Dictionary<string, string> viewOf = ProfileViewOfLabels(doc.Database);
             var planned = Sheets.Application.PlanLabelPlanner.Plan(scene, rules, layouts);
             // A part labelled by hand in the rule's style counts as done (no second label on it).
             int byHand = 0;
             var items = new List<Sheets.Contracts.BuildItem>();
             foreach (var item in planned.Items)
             {
-                var kept = Sheets.Application.HandLabels.Without(scene, item.Changes, out int k);
+                var kept = Sheets.Application.HandLabels.Without(scene, item.Changes, viewOf, out int k);
                 byHand += k;
                 if (kept.Count > 0) items.Add(item with { Changes = kept });
             }
@@ -226,7 +227,7 @@ namespace C3DProTools.Features.Labels
                     foreach (var c in item.Changes.Take(100)) log.AppendLine($"    {c.Kind} {c.RuleId} {c.SourceKey} {c.Description}");
                 }
             }
-            var profile = ProfilePlan(scene, rules, layouts, write, log);
+            var profile = ProfilePlan(scene, rules, layouts, viewOf, write, log);
             if (!write) return;
             int added = 0, removed = 0, failed = 0;
             using (doc.LockDocument())
@@ -270,7 +271,7 @@ namespace C3DProTools.Features.Labels
         /// listed in the report. Empty when the rule set has no profile rule.
         /// </summary>
         private static List<Sheets.Application.ProfileLabelViewPlan> ProfilePlan(Sheets.Contracts.SheetScene scene, Sheets.Contracts.LabelRuleSet rules,
-            List<string> layouts, bool write, StringBuilder log)
+            List<string> layouts, IReadOnlyDictionary<string, string> viewOf, bool write, StringBuilder log)
         {
             var views = new List<Sheets.Application.ProfileLabelViewPlan>();
             if (!rules.Rules.Any(r => r?.View == Sheets.Contracts.ViewKind.Profile)) return views;
@@ -278,7 +279,7 @@ namespace C3DProTools.Features.Labels
             int byHand = 0;
             foreach (var v in planned.Views ?? Array.Empty<Sheets.Application.ProfileLabelViewPlan>())
             {
-                var kept = Sheets.Application.HandLabels.Without(scene, v.Changes, out int k);
+                var kept = Sheets.Application.HandLabels.Without(scene, v.Changes, viewOf, out int k);
                 byHand += k;
                 if (kept.Count > 0) views.Add(v with { Changes = kept });
             }
@@ -292,6 +293,29 @@ namespace C3DProTools.Features.Labels
                 foreach (var c in v.Changes.Take(100)) log.AppendLine($"    {c.Kind} {c.RuleId} {c.SourceKey} {c.Description}");
             }
             return views;
+        }
+
+        /// <summary>Label handle → handle of its profile view, for every profile label (pipe, structure, crossing) in model space.</summary>
+        private static Dictionary<string, string> ProfileViewOfLabels(Database db)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            using (Transaction tr = db.TransactionManager.StartOpenCloseTransaction())
+            {
+                var ms = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
+                foreach (ObjectId id in ms)
+                {
+                    if (id.IsErased || !id.ObjectClass.IsDerivedFrom(Autodesk.AutoCAD.Runtime.RXObject.GetClass(typeof(Autodesk.Civil.DatabaseServices.Label)))) continue;
+                    try
+                    {
+                        // ViewId is on each profile label type; no common base class has it.
+                        Autodesk.AutoCAD.DatabaseServices.DBObject label = tr.GetObject(id, OpenMode.ForRead);
+                        if (label.GetType().GetProperty("ViewId")?.GetValue(label) is ObjectId v && !v.IsNull) map[id.Handle.ToString()] = v.Handle.ToString();
+                    }
+                    catch (System.Exception probe) when (C3DProLogger.IsProbeFailure(probe) || probe is System.Reflection.TargetInvocationException) { }
+                }
+                tr.Commit();
+            }
+            return map;
         }
 
         /// <summary>
