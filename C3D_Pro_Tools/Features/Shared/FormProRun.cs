@@ -51,7 +51,7 @@ namespace C3DProTools.Features.Shared
         private readonly TextBox _splitLength = ToolUi.Number(450), _splitGap = ToolUi.Number(30);
         // Networks
         private readonly ComboBox _rimSurface = ToolUi.Combo(), _fitFace = ToolUi.Combo();
-        private readonly TextBox _coverMin = ToolUi.Number(0.6), _coverMax = ToolUi.Number(6), _maxSlope = ToolUi.Number(7), _clearance = ToolUi.Number(0.3);
+        private readonly TextBox _coverMax = ToolUi.Number(6), _maxSlope = ToolUi.Number(7), _clearance = ToolUi.Number(0.3);
         // Labels
         private readonly TextBox _maxDistance = ToolUi.Number(0), _gap = ToolUi.Number(0);
         // Pavement
@@ -136,17 +136,24 @@ namespace C3DProTools.Features.Shared
             }
         }
 
-        private static void Fill(CheckedListBox list, List<string> names, string patterns)
+        // Every name of each list and the ticked ones, whatever the filter shows.
+        private readonly Dictionary<CheckedListBox, List<string>> _names = new Dictionary<CheckedListBox, List<string>>();
+        private readonly Dictionary<CheckedListBox, HashSet<string>> _ticked = new Dictionary<CheckedListBox, HashSet<string>>();
+
+        private void Fill(CheckedListBox list, List<string> names, string patterns)
         {
-            foreach (string n in names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)) list.Items.Add(n, NamePatterns.Matches(patterns ?? "*", n));
+            _names[list] = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            _ticked[list] = new HashSet<string>(_names[list].Where(n => NamePatterns.Matches(patterns ?? "*", n)), StringComparer.OrdinalIgnoreCase);
+            foreach (string n in _names[list]) list.Items.Add(n, _ticked[list].Contains(n));
         }
 
-        /// <summary>The ticked names as patterns: "*" when all are ticked, else the names; null when none is.</summary>
-        private static string Chosen(CheckedListBox list)
+        /// <summary>The ticked names, hidden by the filter or not, as patterns: "*" when every name is ticked, else the names; null when none is.</summary>
+        private string Chosen(CheckedListBox list)
         {
-            if (list.CheckedItems.Count == 0) return null;
-            if (list.CheckedItems.Count == list.Items.Count) return "*";
-            return string.Join(",", list.CheckedItems.Cast<string>());
+            HashSet<string> on = _ticked[list];
+            if (on.Count == 0) return null;
+            if (_names[list].All(on.Contains)) return "*";
+            return string.Join(",", _names[list].Where(on.Contains));
         }
 
         private static double Num(TextBox box, double fallback) => ToolUi.TryNumber(box, out double v) ? v : fallback;
@@ -163,7 +170,6 @@ namespace C3DProTools.Features.Shared
             _pv.SplitGap = Num(_splitGap, _pv.SplitGap);
             _net.Surface = Pick(_rimSurface);
             _net.FitFace = _fitFace.SelectedItem as string ?? _net.FitFace;
-            _net.CoverMin = Num(_coverMin, _net.CoverMin);
             _net.CoverMax = Num(_coverMax, _net.CoverMax);
             _net.CoverMaxSlope = Num(_maxSlope, _net.CoverMaxSlope);
             _net.CoverClearance = Num(_clearance, _net.CoverClearance);
@@ -171,6 +177,7 @@ namespace C3DProTools.Features.Shared
             _lbl.Gap = Num(_gap, _lbl.Gap);
 
             _zones.EndEdit();
+            List<PavementZone> before = _pav.Zones;
             _pav.Zones = new List<PavementZone>();
             foreach (DataGridViewRow r in _zones.Rows)
             {
@@ -178,14 +185,19 @@ namespace C3DProTools.Features.Shared
                 if (surface.Length == 0) continue;
                 double D(int i) => double.TryParse(Convert.ToString(r.Cells[i].Value, System.Globalization.CultureInfo.InvariantCulture)?.Replace(',', '.'),
                     System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : 0;
+                // What the window does not show (a zone's own label styles) is kept.
+                PavementZone was = before.FirstOrDefault(z => string.Equals(z.Surface, surface, StringComparison.OrdinalIgnoreCase));
                 _pav.Zones.Add(new PavementZone
                 {
                     Surface = surface, Name = r.Cells[1].Value as string is { Length: > 0 } n ? n : surface,
                     MinCover = D(2), DuctType = r.Cells[3].Value as string ?? "", EdgeBand = D(4), MaxCover = D(5),
+                    StartLabelStyle = was?.StartLabelStyle ?? "", EndLabelStyle = was?.EndLabelStyle ?? "",
                 });
             }
             _pav.Unpaved.MinCover = Num(_unpavedCover, _pav.Unpaved.MinCover);
             _pav.Unpaved.DuctType = _unpavedType.SelectedItem as string ?? "";
+            // One unpaved minimum: the cover check takes it from the pavement section, or from networks when no pavement is set.
+            _net.CoverMin = _pav.Unpaved.MinCover;
             _pav.CoverUsesEdgeBand = _coverBand.Checked;
             _pav.LabelsUseEdgeBand = _labelBand.Checked;
 
@@ -270,11 +282,11 @@ namespace C3DProTools.Features.Shared
         }
 
         /// <summary>A card with the list, a filter box and All / None.</summary>
-        private static TableLayoutPanel ListCard(string title, string info, CheckedListBox list)
+        private TableLayoutPanel ListCard(string title, string info, CheckedListBox list)
         {
             TableLayoutPanel card = ToolUi.Card(title, info);
-            List<(string name, bool on)> all = list.Items.Cast<string>().Select((n, i) => (n, list.GetItemChecked(i))).ToList();
-            var ticked = new HashSet<string>(all.Where(a => a.on).Select(a => a.name), StringComparer.OrdinalIgnoreCase);
+            List<string> all = _names[list];
+            HashSet<string> ticked = _ticked[list];
             list.ItemCheck += (s, e) => { string n = (string)list.Items[e.Index]; if (e.NewValue == CheckState.Checked) ticked.Add(n); else ticked.Remove(n); };
             TextBox filter = StyleUi.Box("Filter (part of a name)");
             filter.Width = 260;
@@ -282,8 +294,8 @@ namespace C3DProTools.Features.Shared
             {
                 list.BeginUpdate();
                 list.Items.Clear();
-                foreach (var a in all.Where(a => filter.Text.Length == 0 || a.name.IndexOf(filter.Text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0))
-                    list.Items.Add(a.name, ticked.Contains(a.name));
+                foreach (string n in all.Where(n => filter.Text.Length == 0 || n.IndexOf(filter.Text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0))
+                    list.Items.Add(n, ticked.Contains(n));
                 list.EndUpdate();
             }
             filter.TextChanged += (s, e) => Show();
@@ -362,17 +374,15 @@ namespace C3DProTools.Features.Shared
                 StyleUi.Primary("All", (s, e) => RunNetworks("All"))));
             ToolUi.Add(stack, steps);
 
-            TableLayoutPanel set = ToolUi.Card("Settings", "Cover is measured to the top of the encasement. Under pavement the Pavement tab's cover applies.");
+            TableLayoutPanel set = ToolUi.Card("Settings", "Cover is measured to the top of the encasement. The minimum cover, paved and unpaved, is set on the Pavement tab.");
             Surfaces(_rimSurface, _net.Surface);
             foreach (string f in new[] { "InnerWall", "OuterWall", "Center" }) _fitFace.Items.Add(f);
             ToolUi.Select(_fitFace, _net.FitFace);
-            _coverMin.Text = ToolUi.Format(_net.CoverMin);
             _coverMax.Text = ToolUi.Format(_net.CoverMax);
             _maxSlope.Text = ToolUi.Format(_net.CoverMaxSlope);
             _clearance.Text = ToolUi.Format(_net.CoverClearance);
             ToolUi.Field(set, "Surface (rims, cover)", _rimSurface);
             ToolUi.Field(set, "Fit pipe ends to", _fitFace);
-            ToolUi.Field(set, "Cover, unpaved minimum", ToolUi.WithUnit(_coverMin, "m"));
             ToolUi.Field(set, "Cover maximum", ToolUi.WithUnit(_coverMax, "m"));
             ToolUi.Field(set, "Slope maximum", ToolUi.WithUnit(_maxSlope, "%"));
             ToolUi.Field(set, "Crossing clearance", ToolUi.WithUnit(_clearance, "m"));
