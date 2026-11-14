@@ -5,7 +5,7 @@ your drawing. Ribbon: **C3D Pro Tools → Preset Runs**.
 
 Always start with **Report**: it changes nothing and tells you what each step would do. Every other step is one UNDO.
 
-Short forms: type the capital letters shown in the prompt. C3DPROLBL: `A` Add, `AR` Arrange, `S` Reset. C3DPRONET: `R` Report, `I` Rims, `P` Repair, `F` Fit, `D` Duplicates, `C` Cover. Enter is Report.
+Short forms: type the capital letters shown in the prompt. C3DPROLBL: `A` Add, `AR` Arrange, `S` Reset, `N` Rename. C3DPRONET: `R` Report, `I` Rims, `P` Repair, `F` Fit, `D` Duplicates, `C` Cover. Enter is Report.
 
 ## The settings file
 
@@ -89,12 +89,13 @@ surface is not found (it would erase earlier cover DIMs and draw none). Both com
 | `fitMaxMove` | 3.0 | An end that would move more than this (m) is left alone: its structure connection is wrong |
 | `connectLooseEnds` | true | Connect pipe ends lying inside a structure |
 
-## C3DPROLBL: labels (work in progress)
+## C3DPROLBL: labels
 
 | Step | What it does |
 |---|---|
 | Report | What Add would add, and every label shown on the layouts with an overlap or outside its viewport |
-| Add | Adds the labels the project's label rules (`labelRules`) ask for on the chosen layouts; a re-run adds nothing new |
+| Add | Adds the labels the project's label rules (`labelRules`) ask for on the chosen layouts: plan rules (`"view": "Plan"`) on plan sheets, profile rules (`"view": "Profile"`) in the profile views on profile sheets. A part that already has a label of the rule's style, placed by hand, gets no second one; a re-run adds nothing new |
+| Rename | Names the parts of the chosen networks with the templates saved in Annotation Studio (Rename parts: templates, type codes, sheet source). Lists every new name, asks once, then renames all or nothing; names another part keeps and data references are listed and left |
 | Arrange | Places the labels of the chosen networks clear of each other and inside their viewports; locked labels stay |
 | Reset | Puts the labels of the chosen networks back where their style places them; locked labels stay |
 
@@ -105,8 +106,8 @@ surface is not found (it would erase earlier cover DIMs and draw none). Both com
 | `maxDistance`, `gap`, `margin` | as saved in Annotation Studio | Longest leader, clear space round a label, space inside the viewport edge (paper mm) |
 | `ruleSet` | the only one | Which `labelRules` set Add uses |
 
-Viewport scales and twists are never changed. On tile 124 sheet 102054 Arrange brings the problems from 30 to about 7; it
-is not yet clean on crowded sheets.
+Viewport scales and twists are never changed. On tile 124 sheet 102054 Arrange places 31 of 33 labels; two at the crowded
+junction are left for you to place.
 
 ## Pavement (both commands)
 

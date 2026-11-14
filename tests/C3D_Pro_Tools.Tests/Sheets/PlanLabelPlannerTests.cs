@@ -177,6 +177,20 @@ namespace C3DProTools.Tests.Sheets
         }
 
         [Fact]
+        public void HandPlacedLabelOfTheSameStyle_CoversTheRuleLabel()
+        {
+            // MH-1 (31) already has an "MH Name" label placed by hand on SW-A; MH-2 (32) has one of another style.
+            LabelSnapshot same = new LabelSnapshot(DrawingObjectRef.Of("A07"), DrawingObjectRef.Of("31"), "SW-A", null, Placed);
+            LabelSnapshot other = new LabelSnapshot(DrawingObjectRef.Of("A09"), DrawingObjectRef.Of("32"), "SW-B", null, Placed with { StyleName = "MH Data" });
+            SheetScene scene = Scene(new[] { same, other });
+            PlanLabelsPlan plan = PlanLabelPlanner.Plan(scene, Rules(Manholes("MH Name")), new[] { "SW-A", "SW-B" });
+            List<PlannedChange> kept = HandLabels.Without(scene, All(plan), out int skipped);
+            Assert.Equal(1, skipped);
+            PlannedChange add = Assert.Single(kept);
+            Assert.Equal("32", add.Part?.Handle);
+        }
+
+        [Fact]
         public void CopiedTags_KeepTheLowestHandle_AndWarnForTheRest()
         {
             LabelSnapshot[] labels =
