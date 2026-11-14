@@ -466,6 +466,8 @@ namespace C3DProTools
             _gridLabels.Columns.Add(kind);
             _gridLabels.Columns.Add(new DataGridViewComboBoxColumn { Name = "Style", HeaderText = "Style", FillWeight = 150, FlatStyle = FlatStyle.Flat });
             _gridLabels.Columns.Add(new DataGridViewComboBoxColumn { Name = "Position", HeaderText = "Along the pipe", FillWeight = 50, FlatStyle = FlatStyle.Flat });
+            _gridLabels.Columns.Add(new DataGridViewComboBoxColumn { Name = "SkipAtManhole", HeaderText = "Leave out at a manhole", FillWeight = 60, FlatStyle = FlatStyle.Flat,
+                ToolTipText = "Pipe labels only: leave this label off pipes whose start, end or either end is at a manhole" });
             _gridLabels.CurrentCellDirtyStateChanged += (s, e) => { if (_gridLabels.IsCurrentCellDirty) _gridLabels.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _gridLabels.CellValueChanged += (s, e) => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) SetRowKind(_gridLabels.Rows[e.RowIndex]); };
             ToolUi.Wide(table, _gridLabels);
@@ -898,11 +900,16 @@ namespace C3DProTools
             int i = _gridLabels.Rows.Add();
             DataGridViewRow row = _gridLabels.Rows[i];
             row.Cells[0].Value = LabelSetItem.KindText(item.Kind);
-            SetRowKind(row, item.Style, item.Ratio);
+            SetRowKind(row, item.Style, item.Ratio, item.SkipAtManhole);
         }
 
+        private static readonly (string text, SkipAtManhole skip)[] SkipChoices =
+            { ("No", SkipAtManhole.No), ("At start", SkipAtManhole.Start), ("At end", SkipAtManhole.End), ("At either end", SkipAtManhole.Both) };
+
+        private static SkipAtManhole SkipOf(object text) => SkipChoices.FirstOrDefault(c => c.text == text as string).skip;
+
         /// <summary>Gives a row the style list and positions of its kind, keeping the chosen style when the list has it.</summary>
-        private void SetRowKind(DataGridViewRow row, string style = null, double ratio = double.NaN)
+        private void SetRowKind(DataGridViewRow row, string style = null, double ratio = double.NaN, SkipAtManhole? skip = null)
         {
             LabelKind kind = KindOf(row.Cells[0].Value);
             DataGridViewComboBoxCell styleCell = (DataGridViewComboBoxCell)row.Cells[1];
@@ -930,6 +937,22 @@ namespace C3DProTools
                 posCell.Value = NoPosition;
                 posCell.ReadOnly = true;
             }
+
+            DataGridViewComboBoxCell skipCell = (DataGridViewComboBoxCell)row.Cells[3];
+            SkipAtManhole was = skip ?? SkipOf(skipCell.Value);
+            skipCell.Items.Clear();
+            if (IsPipeKind(kind))
+            {
+                foreach ((string text, SkipAtManhole _) in SkipChoices) skipCell.Items.Add(text);
+                skipCell.Value = SkipChoices.First(c => c.skip == was).text;
+                skipCell.ReadOnly = false;
+            }
+            else
+            {
+                skipCell.Items.Add(NoPosition);
+                skipCell.Value = NoPosition;
+                skipCell.ReadOnly = true;
+            }
         }
 
         /// <summary>After the drawing (and so its style lists) changed: every row keeps its style when it still exists.</summary>
@@ -946,7 +969,11 @@ namespace C3DProTools
                 string style = row.Cells[1].Value as string;
                 if (string.IsNullOrEmpty(style)) continue;
                 LabelKind kind = KindOf(row.Cells[0].Value);
-                items.Add(new LabelSetItem { Kind = kind, Style = style, Ratio = IsPipeKind(kind) ? RatioOf(row.Cells[2].Value) : 0.5 });
+                items.Add(new LabelSetItem
+                {
+                    Kind = kind, Style = style, Ratio = IsPipeKind(kind) ? RatioOf(row.Cells[2].Value) : 0.5,
+                    SkipAtManhole = IsPipeKind(kind) ? SkipOf(row.Cells[3].Value) : SkipAtManhole.No,
+                });
             }
             return items;
         }
@@ -1074,7 +1101,7 @@ namespace C3DProTools
             catch (Exception ex) { MessageBox.Show(this, "Adding labels failed: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             finally { Cursor = Cursors.Default; }
 
-            string summary = $"Added {r.Created} label(s)" + (r.Removed > 0 ? $", removed {r.Removed}" : "") + (r.Skipped > 0 ? $", {r.Skipped} already there or skipped" : "") + (r.Failed > 0 ? $", {r.Failed} failed" : "") + ".";
+            string summary = $"Added {r.Created} label(s)" + (r.Removed > 0 ? $", removed {r.Removed}" : "") + (r.Skipped > 0 ? $", {r.Skipped} already there or skipped" : "") + (r.AtManhole > 0 ? $", {r.AtManhole} left out at manholes" : "") + (r.Failed > 0 ? $", {r.Failed} failed" : "") + ".";
             SetStatus(summary);
             if (r.Errors.Count > 0)
                 MessageBox.Show(this, summary + "\n\n" + string.Join("\n", r.Errors.Distinct().Take(12)), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);

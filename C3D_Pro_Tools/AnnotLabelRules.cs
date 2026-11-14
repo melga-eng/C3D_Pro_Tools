@@ -7,8 +7,16 @@ namespace C3DProTools
 
     internal sealed record AnnotLabelPosition(LabelKind Kind, string Style, string View, double? Ratio);
 
+    /// <summary>Which ends of a pipe leave a label out when that end is at a manhole (any structure; ducts join each other directly).</summary>
+    internal enum SkipAtManhole { No, Start, End, Both }
+
     internal static class AnnotLabelRules
     {
+        /// <summary>True when a pipe label is left out: its row skips that end and the pipe's end there is at a manhole.</summary>
+        internal static bool LeftOut(SkipAtManhole skip, bool startAtManhole, bool endAtManhole) =>
+            (skip == SkipAtManhole.Start || skip == SkipAtManhole.Both) && startAtManhole
+            || (skip == SkipAtManhole.End || skip == SkipAtManhole.Both) && endAtManhole;
+
         internal static string StyleKey(LabelKind kind, string style) => kind + ":" + style;
 
         /// <summary>

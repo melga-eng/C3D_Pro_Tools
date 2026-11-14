@@ -61,4 +61,5 @@ Tests always run on copies.
 - Issues list
 - Other networks' rule sets (MV, LV, fence lighting, navaids, MET)
 - Quantities
+- Navisworks Importer: curved pipes are not imported or drawn, although Navisworks gives Pipe Radius and Radius Point East / North (reported 2026-11-14)
 
