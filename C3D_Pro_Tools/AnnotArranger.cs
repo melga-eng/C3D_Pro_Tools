@@ -793,7 +793,7 @@ namespace C3DProTools
             LayoutRules rules = new LayoutRules { MaxDistance = o.MaxDistance, Gap = o.Gap, MinLeader = 3, Step = 2 };
             List<(Item it, PlanLabel plan)> plans = shapes.Keys.Select(it => (it, new PlanLabel
             {
-                Key = it.Key, Anchor = it.Anchor, Shape = shapes[it], Networks = it.Networks, InArea = b => InArea(it, b.Corners()),
+                Key = it.Key, Anchor = it.Anchor, Shape = shapes[it], Networks = it.Networks, InArea = b => InArea(it, b.Corners()), IsStructure = !it.Info.IsPipe,
                 Ratio = it.OriginalRatio, AltAnchors = it.MaySlide ? SlidePoints((CLabel)tr.GetObject(it.Info.Id, OpenMode.ForWrite), it, v, o.Margin + 2) : new List<(double X, double Y, double Ratio)>()
             })).ToList();
             if (!string.IsNullOrEmpty(o.ExportFolder)) Export(o, sheet, v, obstacles, plans.Select(p => (p.plan, p.it.Region)).ToList());

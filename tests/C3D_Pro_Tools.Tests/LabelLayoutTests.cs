@@ -218,15 +218,20 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
-        public void Row_OfEndLabels_AllGoTheSameWay_AtOneHeight()
+        public void Row_OfEndLabels_AlternatesSides_WithShortestSquareLeaders()
         {
             LabelObstacles o = WithPipe(0);
             List<PlanLabel> labels = new[] { 0.0, 40, 80, 120 }.Select(x => Label("L" + x, x, 0)).ToList();
             foreach (PlanLabel l in labels) LabelLayout.ReserveAnchor(o, l.Anchor, l.Key);
             LabelPlanner.Plan(o, labels, Rules);
             AssertClean(o, labels);
-            Assert.Single(labels.Select(l => l.Spot.Value.Direction).Distinct());
-            Assert.Single(labels.Select(l => Math.Round(l.Spot.Value.End.Y, 6)).Distinct());
+            for (int i = 0; i < labels.Count; i++)
+            {
+                Assert.Equal(i % 2 == 0 ? 1 : -1, Math.Sign(labels[i].Spot.Value.End.Y));
+                Assert.Equal(labels[i].Anchor.X, labels[i].Spot.Value.End.X, 6);
+                Assert.Null(labels[i].Spot.Value.Hull);
+                Assert.Equal(i % 2 == 0 ? 12 : 8, Math.Abs(labels[i].Spot.Value.End.Y), 6);
+            }
         }
 
         [Fact]
@@ -308,9 +313,8 @@ namespace C3DProTools.Tests
             foreach (PlanLabel l in labels) LabelLayout.ReserveAnchor(o, l.Anchor, l.Key);
             LabelPlanner.Plan(o, labels, new LayoutRules { MaxDistance = 80, Gap = 1, MinLeader = 4, Step = 2 });
             AssertClean(o, labels);
-            // They fan out both ways from the middle of the group.
-            Assert.Contains(labels, l => l.Spot.Value.End.Y > 104);
-            Assert.Contains(labels, l => l.Spot.Value.End.Y < 104);
+            for (int i = 1; i < labels.Count; i++)
+                Assert.Equal(-Math.Sign(labels[i - 1].Spot.Value.End.X - 100), Math.Sign(labels[i].Spot.Value.End.X - 100));
         }
 
         [Fact]

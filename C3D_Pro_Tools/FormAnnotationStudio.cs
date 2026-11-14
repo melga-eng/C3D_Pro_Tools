@@ -1140,8 +1140,10 @@ namespace C3DProTools
             try
             {
                 using (_doc.LockDocument())
+                using (var turn = new Features.Labels.ViewTurn(_doc))
                 using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
                 {
+                    o.TurnView = turn.Turn;
                     Database db = _doc.Database;
                     CivilDocument cdoc = CivilDocument.GetCivilDocument(db);
                     List<LabelInfo> labels = AnnotLabels.Scan(tr, db);
