@@ -57,12 +57,11 @@ namespace C3DProTools.Features.Labels
         public static LabelsSettings Load(string drawingPath, out string problem, out string source)
         {
             problem = null;
-            string file = ProjectSettings.PathFor(drawingPath);
-            source = "defaults (no " + ProjectSettings.FileName + " beside the drawing)";
-            if (!File.Exists(file)) return new LabelsSettings();
+            string text = Features.Shared.Contracts.SettingsSource.Text(drawingPath, out string file);
+            source = file;
             try
             {
-                using JsonDocument d = JsonDocument.Parse(File.ReadAllText(file));
+                using JsonDocument d = JsonDocument.Parse(text);
                 foreach (JsonProperty p in d.RootElement.EnumerateObject())
                     if (string.Equals(p.Name, "labels", StringComparison.OrdinalIgnoreCase))
                     {
@@ -74,7 +73,7 @@ namespace C3DProTools.Features.Labels
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
             {
-                problem = $"{ProjectSettings.FileName} could not be read: {ex.Message}";
+                problem = $"The C3D Pro settings could not be read: {ex.Message}";
                 return new LabelsSettings();
             }
         }
@@ -143,14 +142,22 @@ namespace C3DProTools.Features.Labels
             }
             string notes = string.Join(" ", new[] { layoutNote, networkNote }.Where(n => n != null));
             if (notes.Length > 0 && !PresetPrompt.Continue(ed, notes, mode != "Report")) return;
+            string head = (layoutNote != null ? layoutNote + "\n" : "") + (networkNote != null ? networkNote + "\n" : "");
+            ed.WriteMessage("\n" + RunReport.Write(Execute(doc, s, mode, source, q => PresetPrompt.Continue(ed, q, true), typedLayouts, typedNetworks, head), "C3DPROLBL", mode) + "\n");
+            if (mode != "Report") ViewHelper.Regen(doc);
+        }
 
+        /// <summary>Runs one step (or Report) on the layouts and networks the settings name; returns the report.</summary>
+        /// <param name="confirm">Asked once before Rename writes (the question names how many parts and the first new names).</param>
+        internal static string Execute(Document doc, LabelsSettings s, string mode, string source, Func<string, bool> confirm,
+            string typedLayouts = null, string typedNetworks = null, string head = "")
+        {
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{typedLayouts}\", networks \"{typedNetworks}\", settings from {source}");
-            if (layoutNote != null) log.AppendLine(layoutNote);
-            if (networkNote != null) log.AppendLine(networkNote);
+            log.AppendLine($"C3DPROLBL {mode} on {Path.GetFileName(doc.Name)}, layouts \"{typedLayouts ?? s.Layouts}\", networks \"{typedNetworks ?? s.Networks}\", settings from {source}");
+            log.Append(head);
             try
             {
-                if (mode == "Rename") Rename(doc, s, log);
+                if (mode == "Rename") Rename(doc, s, confirm, log);
                 else
                 {
                     if (mode == "Report" || mode == "Add") Add(doc, s, mode == "Add", log);
@@ -162,12 +169,7 @@ namespace C3DProTools.Features.Labels
                 C3DProLogger.Error("C3DPROLBL failed", ex);
                 log.AppendLine($"C3DPROLBL failed: {ex.Message}");
             }
-
-            string file = Path.Combine(Path.GetTempPath(), $"C3DPROLBL-{mode}.txt");
-            try { File.WriteAllText(file, log.ToString()); } catch (IOException) { file = null; }
-            string[] summary = log.ToString().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0 && l[0] != ' ').ToArray();
-            ed.WriteMessage("\n" + string.Join("\n", summary) + (file != null ? $"\nFull report: {file}" : "") + "\n");
-            if (mode != "Report") ViewHelper.Regen(doc);
+            return log.ToString();
         }
 
         /// <summary>
@@ -323,7 +325,7 @@ namespace C3DProTools.Features.Labels
         /// then one question, then every name in one transaction, all or nothing. Names another part keeps, and data references,
         /// are listed and left.
         /// </summary>
-        private static void Rename(Document doc, LabelsSettings s, StringBuilder log)
+        private static void Rename(Document doc, LabelsSettings s, Func<string, bool> confirm, StringBuilder log)
         {
             AnnotationSettings saved = AnnotationSettings.Load();
             NamingOptions n = saved.Naming;
@@ -349,7 +351,7 @@ namespace C3DProTools.Features.Labels
             if (usable.Count == 0) return;
 
             string sample = string.Join(", ", usable.Take(3).Select(r => $"{r.Old} -> {r.New}"));
-            if (!PresetPrompt.Continue(doc.Editor, $"Rename {usable.Count} parts ({sample}{(usable.Count > 3 ? ", ..." : "")})?", true))
+            if (confirm != null && !confirm($"Rename {usable.Count} parts ({sample}{(usable.Count > 3 ? ", ..." : "")})?"))
             {
                 log.AppendLine("Rename: not confirmed, nothing renamed.");
                 return;

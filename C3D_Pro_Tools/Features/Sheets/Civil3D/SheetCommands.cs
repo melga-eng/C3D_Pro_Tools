@@ -71,7 +71,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
 
                 Application.ProjectSettings settings = Application.ProjectSettings.Load(doc.Name, out string problem);
                 StringBuilder b = new StringBuilder();
-                b.AppendLine($"Plan labels for {doc.Name} ({(apply ? "apply" : "preview")}), rules from {Application.ProjectSettings.PathFor(doc.Name)}");
+                b.AppendLine($"Plan labels for {doc.Name} ({(apply ? "apply" : "preview")}), rules from the C3D Pro settings");
                 if (problem != null) b.AppendLine("Problem: " + problem);
 
                 // Several rule sets: the user names one; never a silent first pick.

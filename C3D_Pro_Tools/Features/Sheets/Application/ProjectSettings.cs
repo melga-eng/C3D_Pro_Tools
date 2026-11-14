@@ -36,12 +36,11 @@ namespace C3DProTools.Features.Sheets.Application
         public static ProjectSettings Load(string drawingPath, out string problem)
         {
             problem = null;
-            string file = PathFor(drawingPath);
-            if (!File.Exists(file)) return new ProjectSettings();
-            try { return FromJson(File.ReadAllText(file)); }
+            string text = Features.Shared.Contracts.SettingsSource.Text(drawingPath, out _);
+            try { return FromJson(text); }
             catch (Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException || ex is NotSupportedException)
             {
-                problem = $"{FileName} could not be read: {ex.Message}";
+                problem = $"The C3D Pro settings could not be read: {ex.Message}";
                 return new ProjectSettings();
             }
         }

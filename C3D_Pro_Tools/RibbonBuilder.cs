@@ -10,6 +10,7 @@ namespace C3DProTools
 
         public void Initialize()
         {
+            Features.Shared.SettingsStore.Install();
             if (ComponentManager.Ribbon == null)
             {
                 ComponentManager.ItemInitialized += ComponentManager_ItemInitialized;
@@ -62,6 +63,17 @@ namespace C3DProTools
             RibbonPanelSource panelSource = new RibbonPanelSource { Title = "Pro Tools" };
             RibbonPanel panel = new RibbonPanel { Source = panelSource };
             customTab.Panels.Add(panel);
+
+            // --- C3D Pro Run: profile views, networks and labels in one window ---
+            panelSource.Items.Add(new RibbonButton
+            {
+                Text = "Pro\nRun",
+                ShowText = true,
+                Size = RibbonItemSize.Large,
+                Orientation = System.Windows.Controls.Orientation.Vertical,
+                CommandParameter = "C3DPRORUN ",
+                CommandHandler = new RibbonCommandHandler()
+            });
 
             // --- 0. Workspace Palette Button ---
             RibbonButton workspaceButton = new RibbonButton

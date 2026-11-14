@@ -31,6 +31,10 @@ namespace C3DProTools.Features.Pavement
         public string MarkerStyle { get; set; } = "";
         /// <summary>Step (m) along an alignment before each edge is found to a centimetre.</summary>
         public double Step { get; set; } = 1.0;
+        /// <summary>The cover check leaves a zone's edge band (shoulder, blast pad) out of that zone.</summary>
+        public bool CoverUsesEdgeBand { get; set; } = true;
+        /// <summary>The start / end labels in profile views mark the pavement edge inside the edge band, not the surface edge.</summary>
+        public bool LabelsUseEdgeBand { get; set; } = false;
 
         public bool Any => Zones.Any(z => !string.IsNullOrWhiteSpace(z.Surface));
 
@@ -39,11 +43,10 @@ namespace C3DProTools.Features.Pavement
         public static PavementSettings Load(string drawingPath, out string problem)
         {
             problem = null;
-            string file = ProjectSettings.PathFor(drawingPath);
-            if (!File.Exists(file)) return new PavementSettings();
+            string text = Features.Shared.Contracts.SettingsSource.Text(drawingPath, out _);
             try
             {
-                using JsonDocument d = JsonDocument.Parse(File.ReadAllText(file));
+                using JsonDocument d = JsonDocument.Parse(text);
                 foreach (JsonProperty p in d.RootElement.EnumerateObject())
                     if (string.Equals(p.Name, "pavement", StringComparison.OrdinalIgnoreCase))
                     {
@@ -56,7 +59,7 @@ namespace C3DProTools.Features.Pavement
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
             {
-                problem = $"{ProjectSettings.FileName} could not be read: {ex.Message}";
+                problem = $"The C3D Pro settings could not be read: {ex.Message}";
                 return new PavementSettings();
             }
         }

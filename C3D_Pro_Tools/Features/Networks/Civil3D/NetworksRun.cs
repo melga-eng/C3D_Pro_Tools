@@ -66,12 +66,11 @@ namespace C3DProTools.Features.Networks.Civil3D
         public static NetworksSettings Load(string drawingPath, out string problem, out string source)
         {
             problem = null;
-            string file = ProjectSettings.PathFor(drawingPath);
-            source = "defaults (no " + ProjectSettings.FileName + " beside the drawing)";
-            if (!File.Exists(file)) return new NetworksSettings();
+            string text = Features.Shared.Contracts.SettingsSource.Text(drawingPath, out string file);
+            source = file;
             try
             {
-                using JsonDocument d = JsonDocument.Parse(File.ReadAllText(file));
+                using JsonDocument d = JsonDocument.Parse(text);
                 foreach (JsonProperty p in d.RootElement.EnumerateObject())
                     if (string.Equals(p.Name, "networks", StringComparison.OrdinalIgnoreCase))
                     {
@@ -83,7 +82,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             catch (System.Exception ex) when (ex is JsonException || ex is IOException || ex is UnauthorizedAccessException)
             {
-                problem = $"{ProjectSettings.FileName} could not be read: {ex.Message}";
+                problem = $"The C3D Pro settings could not be read: {ex.Message}";
                 return new NetworksSettings();
             }
         }
@@ -126,9 +125,14 @@ namespace C3DProTools.Features.Networks.Civil3D
                 tr.Commit();
             }
             if (nameNote != null && !PresetPrompt.Continue(ed, nameNote, mode != "Report" && mode != "Cover")) return;
+            ed.WriteMessage("\n" + RunReport.Write(Execute(doc, s, mode, source, typed, nameNote), "C3DPRONET", mode) + "\n");
+        }
 
+        /// <summary>Runs one step (or Report / All) on the networks the settings name; returns the report.</summary>
+        internal static string Execute(Document doc, NetworksSettings s, string mode, string source, string typed = null, string nameNote = null)
+        {
             var log = new StringBuilder();
-            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{typed}\", settings from {source}");
+            log.AppendLine($"C3DPRONET {mode} on {Path.GetFileName(doc.Name)}, networks \"{typed ?? s.Networks}\", settings from {source}");
             if (nameNote != null) log.AppendLine(nameNote);
             try
             {
@@ -148,11 +152,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 C3DProLogger.Error("C3DPRONET failed", ex);
                 log.AppendLine($"C3DPRONET failed: {ex.Message}");
             }
-
-            string file = Path.Combine(Path.GetTempPath(), $"C3DPRONET-{mode}.txt");
-            try { File.WriteAllText(file, log.ToString()); } catch (IOException) { file = null; }
-            string[] summary = log.ToString().Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0 && l[0] != ' ').ToArray();
-            ed.WriteMessage("\n" + string.Join("\n", summary) + (file != null ? $"\nFull report: {file}" : "") + "\n");
+            return log.ToString();
         }
 
         /// <summary>The matched networks that are not data references, with their gravity pipes.</summary>
@@ -287,7 +287,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (pav.Any)
                 {
                     var missing = new List<string>();
-                    pavTests = Pavement.PavementCivil3D.Tests(tr, civil, pav, missing, edgeBands: true);
+                    pavTests = Pavement.PavementCivil3D.Tests(tr, civil, pav, missing, edgeBands: pav.CoverUsesEdgeBand);
                     if (missing.Count > 0) log.AppendLine($"Cover: pavement surfaces not in the drawing, left out: {string.Join(", ", missing)}.");
                     if (pav.Unpaved.MinCover > 0) o.MinCover = pav.Unpaved.MinCover;
                 }
