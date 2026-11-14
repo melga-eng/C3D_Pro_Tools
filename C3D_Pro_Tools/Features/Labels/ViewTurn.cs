@@ -21,7 +21,19 @@ namespace C3DProTools.Features.Labels
             _doc = doc;
             _layout = LayoutManager.Current.CurrentLayout;
             if (!string.Equals(_layout, "Model", StringComparison.OrdinalIgnoreCase)) LayoutManager.Current.CurrentLayout = "Model";
-            using (ViewTableRecord view = doc.Editor.GetCurrentView()) _twist = view.ViewTwist;
+            try { using (ViewTableRecord view = doc.Editor.GetCurrentView()) _twist = view.ViewTwist; }
+            catch (System.Exception)
+            {
+                // Back on the sheet the user was on before failing.
+                RestoreLayout();
+                throw;
+            }
+        }
+
+        private void RestoreLayout()
+        {
+            try { if (!string.Equals(_layout, LayoutManager.Current.CurrentLayout, StringComparison.OrdinalIgnoreCase)) LayoutManager.Current.CurrentLayout = _layout; }
+            catch (System.Exception ex) { C3DProLogger.Warn("Labels: the layout could not be made current again", ex); }
         }
 
         /// <summary>Turns the model view to a viewport's twist (radians).</summary>
@@ -48,9 +60,10 @@ namespace C3DProTools.Features.Labels
                         view.ViewTwist = _twist;
                         _doc.Editor.SetCurrentView(view);
                     }
-                if (!string.Equals(_layout, LayoutManager.Current.CurrentLayout, StringComparison.OrdinalIgnoreCase)) LayoutManager.Current.CurrentLayout = _layout;
             }
-            catch (System.Exception ex) { C3DProLogger.Warn("Labels: the view could not be put back as it was", ex); }
+            catch (System.Exception ex) { C3DProLogger.Warn("Labels: the model view could not be turned back", ex); }
+            // Always, even when the view could not be turned back.
+            RestoreLayout();
         }
     }
 }
