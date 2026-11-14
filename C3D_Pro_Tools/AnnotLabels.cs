@@ -446,16 +446,20 @@ namespace C3DProTools
                 if (!pipe && !(part is Structure)) continue;
                 List<LabelInfo> have = byPart[partId].ToList();
                 List<LabelSetItem> items = set.Items.Where(i => pipe ? i.Kind == LabelKind.PlanPipe || i.Kind == LabelKind.ProfilePipe : i.Kind == LabelKind.PlanStructure || i.Kind == LabelKind.ProfileStructure).ToList();
+                // All the part's rows, before any is left out: whether a style has several positions is the set's, not this pipe's.
+                List<LabelSetItem> rows = items;
+                List<LabelSetItem> leftOut = new List<LabelSetItem>();
                 if (pipe)
                 {
                     // Rows set to skip a manhole end leave this pipe out when that end is at a structure.
                     Pipe p = (Pipe)part;
                     bool atStart = !p.StartStructureId.IsNull, atEnd = !p.EndStructureId.IsNull;
-                    int before = items.Count;
-                    items = items.Where(i => !AnnotLabelRules.LeftOut(i.SkipAtManhole, atStart, atEnd)).ToList();
-                    r.AtManhole += before - items.Count;
+                    leftOut = items.Where(i => AnnotLabelRules.LeftOut(i.SkipAtManhole, atStart, atEnd)).ToList();
+                    items = items.Except(leftOut).ToList();
+                    r.AtManhole += leftOut.Count;
                 }
-                if (items.Count == 0) continue;
+                // Replace also takes off the labels of rows left out here; otherwise a part with no row left is done.
+                if (items.Count == 0 && (mode != ExistingLabels.Replace || leftOut.Count == 0)) continue;
                 if (mode == ExistingLabels.SkipLabelled && have.Count > 0) { r.Skipped++; continue; }
                 if (mode == ExistingLabels.Replace)
                 {
@@ -469,11 +473,12 @@ namespace C3DProTools
                         }
                         continue;
                     }
-                    foreach (LabelInfo l in have.Where(l => items.Any(i => i.Kind == l.Kind)))
+                    foreach (LabelInfo l in have.Where(l => items.Any(i => i.Kind == l.Kind) || leftOut.Any(i => i.Kind == l.Kind && i.Style == l.Style)))
                     {
                         try { tr.GetObject(l.Id, OpenMode.ForWrite).Erase(); r.Removed++; } catch (Exception ex) { r.Errors.Add(ex.Message); }
                     }
                     have.Clear();
+                    if (items.Count == 0) continue;
                 }
 
                 ObjectIdCollection views = new ObjectIdCollection();
@@ -505,7 +510,7 @@ namespace C3DProTools
                     {
                         // Position matters only when the set has several labels of this style (two end labels, say); the
                         // only one of its style counts wherever it sits, since Arrange may have slid it along the pipe.
-                        bool several = items.Count(i => i.Kind == item.Kind && i.Style == item.Style) > 1;
+                        bool several = rows.Count(i => i.Kind == item.Kind && i.Style == item.Style) > 1;
                         if (AnnotLabelRules.TakeExisting(positions, new AnnotLabelPosition(item.Kind, item.Style,
                             viewId.Handle.ToString(), several ? Math.Max(0, Math.Min(1, item.Ratio)) : (double?)null)))
                         { r.Skipped++; continue; }
