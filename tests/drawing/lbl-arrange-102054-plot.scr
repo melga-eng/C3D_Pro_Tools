@@ -1,0 +1,7 @@
+C3DPROLBL
+AR
+SW00670060000C-C00110-FCC-ZZ-DWG-IC-XX-102054
+ICT-*
+_CTAB
+SW00670060000C-C00110-FCC-ZZ-DWG-IC-XX-102054
+(command "_-PLOT" "_N" (getvar "CTAB") "" "DWG To PDF.pc3" (strcat (getvar "DWGPREFIX") "102054-annotation-check.pdf") "_N" "_Y")

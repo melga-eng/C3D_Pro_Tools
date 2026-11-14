@@ -14,6 +14,13 @@ namespace C3DProTools
 {
     internal sealed class ArrangeOptions
     {
+        /// <summary>
+        /// Turns the model view like a viewport (its twist, radians) before that viewport's labels are measured. Civil 3D draws a
+        /// View-oriented label for the view current at the time: which side of the leader its text takes depends on it, so a
+        /// label measured in an unturned model view sits up to a box width from where the sheet plots it (measured on tile 124
+        /// sheet 102054, twist 59.4°). Null: the labels are measured as they are.
+        /// </summary>
+        public Action<double> TurnView;
         /// <summary>Longest leader a dragged label gets, on paper (mm).</summary>
         public double MaxDistance = 60;
         /// <summary>Clear space kept around every label (mm).</summary>
@@ -589,7 +596,8 @@ namespace C3DProTools
         {
             ArrangeReport report = new ArrangeReport();
             LabelObstacles obstacles = new LabelObstacles();
-            double near = PlanGeometry.PaperToModel(o.NearMarginMm, v.Scale);
+            o.TurnView?.Invoke(v.Twist);
+            double near =PlanGeometry.PaperToModel(o.NearMarginMm, v.Scale);
             bool Near(Point3d p) => p.X >= v.ModelBox.MinPoint.X - near && p.X <= v.ModelBox.MaxPoint.X + near && p.Y >= v.ModelBox.MinPoint.Y - near && p.Y <= v.ModelBox.MaxPoint.Y + near;
             bool NearAny(IEnumerable<Point3d> pts)
             {
@@ -785,7 +793,7 @@ namespace C3DProTools
             LayoutRules rules = new LayoutRules { MaxDistance = o.MaxDistance, Gap = o.Gap, MinLeader = 3, Step = 2 };
             List<(Item it, PlanLabel plan)> plans = shapes.Keys.Select(it => (it, new PlanLabel
             {
-                Key = it.Key, Anchor = it.Anchor, Shape = shapes[it], Networks = it.Networks, InArea = b => InArea(it, b.Corners()),
+                Key = it.Key, Anchor = it.Anchor, Shape = shapes[it], Networks = it.Networks, InArea = b => InArea(it, b.Corners()), IsStructure = !it.Info.IsPipe,
                 Ratio = it.OriginalRatio, AltAnchors = it.MaySlide ? SlidePoints((CLabel)tr.GetObject(it.Info.Id, OpenMode.ForWrite), it, v, o.Margin + 2) : new List<(double X, double Y, double Ratio)>()
             })).ToList();
             if (!string.IsNullOrEmpty(o.ExportFolder)) Export(o, sheet, v, obstacles, plans.Select(p => (p.plan, p.it.Region)).ToList());

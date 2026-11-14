@@ -558,8 +558,8 @@ namespace C3DProTools
             ToolUi.Add(stack, clear);
 
             TableLayoutPanel place = ToolUi.Card("4. Placement (paper distances)");
-            ToolUi.Field(place, "Longest leader", ToolUi.WithUnit(_txtMaxDist, "mm"), _tips, "A dragged label's leader is never longer than this. " +
-                "A label with no clear place within it is put back as it was and listed below.");
+            ToolUi.Field(place, "Longest leader", ToolUi.WithUnit(_txtMaxDist, "mm"), _tips, "A dragged label's usual longest leader. Where labelled points crowd (a junction, a run of close joints) " +
+                "leaders may reach 2.5 times this, as they are stepped out by hand. A label with no clear place is put back as it was and listed below.");
             ToolUi.Field(place, "Space around labels", ToolUi.WithUnit(_txtGap, "mm"));
             ToolUi.Field(place, "Keep from viewport edge", ToolUi.WithUnit(_txtMargin, "mm"));
             ToolUi.Field(place, "Parallel cables", ToolUi.WithUnit(_txtRunGap, "m apart at most (centre to centre, in the model)"), _tips,
@@ -1140,8 +1140,10 @@ namespace C3DProTools
             try
             {
                 using (_doc.LockDocument())
+                using (var turn = new Features.Labels.ViewTurn(_doc))
                 using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
                 {
+                    o.TurnView = turn.Turn;
                     Database db = _doc.Database;
                     CivilDocument cdoc = CivilDocument.GetCivilDocument(db);
                     List<LabelInfo> labels = AnnotLabels.Scan(tr, db);

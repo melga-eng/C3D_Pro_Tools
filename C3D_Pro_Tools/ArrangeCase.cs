@@ -24,6 +24,7 @@ namespace C3DProTools
         public sealed class Label
         {
             public string Key { get; set; } = "";
+            public bool? IsStructure { get; set; }
             public double[] Anchor { get; set; } = new double[2];
             /// <summary>Box relative to the leader end, each [minX, minY, maxX, maxY]: right, left, and (when measured) up / down.</summary>
             public double[] Right { get; set; }
@@ -32,6 +33,8 @@ namespace C3DProTools
             public double[] UpLeft { get; set; }
             public double[] DownRight { get; set; }
             public double[] DownLeft { get; set; }
+            /// <summary>The box measured with the leader at each angle, each [angle (radians), minX, minY, maxX, maxY]; empty in older cases.</summary>
+            public List<double[]> Samples { get; set; } = new List<double[]>();
             public List<string> Networks { get; set; } = new List<string>();
             /// <summary>Points along its pipe it may slide to, each [x, y, ratio], and its own ratio.</summary>
             public List<double[]> Alternatives { get; set; } = new List<double[]>();
@@ -59,9 +62,10 @@ namespace C3DProTools
         {
             Labels.Add(new Label
             {
-                Key = p.Key, Anchor = new[] { p.Anchor.X, p.Anchor.Y }, Right = R(p.Shape.Right), Left = R(p.Shape.Left),
+                Key = p.Key, IsStructure = p.IsStructure, Anchor = new[] { p.Anchor.X, p.Anchor.Y }, Right = R(p.Shape.Right), Left = R(p.Shape.Left),
                 UpRight = p.Shape.UpRight.HasValue ? R(p.Shape.UpRight.Value) : null, UpLeft = p.Shape.UpLeft.HasValue ? R(p.Shape.UpLeft.Value) : null,
                 DownRight = p.Shape.DownRight.HasValue ? R(p.Shape.DownRight.Value) : null, DownLeft = p.Shape.DownLeft.HasValue ? R(p.Shape.DownLeft.Value) : null,
+                Samples = p.Shape.Samples.Select(s => new[] { s.Angle, s.Box.MinX, s.Box.MinY, s.Box.MaxX, s.Box.MaxY }).ToList(),
                 Networks = p.Networks?.ToList() ?? new List<string>(), Alternatives = p.AltAnchors.Select(a => new[] { a.X, a.Y, a.Ratio }).ToList(), Ratio = p.Ratio,
                 Region = region.HasValue ? R(region.Value) : null
             });
@@ -108,13 +112,17 @@ namespace C3DProTools
             return Labels.Select(l =>
             {
                 LRect? region = Rn(l.Region);
-                return new PlanLabel
+                DraggedShape shape = new DraggedShape { Right = R(l.Right), Left = R(l.Left), UpRight = Rn(l.UpRight), UpLeft = Rn(l.UpLeft), DownRight = Rn(l.DownRight), DownLeft = Rn(l.DownLeft) };
+                foreach (double[] s in l.Samples ?? new List<double[]>()) shape.Samples.Add((s[0], new LRect(s[1], s[2], s[3], s[4]), null));
+                var planned = new PlanLabel
                 {
                     Key = l.Key, Anchor = (l.Anchor[0], l.Anchor[1]),
-                    Shape = new DraggedShape { Right = R(l.Right), Left = R(l.Left), UpRight = Rn(l.UpRight), UpLeft = Rn(l.UpLeft), DownRight = Rn(l.DownRight), DownLeft = Rn(l.DownLeft) },
+                    Shape = shape,
                     Networks = new HashSet<string>(l.Networks), AltAnchors = l.Alternatives.Select(a => (a[0], a[1], a[2])).ToList(), Ratio = l.Ratio,
                     InArea = b => b.Corners().All(p => Inside(outline, Margin, p) && (!region.HasValue || region.Value.Contains(p)))
                 };
+                if (l.IsStructure.HasValue) planned.IsStructure = l.IsStructure.Value;
+                return planned;
             }).ToList();
         }
 

@@ -313,6 +313,13 @@ namespace C3DProTools
         public double OcclusionCost = 0.8;
         /// <summary>Cost of sliding a label's anchor along its pipe, per whole length of the pipe slid.</summary>
         public double SlideCost = 0.4;
+        /// <summary>
+        /// Longest leader (mm) where labelled points crowd (a junction with many pipe ends, a run of close joints): there is no
+        /// room for their labels within the usual longest leader, and by hand they are fanned or stepped further out. 0 = 2.5
+        /// times <see cref="MaxDistance"/>.
+        /// </summary>
+        public double CrowdedReach;
+        public double Crowded => CrowdedReach > 0 ? CrowdedReach : 2.5 * MaxDistance;
     }
 
     internal static class LabelLayout
@@ -528,7 +535,8 @@ namespace C3DProTools
             double reach = rules.MaxDistance;
             var stacks = StackSpots(obstacles, a, shape, rules, outward);
             if (staticObstacles != null) stacks = stacks.Where(s =>
-                staticObstacles.Blocker(s.Outline, rules.Gap, networks, own) == null && !staticObstacles.LeaderCrossesText(a, s.End, own));
+                staticObstacles.Blocker(s.Outline, rules.Gap, networks, own) == null && !staticObstacles.LeaderCrossesText(a, s.End, own) &&
+                staticObstacles.LeaderCrossings(a, s.End, own) == 0);
             int skipFirst = staticObstacles?.Count ?? 0;
             foreach (LabelSpot s in (candidates ?? Spots(a, shape, rules, outward)).Concat(stacks).OrderBy(s => s.Cost))
             {
@@ -583,6 +591,13 @@ namespace C3DProTools
     internal sealed class PlanLabel
     {
         public string Key;
+        // Null means an older caller/case: recognize the measured manhole box.
+        private bool? _isStructure;
+        public bool IsStructure
+        {
+            get => _isStructure ?? (Shape != null && Math.Abs(Shape.Right.Width - 35) <= 2.5 && Math.Abs(Shape.Right.Height - 33.5) <= 2);
+            set => _isStructure = value;
+        }
         public (double X, double Y) Anchor;
         public DraggedShape Shape;
         public ISet<string> Networks;
@@ -639,7 +654,7 @@ namespace C3DProTools
         private static LayoutRules Copy(LayoutRules r, bool up) => new LayoutRules
         {
             MaxDistance = r.MaxDistance, Gap = r.Gap, MinLeader = r.MinLeader, Step = r.Step, PreferUp = up, OtherWayCost = r.OtherWayCost,
-            SlantCost = r.SlantCost, CrossingCost = r.CrossingCost, AlignBonus = r.AlignBonus, OcclusionCost = r.OcclusionCost, SlideCost = r.SlideCost
+            SlantCost = r.SlantCost, CrossingCost = r.CrossingCost, AlignBonus = r.AlignBonus, OcclusionCost = r.OcclusionCost, SlideCost = r.SlideCost, CrowdedReach = r.CrowdedReach
         };
 
         /// <summary>
@@ -667,7 +682,8 @@ namespace C3DProTools
                     else spots = LabelLayout.Spots(anchor, l.Shape, r, l.OutwardVec)
                         .Where(s => (l.InArea == null || l.InArea(s.Box)) &&
                             l.StaticObstacles.Blocker(s.Outline, r.Gap, l.Networks, l.Key) == null &&
-                            !l.StaticObstacles.LeaderCrossesText(anchor, s.End, l.Key)).ToList();
+                            !l.StaticObstacles.LeaderCrossesText(anchor, s.End, l.Key) &&
+                            l.StaticObstacles.LeaderCrossings(anchor, s.End, l.Key) == 0).ToList();
                     l.Candidates[key] = spots;
                 }
                 return spots;
@@ -697,7 +713,7 @@ namespace C3DProTools
         }
 
         /// <summary>Plans every label's place (each one's <see cref="PlanLabel.Spot"/>); returns whether most leaders go up.</summary>
-        public static bool Plan(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
+        private static bool FreePlan(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
         {
             if (labels.Count == 0) return rules.PreferUp;
             foreach (var label in labels) { label.Candidates.Clear(); label.StaticObstacles = baseObs; }
@@ -727,7 +743,7 @@ namespace C3DProTools
                         var r = Copy(rules, entry.Key.Up);
                         var edges = LabelLayout.StackSpots(obstacles, (entry.Key.X, entry.Key.Y), l.Shape, r, l.OutwardVec)
                             .Where(s => (l.InArea == null || l.InArea(s.Box)) && baseObs.Blocker(s.Outline, r.Gap, l.Networks, l.Key) == null &&
-                                !baseObs.LeaderCrossesText(s.Anchor, s.End, l.Key));
+                                !baseObs.LeaderCrossesText(s.Anchor, s.End, l.Key) && baseObs.LeaderCrossings(s.Anchor, s.End, l.Key) == 0);
                         l.Candidates[entry.Key] = entry.Value.Concat(edges).OrderBy(s => s.Cost).ToList();
                     }
                 }
@@ -815,6 +831,288 @@ namespace C3DProTools
 
             foreach (var l in labels) { l.Candidates.Clear(); l.StaticObstacles = null; }
             return labels.Count(l => l.PreferUp) * 2 >= labels.Count;
+        }
+
+        /// <summary>Structures, then straight-run patterns, then the existing free search for the remainder.</summary>
+        public static bool Plan(LabelObstacles baseObs, List<PlanLabel> labels, LayoutRules rules)
+        {
+            foreach (var l in labels) { l.Spot = null; l.Candidates.Clear(); l.StaticObstacles = null; l.PreferUp = rules.PreferUp; }
+            var o = baseObs.Clone();
+            // Reserve all points even for callers that have not already done so.
+            foreach (var l in labels) LabelLayout.ReserveAnchor(o, l.Anchor, l.Key);
+            List<List<PlanLabel>> clusters = Clusters(labels.Where(l => !l.IsStructure).ToList(), 12);
+            // A junction's own manhole label waits until its pipe labels are fanned out: placed first it takes the place beside
+            // the junction and hides the places behind it from every leader.
+            bool AtJunction(PlanLabel s) => clusters.Any(c => c.Any(l => Math.Abs(l.Anchor.X - s.Anchor.X) <= 12 && Math.Abs(l.Anchor.Y - s.Anchor.Y) <= 12));
+            void PlaceStructure(PlanLabel l, LayoutRules sr, LabelObstacles obs)
+            {
+                // The nearest clear place that does not sit on other labelled points' doorstep: a box within 15 mm of a point
+                // still waiting for its label costs, the more the nearer (it would wall that point in).
+                List<(double X, double Y)> waiting = labels.Where(x => x != l && !x.Spot.HasValue).Select(x => x.Anchor).ToList();
+                LabelSpot? best = null;
+                double bestCost = double.PositiveInfinity;
+                for (double radius = Math.Max(6, sr.MinLeader); radius <= sr.MaxDistance + 1e-9; radius += 2)
+                {
+                    if (radius > bestCost) break;
+                    for (int angle = 0; angle < 72; angle++)
+                    {
+                        double a = angle * Math.PI / 36;
+                        var spot = PatternSpot(obs, l, (l.Anchor.X + radius * Math.Cos(a), l.Anchor.Y + radius * Math.Sin(a)), sr);
+                        if (!spot.HasValue) continue;
+                        double cost = spot.Value.Cost + waiting.Sum(w => 40 * Math.Max(0, 1 - LabelLayout.Distance(spot.Value.Box, w) / 15));
+                        if (cost < bestCost) { best = spot; bestCost = cost; }
+                    }
+                }
+                l.Spot = best;
+                Claim(obs, l);
+            }
+            foreach (var l in labels.Where(l => l.IsStructure && !AtJunction(l))) PlaceStructure(l, rules, o);
+            // Where points crowd, leaders may be longer (see LayoutRules.CrowdedReach).
+            LayoutRules far = Copy(rules, rules.PreferUp);
+            far.MaxDistance = rules.Crowded;
+            far.CrowdedReach = rules.Crowded;
+            // Junctions first: several labelled points within a few mm are fanned out in columns beside the junction.
+            // Each junction both ways (its pipe labels fanned first, or its manhole label first): the way that places more is kept.
+            foreach (List<PlanLabel> cluster in clusters)
+            {
+                List<PlanLabel> own = labels.Where(s => s.IsStructure && !s.Spot.HasValue &&
+                    cluster.Any(l => Math.Abs(l.Anchor.X - s.Anchor.X) <= 12 && Math.Abs(l.Anchor.Y - s.Anchor.Y) <= 12)).ToList();
+                List<PlanLabel> members = cluster.Concat(own).ToList();
+                Dictionary<PlanLabel, LabelSpot?> kept = null;
+                double keptCost = 0;
+                foreach (bool fanFirst in new[] { true, false })
+                {
+                    LabelObstacles trial = o.Clone();
+                    foreach (PlanLabel m in members) m.Spot = null;
+                    if (fanFirst) { Fan(trial, cluster, far); foreach (PlanLabel s in own) PlaceStructure(s, far, trial); }
+                    else { foreach (PlanLabel s in own) PlaceStructure(s, far, trial); Fan(trial, cluster, far); }
+                    int count = members.Count(m => m.Spot.HasValue);
+                    double cost = members.Where(m => m.Spot.HasValue).Sum(m => m.Spot.Value.Cost);
+                    if (kept == null || count > kept.Values.Count(v => v.HasValue) || (count == kept.Values.Count(v => v.HasValue) && cost < keptCost))
+                    { kept = members.ToDictionary(m => m, m => m.Spot); keptCost = cost; }
+                }
+                foreach (PlanLabel m in members) { m.Spot = kept[m]; Claim(o, m); }
+            }
+            foreach (var run in Runs(labels.Where(l => !l.IsStructure && !l.Spot.HasValue).ToList()))
+            {
+                var ordered = run.Labels;
+                var u = run.Axis;
+                double Along((double X, double Y) p) => p.X * u.X + p.Y * u.Y;
+                double Extent(PlanLabel l)
+                {
+                    // Classify using the measured boxes at the two perpendicular leader angles.
+                    return new[] { 1, -1 }.Max(side =>
+                    {
+                        double dx = -u.Y * side, dy = u.X * side;
+                        var b = l.Shape.BoxFor(dx, dy, dx >= 0);
+                        return Math.Abs(u.X) * b.Width + Math.Abs(u.Y) * b.Height;
+                    });
+                }
+                bool sparse = Enumerable.Range(1, ordered.Count - 1).All(i =>
+                    Along(ordered[i].Anchor) - Along(ordered[i - 1].Anchor) >= Math.Max(Extent(ordered[i]), Extent(ordered[i - 1])) + rules.Gap);
+                if (sparse)
+                {
+                    for (int i = 0; i < ordered.Count; i++)
+                    {
+                        var l = ordered[i];
+                        foreach (int side in new[] { i % 2 == 0 ? 1 : -1, i % 2 == 0 ? -1 : 1 })
+                        {
+                            for (double d = Math.Max(8, rules.MinLeader); d <= rules.MaxDistance + 1e-9; d += 2)
+                            {
+                                l.Spot = PatternSpot(o, l, (l.Anchor.X - u.Y * side * d, l.Anchor.Y + u.X * side * d), rules);
+                                if (l.Spot.HasValue) break;
+                            }
+                            if (l.Spot.HasValue) break;
+                        }
+                        Claim(o, l);
+                    }
+                }
+                else
+                {
+                    // Prefer alternating banks on near-vertical runs. Try a single bank as well when
+                    // the alternating pattern cannot place the whole run.
+                    bool vertical = Math.Abs(u.X) <= 0.25;
+                    Dictionary<PlanLabel, LabelSpot> best = new();
+                    double bestLength = double.PositiveInfinity;
+                    bool bestAlternates = false;
+                    foreach (LayoutRules sr in new[] { rules, far })
+                    foreach (bool alternate in vertical ? new[] { true, false } : new[] { false })
+                    foreach (int side in new[] { 1, -1 })
+                    foreach (bool reverse in new[] { false, true })
+                        {
+                            if (best.Count == ordered.Count && (sr == far || (bestAlternates && !alternate))) continue;
+                            var trial = Staircase(o, reverse ? ordered.AsEnumerable().Reverse().ToList() : ordered,
+                                reverse ? (-u.X, -u.Y) : u, side, alternate, sr);
+                            double length = trial.Values.Sum(s => s.Cost);
+                            if (trial.Count > best.Count || (trial.Count == best.Count && length < bestLength))
+                            { best = trial; bestLength = length; bestAlternates = alternate; }
+                        }
+                    foreach (var l in ordered) { l.Spot = best.TryGetValue(l, out var spot) ? spot : null; Claim(o, l); }
+                }
+            }
+            var remaining = labels.Where(l => !l.Spot.HasValue).ToList();
+            if (remaining.Count > 0) FreePlan(o, remaining, rules);
+            // What is still without a place is tried once more with the longer leaders of crowded places.
+            var o2 = o.Clone();
+            foreach (var l in labels.Where(l => l.Spot.HasValue && remaining.Contains(l))) Claim(o2, l);
+            var left = remaining.Where(l => !l.Spot.HasValue).ToList();
+            if (left.Count > 0) FreePlan(o2, left, far);
+            // Bring long leaders in along their existing direction where the final layout allows it.
+            foreach (PlanLabel l in labels.Where(l => l.Spot.HasValue && !l.Spot.Value.Ratio.HasValue))
+            {
+                LabelSpot old = l.Spot.Value;
+                double dx = old.End.X - l.Anchor.X, dy = old.End.Y - l.Anchor.Y;
+                double length = Math.Sqrt(dx * dx + dy * dy);
+                if (length <= 30) continue;
+                var others = With(baseObs, labels.Where(x => x != l));
+                foreach (PlanLabel other in labels.Where(x => x != l)) LabelLayout.ReserveAnchor(others, other.Anchor, other.Key);
+                for (double candidate = length - 1; candidate >= Math.Max(rules.MinLeader, length - 5); candidate--)
+                {
+                    double scale = candidate / length;
+                    var shorter = PatternSpot(others, l, (l.Anchor.X + dx * scale, l.Anchor.Y + dy * scale), far);
+                    if (shorter.HasValue) l.Spot = shorter;
+                }
+            }
+            return labels.Count(l => l.PreferUp) * 2 >= labels.Count;
+        }
+
+        /// <summary>Groups of three or more labelled points chained closer than <paramref name="reach"/> (mm): a junction.</summary>
+        private static List<List<PlanLabel>> Clusters(List<PlanLabel> labels, double reach) =>
+            Groups(labels, reach).Where(g => g.Count >= 3 &&
+                g.Max(l => l.Anchor.X) - g.Min(l => l.Anchor.X) <= 2.5 * reach &&
+                g.Max(l => l.Anchor.Y) - g.Min(l => l.Anchor.Y) <= 2.5 * reach &&
+                !IsStraight(g)).ToList();
+
+        private static bool IsStraight(List<PlanLabel> labels)
+        {
+            var ends = (from a in labels from b in labels
+                        let dx = b.Anchor.X - a.Anchor.X
+                        let dy = b.Anchor.Y - a.Anchor.Y
+                        orderby dx * dx + dy * dy descending
+                        select (Start: a.Anchor, X: dx, Y: dy)).First();
+            double length = Math.Sqrt(ends.X * ends.X + ends.Y * ends.Y);
+            return length > 1e-6 && labels.All(l =>
+                Math.Abs((l.Anchor.X - ends.Start.X) * ends.Y - (l.Anchor.Y - ends.Start.Y) * ends.X) <= 1e-6 * length);
+        }
+
+        /// <summary>
+        /// A junction's labels fanned out: columns of boxes left and right of it, each label taking the nearest free place of its
+        /// column grid whose leader reaches it without crossing a label, text or leader already there. Labels alternate sides
+        /// (left points to the left, right points to the right), so the leaders spread instead of walling the junction in.
+        /// </summary>
+        private static void Fan(LabelObstacles o, List<PlanLabel> cluster, LayoutRules far)
+        {
+            double cx = cluster.Average(l => l.Anchor.X), cy = cluster.Average(l => l.Anchor.Y);
+            List<PlanLabel> order = cluster.OrderBy(l => l.Anchor.X).ThenBy(l => l.Anchor.Y).ThenBy(l => l.Key, StringComparer.Ordinal).ToList();
+            double w = cluster.Max(l => l.Shape.BoxFor(1, 0, true).Width), h = cluster.Max(l => l.Shape.BoxFor(1, 0, true).Height);
+            for (int i = 0; i < order.Count; i++)
+            {
+                PlanLabel l = order[i];
+                // The left half of the points goes left first, the right half right first.
+                int first = i < (order.Count + 1) / 2 ? -1 : 1;
+                LabelSpot? best = null;
+                foreach (int side in new[] { first, -first })
+                {
+                    for (int col = 0; col < 3 && !best.HasValue; col++)
+                    {
+                        double x = cx + side * (20 + col * (w + far.Gap + 2));
+                        foreach (int k in Enumerable.Range(0, 2 * (int)Math.Ceiling(far.MaxDistance / (h + far.Gap)) + 1).Select(n => n % 2 == 0 ? -n / 2 : (n + 1) / 2))
+                        {
+                            LabelSpot? s = PatternSpot(o, l, (x, cy + k * (h + far.Gap)), far);
+                            if (s.HasValue && (!best.HasValue || s.Value.Cost < best.Value.Cost)) best = s;
+                        }
+                    }
+                    if (best.HasValue) break;
+                }
+                l.Spot = best;
+                Claim(o, l);
+            }
+        }
+
+        // All pattern boxes are upright. In particular, do not use HullFor to shrink a sampled box.
+        private static LabelSpot? PatternSpot(LabelObstacles o, PlanLabel l, (double X, double Y) end, LayoutRules r)
+        {
+            double dx = end.X - l.Anchor.X, dy = end.Y - l.Anchor.Y;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+            if (length < Math.Max(1e-9, r.MinLeader) || length > r.MaxDistance + 1e-9 ||
+                o.LeaderCrossesText(l.Anchor, end, l.Key) || o.LeaderCrossings(l.Anchor, end, l.Key) > 0) return null;
+            foreach (bool right in dx > 1e-9 ? new[] { true } : dx < -1e-9 ? new[] { false } : new[] { true, false })
+            {
+                var box = l.Shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
+                if (box.Contains(l.Anchor) || (l.InArea != null && !l.InArea(box)) || o.Blocker(box, r.Gap, l.Networks, l.Key) != null) continue;
+                return new LabelSpot { Box = box, End = end, Anchor = l.Anchor, Cost = length, Direction = Math.Abs(dx) < 1e-9 ? (dy > 0 ? 0 : 1) : Math.Abs(dy) < 1e-9 ? 2 : 3 };
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// A crowded run stepped out on one side of its line, as it is done by hand: the labels in the order of their points, each
+        /// at the nearest clear place whose box lies beside or behind its own point (never ahead, where the next points' leaders
+        /// must pass), so each next box lands a step further out and no leader crosses another.
+        /// </summary>
+        private static Dictionary<PlanLabel, LabelSpot> Staircase(LabelObstacles obstacles, List<PlanLabel> labels,
+            (double X, double Y) u, int side, bool alternate, LayoutRules r)
+        {
+            var o = obstacles.Clone();
+            var result = new Dictionary<PlanLabel, LabelSpot>();
+            for (int i = 0; i < labels.Count; i++)
+            {
+                PlanLabel l = labels[i];
+                int bank = alternate && i % 2 != 0 ? -side : side;
+                var n = (X: -u.Y * bank, Y: u.X * bank);
+                LabelSpot? best = null;
+                for (double d = Math.Max(4, r.MinLeader); d <= r.MaxDistance + 1e-9; d += 2)
+                {
+                    // Once a place is found, deeper rows cannot be nearer than it.
+                    if (best.HasValue && d > best.Value.Cost) break;
+                    for (double shift = 4; shift >= -r.MaxDistance - 1e-9; shift -= 2)
+                    {
+                        var end = (l.Anchor.X + u.X * shift + n.X * d, l.Anchor.Y + u.Y * shift + n.Y * d);
+                        var spot = PatternSpot(o, l, end, r);
+                        if (!spot.HasValue) continue;
+                        // The whole box behind its own point: nothing of it under the points still to come.
+                        double ahead = spot.Value.Box.Corners().Max(c => (c.X - l.Anchor.X) * u.X + (c.Y - l.Anchor.Y) * u.Y);
+                        if (!alternate && ahead > 1.0) continue;
+                        if (!best.HasValue || spot.Value.Cost < best.Value.Cost - 1e-9) best = spot;
+                    }
+                }
+                if (!best.HasValue) continue;
+                result[l] = best.Value;
+                LabelLayout.Claim(o, best.Value, l.Anchor, l.Key);
+            }
+            return result;
+        }
+        /// <summary>Largest straight neighbour sets first, fitted to a common line within 3 paper mm.</summary>
+        private static List<(List<PlanLabel> Labels, (double X, double Y) Axis)> Runs(List<PlanLabel> pending)
+        {
+            var runs = new List<(List<PlanLabel>, (double X, double Y))>();
+            while (pending.Count >= 2)
+            {
+                List<PlanLabel> best = null;
+                (double X, double Y) axis = (1, 0);
+                for (int i = 0; i < pending.Count; i++)
+                    for (int j = i + 1; j < pending.Count; j++)
+                    {
+                        double dx = pending[j].Anchor.X - pending[i].Anchor.X, dy = pending[j].Anchor.Y - pending[i].Anchor.Y;
+                        double len = Math.Sqrt(dx * dx + dy * dy);
+                        if (len < 1e-6) continue;
+                        var candidates = pending.Where(l => Math.Abs((l.Anchor.X - pending[i].Anchor.X) * dy - (l.Anchor.Y - pending[i].Anchor.Y) * dx) / len <= 3).ToList();
+                        if (best == null || candidates.Count > best.Count) { best = candidates; axis = (dx / len, dy / len); }
+                    }
+                if (best == null) break;
+                double mx = best.Average(l => l.Anchor.X), my = best.Average(l => l.Anchor.Y);
+                double xx = best.Sum(l => Math.Pow(l.Anchor.X - mx, 2)), yy = best.Sum(l => Math.Pow(l.Anchor.Y - my, 2));
+                double xy = best.Sum(l => (l.Anchor.X - mx) * (l.Anchor.Y - my));
+                double angle = Math.Atan2(2 * xy, xx - yy) / 2;
+                axis = (Math.Cos(angle), Math.Sin(angle));
+                if (axis.X < -1e-9 || (Math.Abs(axis.X) <= 1e-9 && axis.Y < 0)) axis = (-axis.X, -axis.Y);
+                var u = axis;
+                best = best.Where(l => Math.Abs((l.Anchor.Y - my) * u.X - (l.Anchor.X - mx) * u.Y) <= 3 + 1e-9).ToList();
+                if (best.Count < 2) break;
+                runs.Add((best.OrderBy(l => l.Anchor.X * u.X + l.Anchor.Y * u.Y).ThenBy(l => l.Key, StringComparer.Ordinal).ToList(), u));
+                pending = pending.Except(best).ToList();
+            }
+            return runs;
         }
 
         private static void RepairCrossingPairs(List<PlanLabel> labels, LayoutRules rules)
@@ -1071,7 +1369,8 @@ namespace C3DProTools
         {
             (double X, double Y) start = from.Ratio.HasValue ? from.Anchor : l.Anchor;
             double dx = end.X - start.X, dy = end.Y - start.Y, length = Math.Sqrt(dx * dx + dy * dy);
-            if (length > rules.MaxDistance + 1e-9 || length < 1e-9 || o.LeaderCrossesText(start, end, l.Key)) yield break;
+            if (length > rules.MaxDistance + 1e-9 || length < Math.Max(rules.MinLeader, 1e-9) || o.LeaderCrossesText(start, end, l.Key) ||
+                o.LeaderCrossings(start, end, l.Key) > 0) yield break;
             foreach (bool right in dx > 1e-9 ? new[] { true } : dx < -1e-9 ? new[] { false } : new[] { true, false })
             {
                 LRect box = l.Shape.BoxFor(dx, dy, right).Offset(end.X, end.Y);
