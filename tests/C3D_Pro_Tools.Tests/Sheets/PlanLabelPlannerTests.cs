@@ -177,6 +177,44 @@ namespace C3DProTools.Tests.Sheets
         }
 
         [Fact]
+        public void HandPlacedLabelOfTheSameStyle_CoversTheRuleLabel()
+        {
+            // MH-1 (31) already has an "MH Name" label placed by hand on SW-A; MH-2 (32) has one of another style.
+            LabelSnapshot same = new LabelSnapshot(DrawingObjectRef.Of("A07"), DrawingObjectRef.Of("31"), "SW-A", null, Placed);
+            LabelSnapshot other = new LabelSnapshot(DrawingObjectRef.Of("A09"), DrawingObjectRef.Of("32"), "SW-B", null, Placed with { StyleName = "MH Data" });
+            SheetScene scene = Scene(new[] { same, other });
+            PlanLabelsPlan plan = PlanLabelPlanner.Plan(scene, Rules(Manholes("MH Name")), new[] { "SW-A", "SW-B" });
+            List<PlannedChange> kept = HandLabels.Without(scene, All(plan), null, out int skipped);
+            Assert.Equal(1, skipped);
+            PlannedChange add = Assert.Single(kept);
+            Assert.Equal("32", add.Part?.Handle);
+        }
+
+        [Fact]
+        public void HandLabelOffEverySheet_DoesNotCoverAPlanLabel()
+        {
+            LabelSnapshot off = new LabelSnapshot(DrawingObjectRef.Of("A07"), DrawingObjectRef.Of("31"), "", null, Placed);
+            SheetScene scene = Scene(new[] { off });
+            PlanLabelsPlan plan = PlanLabelPlanner.Plan(scene, Rules(Manholes("MH Name")), new[] { "SW-A" });
+            HandLabels.Without(scene, All(plan), null, out int skipped);
+            Assert.Equal(0, skipped);
+        }
+
+        [Fact]
+        public void ProfileHandLabel_CoversOnlyItsOwnView()
+        {
+            // Pipe 21 shows in views B1 and B2 on one sheet; the hand label is in B1.
+            LabelSnapshot inV1 = new LabelSnapshot(DrawingObjectRef.Of("A07"), DrawingObjectRef.Of("21"), "SW-P", null, Placed with { StyleName = "Name" });
+            SheetScene scene = Scene(new[] { inV1 });
+            var viewOf = new Dictionary<string, string> { ["A07"] = "B1" };
+            PlannedChange In(string view) => new PlannedChange("", BuildStep.ProfileLabels, ChangeKind.Add, ChangeTarget.Label, "SW-P", "ict.profile.pipe",
+                ProfileLabelPlanner.SourceKey(DrawingObjectRef.Of("21"), DrawingObjectRef.Of(view)), null, "") { Part = DrawingObjectRef.Of("21"), StyleSlot = "Name" };
+            List<PlannedChange> kept = HandLabels.Without(scene, new[] { In("B1"), In("B2") }, viewOf, out int skipped);
+            Assert.Equal(1, skipped);
+            Assert.EndsWith(":view:B2", Assert.Single(kept).SourceKey);
+        }
+
+        [Fact]
         public void CopiedTags_KeepTheLowestHandle_AndWarnForTheRest()
         {
             LabelSnapshot[] labels =
