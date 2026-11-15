@@ -171,16 +171,18 @@ namespace C3DProTools
 
         private void SaveMapping()
         {
+            _grid.EndEdit();
             using (SaveFileDialog sfd = new SaveFileDialog { Filter = "Style mapping (*.json)|*.json", Title = "Save style mapping", FileName = Path.GetFileName(MappingPath.Length > 0 ? MappingPath : "StyleMapping.json") })
             {
                 if (sfd.ShowDialog(this) != DialogResult.OK) return;
                 // Keep lines from other drawings that this one does not have, so one file can grow into the company map.
                 List<StyleMapEntry> merged = File.Exists(sfd.FileName) ? SafeLoad(sfd.FileName) : new List<StyleMapEntry>();
-                foreach (StyleMapEntry e in CurrentEntries())
+                foreach (DataGridViewRow row in _grid.Rows)
                 {
-                    merged.RemoveAll(x => x.Collection == e.Collection && string.Equals(x.From, e.From, StringComparison.OrdinalIgnoreCase));
-                    merged.Add(e);
+                    StyleItem source = (StyleItem)row.Tag;
+                    merged.RemoveAll(x => x.Collection == source.CollectionKey && string.Equals(x.From, source.Name, StringComparison.OrdinalIgnoreCase));
                 }
+                merged.AddRange(CurrentEntries());
                 try { StyleOperations.SaveMapping(sfd.FileName, merged); MappingPath = sfd.FileName; }
                 catch (IOException ex) { MessageBox.Show(this, ex.Message, "Save mapping", MessageBoxButtons.OK, MessageBoxIcon.Error); }
             }
