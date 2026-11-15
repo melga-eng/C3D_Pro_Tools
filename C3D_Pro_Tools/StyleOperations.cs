@@ -120,7 +120,7 @@ namespace C3DProTools
                 ObjectId space = Db.CurrentSpaceId;
                 foreach (ObjectId id in ids)
                 {
-                    if (!(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
+                    if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
                     if (ent.OwnerId != space) { other++; continue; }
                     try
                     {
@@ -143,11 +143,13 @@ namespace C3DProTools
             int other = 0;
             using (Transaction tr = Db.TransactionManager.StartOpenCloseTransaction())
             {
-                foreach (ObjectId id in items.SelectMany(i => i.EntityUsers).Distinct())
+                // Objects drawn with the style, and drawing objects that use it otherwise (a point's label style, say).
+                foreach (ObjectId id in items.SelectMany(i => i.EntityUsers.Concat(i.OtherReferrers)).Distinct())
                 {
                     try
                     {
-                        if (tr.GetObject(id, OpenMode.ForRead).OwnerId == space) here.Add(id); else other++;
+                        if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
+                        if (ent.OwnerId == space) here.Add(id); else other++;
                     }
                     catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
@@ -355,16 +357,20 @@ namespace C3DProTools
                         }
                         catch (Exception ex) { result.Failed++; result.Log.Add($"{p.OldValue}: {ex.Message}"); }
                     }
-                    foreach (PlannedRename p in parked)
-                    {
-                        DBObject obj = tr.GetObject(p.Item.Id, OpenMode.ForWrite);
-                        try { StyleCatalog.SetName(tr, obj, p.NewValue); result.Changed++; }
-                        catch (Exception ex)
+                    if (result.Failed == 0)
+                        foreach (PlannedRename p in parked)
                         {
-                            result.Failed++;
-                            result.Log.Add($"{p.OldValue} → {p.NewValue}: {ex.Message}");
-                            try { StyleCatalog.SetName(tr, obj, p.OldValue); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                            try { StyleCatalog.SetName(tr, tr.GetObject(p.Item.Id, OpenMode.ForWrite), p.NewValue); result.Changed++; }
+                            catch (Exception ex) { result.Failed++; result.Log.Add($"{p.OldValue} → {p.NewValue}: {ex.Message}"); }
                         }
+                    // All or nothing: one failed name undoes every rename, so no style is ever left with a temporary name.
+                    if (result.Failed > 0)
+                    {
+                        tr.Abort();
+                        result.Log.Insert(0, $"No style was renamed: {result.Failed} rename(s) failed.");
+                        result.Skipped += result.Changed;
+                        result.Changed = 0;
+                        return result;
                     }
                 }
                 tr.Commit();
@@ -450,7 +456,11 @@ namespace C3DProTools
                         StyleItem src = pair.Key, dst = pair.Value;
                         foreach (ObjectId entId in src.EntityUsers)
                         {
-                            DBObject obj = tr.GetObject(entId, OpenMode.ForWrite, false, true);
+                            if (entId.IsErased) continue;
+                            DBObject obj = tr.GetObject(entId, OpenMode.ForRead, false, true);
+                            // The list was read when the window scanned; an object moved to another style since then stays as it is.
+                            if (StyleEntityHelper.GetStyleId(obj) != src.Id) continue;
+                            obj.UpgradeOpen();
                             if (StyleEntityHelper.TrySetStyleId(obj, dst.Id)) moved++;
                         }
                         foreach (ObjectId refId in src.OtherReferrers)
@@ -489,6 +499,17 @@ namespace C3DProTools
             if (obj is DimStyleTableRecord dim && dim.Dimtxsty == from) { dim.Dimtxsty = to; changed = true; }
             if (obj is MLeaderStyle ml && ml.TextStyleId == from) { ml.TextStyleId = to; changed = true; }
             if (obj is Entity && StyleEntityHelper.GetStyleId(obj) == from && StyleEntityHelper.TrySetStyleId(obj, to)) changed = true;
+            // A Civil 3D label style names its text style (Properties.Label.TextStyle), it does not point at it.
+            if (obj is Autodesk.Civil.DatabaseServices.Styles.LabelStyle ls && from.GetObject(OpenMode.ForRead) is TextStyleTableRecord fromText
+                && to.GetObject(OpenMode.ForRead) is TextStyleTableRecord toText)
+            {
+                try
+                {
+                    var ts = ls.Properties.Label.TextStyle;
+                    if (string.Equals(ts.Value, fromText.Name, StringComparison.OrdinalIgnoreCase)) { ts.Value = toText.Name; changed = true; }
+                }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            }
 
             foreach (PropertyInfo p in obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
@@ -536,12 +557,17 @@ namespace C3DProTools
                     string baseKey = item.CollectionKey + "|" + m.Groups["b"].Value.Trim().ToUpperInvariant();
                     if (byKey.TryGetValue(baseKey, out StyleItem original) && CanMerge(item, original))
                     {
-                        // Follow chains ("X (1) (1)") back to the first original.
-                        while (original.DuplicateOf != null) original = original.DuplicateOf;
                         item.DuplicateOf = original;
                         break;
                     }
                 }
+            }
+            // Then every chain ("Copy of Copy of X") is followed to its first original, whatever order the list had, so all
+            // copies merge straight into the style that stays.
+            foreach (StyleItem item in items)
+            {
+                int steps = 0;
+                while (item.DuplicateOf?.DuplicateOf != null && item.DuplicateOf.DuplicateOf != item && steps++ < 50) item.DuplicateOf = item.DuplicateOf.DuplicateOf;
             }
         }
 
@@ -616,10 +642,14 @@ namespace C3DProTools
             DuplicateRecordCloning cloning = mode == ConflictMode.Overwrite ? DuplicateRecordCloning.Replace
                 : mode == ConflictMode.Rename ? DuplicateRecordCloning.MangleName : DuplicateRecordCloning.Ignore;
 
+            // With "skip existing", a style the destination already has is skipped, not counted as imported.
+            bool skipExisting = mode != ConflictMode.Overwrite && mode != ConflictMode.Rename;
+            HashSet<string> existing = skipExisting ? new HashSet<string>(StyleSession.ItemsOf(dest).Select(i => i.Key)) : new HashSet<string>();
             Dictionary<string, ObjectIdCollection> acad = new Dictionary<string, ObjectIdCollection>();
             foreach (StyleItem item in styles)
             {
                 if (item.IsChild) { result.Skipped++; continue; }
+                if (skipExisting && existing.Contains(item.Key)) { result.Skipped++; continue; }
                 if (item.IsCivil)
                 {
                     try
@@ -642,8 +672,13 @@ namespace C3DProTools
                 if (owner.IsNull) { result.Skipped += group.Value.Count; continue; }
                 try
                 {
-                    source.WblockCloneObjects(group.Value, owner, new IdMapping(), cloning, false);
-                    result.Changed += group.Value.Count;
+                    IdMapping map = new IdMapping();
+                    source.WblockCloneObjects(group.Value, owner, map, cloning, false);
+                    // Only the styles really copied count; the rest the destination kept as they were.
+                    int copied = 0;
+                    foreach (IdPair p in map) if (p.IsPrimary && p.IsCloned) copied++;
+                    result.Changed += copied;
+                    result.Skipped += group.Value.Count - copied;
                 }
                 catch (Exception ex) { result.Failed += group.Value.Count; result.Log.Add($"{group.Key}: {ex.Message}"); }
             }

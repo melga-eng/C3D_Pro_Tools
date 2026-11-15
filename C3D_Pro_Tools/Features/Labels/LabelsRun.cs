@@ -183,8 +183,8 @@ namespace C3DProTools.Features.Labels
             Sheets.Contracts.LabelRuleSet rules = project.RuleSet(string.IsNullOrWhiteSpace(s.RuleSet) ? null : s.RuleSet);
             if (rules == null)
             {
-                log.AppendLine(project.LabelRules.Count == 0 ? "Add: no label rules (labelRules in the settings file); skipped."
-                    : $"Add: set labels.ruleSet to one of {string.Join(", ", project.LabelRules.Select(r => $"\"{r?.Name}\""))}; skipped.");
+                log.AppendLine(project.LabelRules.Count == 0 ? "Add: no label rules are saved for this drawing; no labels were added."
+                    : $"Add: several label rule sets, none chosen ({string.Join(", ", project.LabelRules.Select(r => $"\"{r?.Name}\""))}); no labels were added.");
                 return;
             }
             var ruleIssues = Sheets.Contracts.LabelRuleValidation.Validate(rules);

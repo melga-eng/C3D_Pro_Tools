@@ -260,7 +260,7 @@ namespace C3DProTools
             g.CellValuePushed += Grid_CellValuePushed;
             g.CellPainting += Grid_CellPainting;
             g.CellFormatting += Grid_CellFormatting;
-            g.CellBeginEdit += (s, e) => { StyleItem i = ItemAt(e.RowIndex); if (i == null || IsMissing(i) || (e.ColumnIndex == ColName && _busy)) e.Cancel = true; };
+            g.CellBeginEdit += (s, e) => { StyleItem i = ItemAt(e.RowIndex); if (i == null || (IsMissing(i) && e.ColumnIndex != ColCheck) || (e.ColumnIndex == ColName && _busy)) e.Cancel = true; };
             g.CurrentCellDirtyStateChanged += (s, e) => { if (g.CurrentCell?.ColumnIndex == ColCheck) g.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             g.ColumnHeaderMouseClick += Grid_HeaderClick;
             g.SelectionChanged += (s, e) => { _detailsTimer.Stop(); _detailsTimer.Start(); };
@@ -280,7 +280,7 @@ namespace C3DProTools
             _gridMenu.Items.Add("Rename  (F2)", null, (s, e) => { if (g.CurrentRow != null) { g.CurrentCell = g.CurrentRow.Cells[ColName]; g.BeginEdit(true); } });
             _gridMenu.Items.Add("Copy name", null, (s, e) => CopyNames());
             _gridMenu.Items.Add("Zoom to objects using it", null, (s, e) => ZoomToUsers(CurrentItem()));
-            _gridMenu.Items.Add("Select objects using it", null, (s, e) => SelectUsers(SelectedItems()));
+            _gridMenu.Items.Add("Select objects using it (ticked styles, else these rows)", null, (s, e) => SelectUsers(TickedOrSelected()));
             _gridMenu.Items.Add(new ToolStripSeparator());
             _gridMenu.Items.Add("Merge ticked styles into this one…", null, (s, e) => MergeCheckedInto(CurrentItem()));
             _gridMenu.Items.Add("Show this category", null, (s, e) => { StyleItem i = CurrentItem(); if (i != null) SelectCategory(i.TreePath); });
@@ -391,7 +391,10 @@ namespace C3DProTools
             _cardDuplicates.Body.Controls.Add(StyleUi.Primary("Review and merge duplicates…", (s, e) => MergeDuplicates()));
             _cardDuplicates.Body.Controls.Add(StyleUi.Secondary("Show duplicates", (s, e) => SelectChip("Duplicate")));
 
-            _cardChecked = new StyleCard("Ticked styles", "Tick styles in the list to merge or delete them.");
+            _cardChecked = new StyleCard("Ticked styles", "Tick styles in the list to select the objects using them, merge or delete them.");
+            _cardChecked.Body.Controls.Add(StyleUi.Row(
+                StyleUi.Secondary("Select in drawing", (s, e) => { List<StyleItem> t = CheckedItems(); if (t.Count == 0) SetStatus("Tick styles first.", true); else SelectUsers(t); }),
+                StyleUi.Secondary("Zoom to", (s, e) => { List<StyleItem> t = CheckedItems(); if (t.Count == 0) SetStatus("Tick styles first.", true); else ZoomToIds(t.SelectMany(i => i.EntityUsers.Concat(i.OtherReferrers))); })));
             _cardChecked.Body.Controls.Add(StyleUi.Row(StyleUi.Caption("Merge into:"), _cbMergeTarget));
             _cardChecked.Body.Controls.Add(StyleUi.Row(
                 StyleUi.Primary("Merge ticked…", (s, e) => MergeChecked()),
@@ -792,19 +795,15 @@ namespace C3DProTools
                     : chip.Kind == "Checked" ? scoped.Count(i => _checked.Contains(i.Id)) + scopedMissing.Count(i => _checked.Contains(i.Id))
                     : scoped.Count(i => MatchesChip(i, chip.Kind));
 
+            // The highlighted styles, read from the list as it is before it changes.
+            ObjectId current = CurrentItem()?.Id ?? ObjectId.Null;
+            HashSet<ObjectId> selected = new HashSet<ObjectId>(SelectedItems().Select(i => i.Id));
             _view = _chip == "Missing" ? scopedMissing : scoped.Where(i => MatchesChip(i, _chip)).ToList();
             SortView();
 
-            ObjectId current = CurrentItem()?.Id ?? ObjectId.Null;
             _grid.RowCount = 0;
             _grid.RowCount = _view.Count;
-            int index = _view.FindIndex(i => i.Id == current);
-            if (index >= 0)
-            {
-                _grid.ClearSelection();
-                _grid.CurrentCell = _grid.Rows[index].Cells[ColName];
-                _grid.Rows[index].Selected = true;
-            }
+            RestoreSelection(current, selected);
             UpdateRenamePreview();
             ShowDetails(CurrentItem());
             if (_session != null && _view.Count == 0 && items.Count > 0) SetStatus("No styles match the current filter.");
@@ -921,7 +920,7 @@ namespace C3DProTools
         private IEnumerable<string> Pills(StyleItem i)
         {
             if (IsMissing(i)) { yield return "Missing"; yield break; }
-            yield return i.Protected ? "Protected" : i.Usage == StyleUsage.Used ? "Used" : i.Usage == StyleUsage.Unused ? "Unused" : "Hidden ref";
+            yield return i.Protected ? "Protected" : i.Usage == StyleUsage.Used ? "Used" : i.Usage == StyleUsage.Unused ? (i.Purgeable ? "Unused" : "Unused, Purge keeps it") : "Hidden ref";
             if (i.DuplicateOf != null) yield return "Duplicate";
             if (i.Standard == StandardState.NonStandard) yield return "Non-standard";
         }
@@ -935,10 +934,24 @@ namespace C3DProTools
                 SetChecked(_view, !all);
                 return;
             }
+            ObjectId current = CurrentItem()?.Id ?? ObjectId.Null;
+            HashSet<ObjectId> selected = new HashSet<ObjectId>(SelectedItems().Select(i => i.Id));
             if (_sortColumn == e.ColumnIndex) _sortAscending = !_sortAscending;
             else { _sortColumn = e.ColumnIndex; _sortAscending = e.ColumnIndex != ColUses; }
             SortView();
             _grid.Invalidate();
+            // The rows move; the highlight follows the styles, not the row numbers.
+            RestoreSelection(current, selected);
+            ShowDetails(CurrentItem());
+        }
+
+        /// <summary>Highlights the given styles again, wherever they are in the list now.</summary>
+        private void RestoreSelection(ObjectId current, HashSet<ObjectId> selected)
+        {
+            _grid.ClearSelection();
+            int index = _view.FindIndex(i => i.Id == current);
+            if (index >= 0) _grid.CurrentCell = _grid.Rows[index].Cells[ColName];
+            for (int k = 0; k < _view.Count; k++) if (selected.Contains(_view[k].Id)) _grid.Rows[k].Selected = true;
         }
 
         private void Grid_KeyDown(object sender, KeyEventArgs e)
@@ -1027,7 +1040,7 @@ namespace C3DProTools
             StringBuilder sb = new StringBuilder();
             if (i.Protected) sb.Append(i.ProtectedReason).Append(". It is never deleted. ");
             else if (i.Usage == StyleUsage.Used) sb.Append($"Used by {StyleOperations.Describe(i)}. ");
-            else if (i.Usage == StyleUsage.Unused) sb.Append("Nothing uses this style, so it can be purged. ");
+            else if (i.Usage == StyleUsage.Unused) sb.Append(i.Purgeable ? "Nothing uses this style, so it can be purged. " : "Nothing found using this style, but AutoCAD Purge will not delete it, so it is kept. ");
             else sb.Append("No reference was found, but AutoCAD still refuses to purge it (usually a default in Feature or Command settings). It is never deleted. ");
             if (i.DuplicateOf != null) sb.Append($"Looks like a copy of \"{i.DuplicateOf.Name}\"; merging moves its objects there. ");
             if (i.Standard == StandardState.NonStandard) sb.Append("Not part of the template. ");
@@ -1061,8 +1074,8 @@ namespace C3DProTools
         private void ZoomToUsers(StyleItem item)
         {
             if (item == null) return;
-            if (item.EntityUsers.Count == 0) { SetStatus("No objects use this style directly.", true); return; }
-            ZoomToIds(item.EntityUsers);
+            if (item.EntityUsers.Count + item.OtherReferrers.Count == 0) { SetStatus("No objects use this style.", true); return; }
+            ZoomToIds(item.EntityUsers.Concat(item.OtherReferrers));
         }
 
         private void ZoomToIds(IEnumerable<ObjectId> ids)
@@ -1083,12 +1096,18 @@ namespace C3DProTools
         {
             if (items.Count == 0 || !CanUseView() || _session == null) return;
             (List<ObjectId> here, int other) = _session.UsersInCurrentSpace(items);
-            try
-            {
-                using (_doc.LockDocument()) _doc.Editor.SetImpliedSelection(here.ToArray());
-                SetStatus($"Selected {here.Count} object(s) in the current space" + (other > 0 ? $"; {other} more are in other layouts or blocks." : "."));
-            }
-            catch (Exception ex) { SetStatus("Selection failed: " + ex.Message, true); }
+            if (here.Count == 0) { SetStatus($"No object using {(items.Count == 1 ? "this style" : "these styles")} is in the current space" + (other > 0 ? $" ({other} in other layouts or blocks)." : "."), true); return; }
+            // A selection set from this modeless window is ignored by Civil 3D; a command makes it, so it shows with grips.
+            StyleManagerCommand.PendingSelection = here.ToArray();
+            _doc.SendStringToExecute("C3DPROSELECTSTYLEUSERS ", true, false, false);
+            SetStatus($"Selected {here.Count} object(s) in the current space" + (other > 0 ? $"; {other} more are in other layouts or blocks." : "."));
+        }
+
+        /// <summary>The ticked styles when any are ticked, else the highlighted rows.</summary>
+        private List<StyleItem> TickedOrSelected()
+        {
+            List<StyleItem> ticked = CheckedItems();
+            return ticked.Count > 0 ? ticked : SelectedItems();
         }
 
         // =====================================================================================
@@ -1206,10 +1225,10 @@ namespace C3DProTools
                 new[] { "Style", "Category", "Status" },
                 items.Select(i =>
                 {
-                    bool ok = i.Usage == StyleUsage.Unused && !i.Protected;
+                    bool ok = i.Usage == StyleUsage.Unused && !i.Protected && i.Purgeable;
                     return new PreviewRow
                     {
-                        Cells = new[] { i.Name, i.FullCategory, i.Protected ? i.ProtectedReason : ok ? "Unused" : "In use: " + StyleOperations.Describe(i) },
+                        Cells = new[] { i.Name, i.FullCategory, i.Protected ? i.ProtectedReason : ok ? "Unused" : i.Usage == StyleUsage.Unused ? "Purge will not delete it (kept)" : "In use: " + StyleOperations.Describe(i) },
                         Enabled = ok, Tag = i
                     };
                 }).ToList(),

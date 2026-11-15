@@ -20,5 +20,19 @@ namespace C3DProTools
                 AcadCoreApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage($"\nStyle Manager error: {ex.Message}");
             }
         }
+
+        /// <summary>The objects the Style Manager asked to select; taken by <see cref="SelectStyleUsers"/>.</summary>
+        internal static Autodesk.AutoCAD.DatabaseServices.ObjectId[] PendingSelection;
+
+        /// <summary>Selects the objects the Style Manager handed over (a selection made inside a command shows with grips).</summary>
+        [CommandMethod("C3DPROSELECTSTYLEUSERS", CommandFlags.Redraw | CommandFlags.NoHistory)]
+        public void SelectStyleUsers()
+        {
+            var ids = PendingSelection;
+            PendingSelection = null;
+            var ed = AcadCoreApp.DocumentManager.MdiActiveDocument?.Editor;
+            if (ed == null || ids == null || ids.Length == 0) return;
+            ed.SetImpliedSelection(ids);
+        }
     }
 }
