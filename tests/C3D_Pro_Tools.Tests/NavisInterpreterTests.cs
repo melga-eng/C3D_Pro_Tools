@@ -117,5 +117,61 @@ namespace C3DProTools.Tests
             e.Props.Add(Civil("Inner Diameter or Width", text));
             Assert.Equal(metres, NavisInterpreter.Read(e).InnerWidth, 6);
         }
+
+        // ---------------- Curved pipes ----------------
+
+        [Fact]
+        public void Arc_QuarterCircle_TurnsTheShortWay()
+        {
+            // Centre (0,0), radius 10: from east (10,0) to north (0,10) is a quarter turn counter-clockwise.
+            Assert.True(NavisInterpreter.Arc(new V3(10, 0, 100), new V3(0, 10, 99), 0, 0, 10, out V3 mid, out bool cw, out _));
+            Assert.False(cw);
+            Assert.Equal(10 / System.Math.Sqrt(2), mid.X, 6);
+            Assert.Equal(10 / System.Math.Sqrt(2), mid.Y, 6);
+            Assert.Equal(99.5, mid.Z, 6);
+            // The other way round turns clockwise through the same middle.
+            Assert.True(NavisInterpreter.Arc(new V3(0, 10, 99), new V3(10, 0, 100), 0, 0, 10, out V3 back, out bool cw2, out _));
+            Assert.True(cw2);
+            Assert.Equal(mid.X, back.X, 6);
+        }
+
+        [Fact]
+        public void Arc_EndsOffTheRadius_OrHalfCircle_AreRefused()
+        {
+            Assert.False(NavisInterpreter.Arc(new V3(10, 0, 0), new V3(0, 12, 0), 0, 0, 10, out _, out _, out string off));
+            Assert.Contains("from the radius point", off);
+            Assert.False(NavisInterpreter.Arc(new V3(10, 0, 0), new V3(-10, 0, 0), 0, 0, 10, out _, out _, out string half));
+            Assert.Contains("half circle", half);
+        }
+
+        [Fact]
+        public void CivilPipe_WithRadiusAndRadiusPoint_IsReadCurved()
+        {
+            V3 a = new V3(510, 200, 100), b = new V3(500, 210, 99.8);
+            NavisElement e = CivilPipe(a, b, 0.3, 0.05, Meshes.Cylinder(a, b, 0.2));
+            e.Props.Add(Civil("Pipe Radius", "10.000m"));
+            e.Props.Add(Civil("Radius Point Easting", "", 500));
+            e.Props.Add(Civil("Radius Point Northing", "", 200));
+            ImportCandidate c = NavisInterpreter.Read(e);
+            Assert.True(c.IsCurved);
+            Assert.Equal(10, c.CurveRadius, 6);
+            Assert.False(c.CurveClockwise);
+            Assert.Contains(c.Notes, n => n.Contains("Curved pipe"));
+        }
+
+        [Fact]
+        public void CivilPipe_WithBareRadius_ReadsMetres_AndZeroRadiusIsStraight()
+        {
+            V3 a = new V3(550, 200, 100), b = new V3(500, 250, 99);
+            NavisElement e = CivilPipe(a, b, 0.3, 0.05, Meshes.Cylinder(a, b, 0.2));
+            e.Props.Add(Civil("Pipe Radius", "50"));
+            e.Props.Add(Civil("Radius Point East", "500"));
+            e.Props.Add(Civil("Radius Point North", "200"));
+            Assert.Equal(50, NavisInterpreter.Read(e).CurveRadius, 6);
+
+            NavisElement straight = CivilPipe(a, b, 0.3, 0.05, Meshes.Cylinder(a, b, 0.2));
+            straight.Props.Add(Civil("Pipe Radius", "0"));
+            Assert.False(NavisInterpreter.Read(straight).IsCurved);
+        }
     }
 }

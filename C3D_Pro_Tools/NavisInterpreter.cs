@@ -22,6 +22,11 @@ namespace C3DProTools
 
         // Pipes and boxes
         public V3 Start, End;
+        /// <summary>A curved Civil 3D pipe (Pipe Radius, Radius Point): the plan radius (0 = straight), a point halfway along the arc, and its turn.</summary>
+        public double CurveRadius;
+        public V3 CurveMid;
+        public bool CurveClockwise;
+        public bool IsCurved => CurveRadius > 0;
         public bool Circular = true;
         public double OuterWidth, OuterHeight, InnerWidth, InnerHeight, Wall;
         /// <summary>Barrel centres across the pipe (metres, along <see cref="BarrelAxis"/>); one entry (0,0) for a single pipe.</summary>
@@ -117,6 +122,24 @@ namespace C3DProTools
             if (!shape.Equals("Circular", StringComparison.OrdinalIgnoreCase) && c.Circular)
                 c.Notes.Add($"{shape} section is brought in as circular.");
 
+            // A curved pipe: built as an arc from its properties. The straight mesh fit does not apply to it.
+            double radius = p.LenWhere(n => n.IndexOf("Radius", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("Point", StringComparison.OrdinalIgnoreCase) < 0);
+            double cx = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("East", StringComparison.OrdinalIgnoreCase) >= 0);
+            double cy = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("North", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (radius > 0 && !double.IsNaN(cx) && !double.IsNaN(cy))
+            {
+                if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
+                {
+                    c.CurveRadius = radius;
+                    c.CurveMid = mid;
+                    c.CurveClockwise = clockwise;
+                    c.Notes.Add($"Curved pipe, radius {radius:0.000} m: built as a curved pipe.");
+                    c.Fit = Fit(c.Source);
+                    return;
+                }
+                c.Notes.Add($"Has a radius ({radius:0.000} m) but {problem}; brought in straight.");
+            }
+
             LinearFit fit = c.Fit = Fit(c.Source);
             if (fit == null) { c.Notes.Add("The mesh could not be measured; the Civil 3D properties are used as they are."); c.Confidence = ImportConfidence.Medium; return; }
 
@@ -142,6 +165,34 @@ namespace C3DProTools
             if (sizeError > HighTolerance)
                 c.Notes.Add($"Property size differs from the model by {sizeError * 1000:0} mm.");
             c.Deviation = Math.Max(endError, sizeError);
+        }
+
+        /// <summary>
+        /// The arc of a curved pipe in plan: centre (cx, cy) and radius, from start to end along the shorter way round. Gives a
+        /// point halfway along it (level halfway between the ends, as a pipe's grade is even) and whether it turns clockwise.
+        /// False, with the reason, when the ends are not on that radius or the arc is a half circle (which way is unknown).
+        /// </summary>
+        public static bool Arc(V3 start, V3 end, double cx, double cy, double radius, out V3 mid, out bool clockwise, out string problem)
+        {
+            mid = default; clockwise = false; problem = null;
+            double sx = start.X - cx, sy = start.Y - cy, ex = end.X - cx, ey = end.Y - cy;
+            double rs = Math.Sqrt(sx * sx + sy * sy), re = Math.Sqrt(ex * ex + ey * ey);
+            double tolerance = Math.Max(0.05, radius * 0.01);
+            if (Math.Abs(rs - radius) > tolerance || Math.Abs(re - radius) > tolerance)
+            {
+                problem = $"its ends are {rs:0.000} m and {re:0.000} m from the radius point";
+                return false;
+            }
+            double cross = sx * ey - sy * ex;
+            double bx = sx / rs + ex / re, by = sy / rs + ey / re, b = Math.Sqrt(bx * bx + by * by);
+            if (b < 1e-6 || Math.Abs(cross) < 1e-9 * radius * radius)
+            {
+                problem = "the arc is a half circle (it could turn either way)";
+                return false;
+            }
+            clockwise = cross < 0;
+            mid = new V3(cx + bx / b * radius, cy + by / b * radius, (start.Z + end.Z) / 2);
+            return true;
         }
 
         private static double Spacing(LinearFit fit) => fit.Barrels.Count < 2 ? 0 : Math.Abs(fit.Barrels[1].u - fit.Barrels[0].u);
@@ -351,6 +402,27 @@ namespace C3DProTools
             {
                 if (!_byName.TryGetValue(name, out NavisProp p)) return 0;
                 return ParseLength(p);
+            }
+
+            /// <summary>The first property whose name passes the test (the radius names differ between exports).</summary>
+            private NavisProp Where(Func<string, bool> test) => _byName.Where(kv => test(kv.Key)).Select(kv => kv.Value).FirstOrDefault();
+
+            public double NumWhere(Func<string, bool> test)
+            {
+                NavisProp p = Where(test);
+                if (p == null) return double.NaN;
+                if (p.Number.HasValue) return p.Number.Value;
+                Match m = Regex.Match(p.Value ?? "", @"[-+]?\d[\d,]*(\.\d+)?([eE][-+]?\d+)?");
+                return m.Success && double.TryParse(m.Value.Replace(",", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : double.NaN;
+            }
+
+            /// <summary>A length in metres; a bare number counts as metres (a radius of 50 is 50 m, not 50 mm).</summary>
+            public double LenWhere(Func<string, bool> test)
+            {
+                NavisProp p = Where(test);
+                if (p == null) return 0;
+                if (Regex.IsMatch(p.Value ?? "", @"\d\s*(mm|cm|m|in|""|ft|')\s*$", RegexOptions.IgnoreCase)) return ParseLength(p);
+                return NumWhere(test) is double v && !double.IsNaN(v) ? v : 0;
             }
 
             public double FirstLen(params string[] names)

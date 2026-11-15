@@ -459,6 +459,14 @@ namespace C3DProTools.Features.Shared
             ToolUi.Wide(band, _coverBand);
             ToolUi.Wide(band, _labelBand);
             ToolUi.Add(stack, band);
+
+            TableLayoutPanel use = ToolUi.Card("Use these settings",
+                "Check cover lists every duct against the cover and duct type of the pavement over it, for the networks ticked on the Networks tab; it changes nothing. " +
+                "Label pavement edges puts the start / end of pavement labels on the proposed profile, in the profile views of the alignments ticked on the Profile views tab.");
+            ToolUi.Wide(use, Steps(
+                StyleUi.Secondary("Check cover under pavement", (s, e) => RunNetworks("Cover")),
+                StyleUi.Primary("Label pavement edges", (s, e) => RunProfile("Pavement"))));
+            ToolUi.Add(stack, use);
             return host;
         }
     }
