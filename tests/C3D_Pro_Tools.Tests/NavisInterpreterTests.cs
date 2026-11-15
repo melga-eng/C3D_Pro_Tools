@@ -136,6 +136,45 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void Arc_LongWay_GoesRoundTheOtherSide()
+        {
+            Assert.True(NavisInterpreter.Arc(new V3(10, 0, 0), new V3(0, 10, 0), 0, 0, 10, out V3 mid, out bool cw, out _, longWay: true));
+            Assert.True(cw);
+            Assert.Equal(-10 / System.Math.Sqrt(2), mid.X, 6);
+            Assert.Equal(-10 / System.Math.Sqrt(2), mid.Y, 6);
+        }
+
+        [Fact]
+        public void Arc_GentleCurve_KeepsItsRadius_WhenTheEndsAreAMillimetreOff()
+        {
+            // 100 m radius, 1 m of arc; the end is 1 mm further out than the start. The circle through the three points stays ~100 m.
+            V3 a = new V3(100, 0, 0), b = new V3(100.001 * System.Math.Cos(0.01), 100.001 * System.Math.Sin(0.01), 0);
+            Assert.True(NavisInterpreter.Arc(a, b, 0, 0, 100, out V3 m, out _, out _));
+            double A = Dist(b, m), B = Dist(a, m), C = Dist(a, b);
+            double area = System.Math.Abs((b.X - a.X) * (m.Y - a.Y) - (m.X - a.X) * (b.Y - a.Y)) / 2;
+            Assert.InRange(A * B * C / (4 * area), 99, 101);
+        }
+
+        private static double Dist(V3 p, V3 q) => System.Math.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y));
+
+        [Fact]
+        public void CivilPipe_BentMoreThanHalfACircle_FollowsItsMesh()
+        {
+            V3 a = new V3(10, 0, 100), b = new V3(0, 10, 100);
+            // Mesh points along the long way round (from 0° clockwise to 90°, through 180° and 270°).
+            var pts = new List<double>();
+            for (int k = 0; k <= 30; k++) { double t = -k * 1.5 * System.Math.PI / 30; pts.AddRange(new[] { 10 * System.Math.Cos(t), 10 * System.Math.Sin(t), 100.0 }); }
+            NavisElement e = CivilPipe(a, b, 0.3, 0.05, pts.ToArray());
+            e.Props.Add(Civil("Pipe Radius", "10m"));
+            e.Props.Add(Civil("Radius Point Easting", "", 0));
+            e.Props.Add(Civil("Radius Point Northing", "", 0));
+            ImportCandidate c = NavisInterpreter.Read(e);
+            Assert.True(c.IsCurved);
+            Assert.True(c.CurveClockwise);
+            Assert.True(c.CurveMid.X < 0 && c.CurveMid.Y < 0);
+        }
+
+        [Fact]
         public void Arc_EndsOffTheRadius_OrHalfCircle_AreRefused()
         {
             Assert.False(NavisInterpreter.Arc(new V3(10, 0, 0), new V3(0, 12, 0), 0, 0, 10, out _, out _, out string off));

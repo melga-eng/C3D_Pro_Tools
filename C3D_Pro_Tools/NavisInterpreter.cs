@@ -130,6 +130,13 @@ namespace C3DProTools
             {
                 if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
                 {
+                    // A bend over half a circle: the model (mesh) shows which way the pipe goes.
+                    if (Arc(c.Start, c.End, cx, cy, radius, out V3 longMid, out bool longClockwise, out _, longWay: true)
+                        && MeshDistance(c.Source, longMid) < MeshDistance(c.Source, mid))
+                    {
+                        mid = longMid;
+                        clockwise = longClockwise;
+                    }
                     c.CurveRadius = radius;
                     c.CurveMid = mid;
                     c.CurveClockwise = clockwise;
@@ -168,11 +175,12 @@ namespace C3DProTools
         }
 
         /// <summary>
-        /// The arc of a curved pipe in plan: centre (cx, cy) and radius, from start to end along the shorter way round. Gives a
-        /// point halfway along it (level halfway between the ends, as a pipe's grade is even) and whether it turns clockwise.
-        /// False, with the reason, when the ends are not on that radius or the arc is a half circle (which way is unknown).
+        /// The arc of a curved pipe in plan: centre (cx, cy) and radius, from start to end the shorter way round (or, with
+        /// <paramref name="longWay"/>, the longer). Gives a point halfway along it (as far from the centre as the ends, level
+        /// halfway between them, as a pipe's grade is even) and whether it turns clockwise. False, with the reason, when the
+        /// ends are not on that radius or the arc is a half circle (which way is unknown).
         /// </summary>
-        public static bool Arc(V3 start, V3 end, double cx, double cy, double radius, out V3 mid, out bool clockwise, out string problem)
+        public static bool Arc(V3 start, V3 end, double cx, double cy, double radius, out V3 mid, out bool clockwise, out string problem, bool longWay = false)
         {
             mid = default; clockwise = false; problem = null;
             double sx = start.X - cx, sy = start.Y - cy, ex = end.X - cx, ey = end.Y - cy;
@@ -190,9 +198,25 @@ namespace C3DProTools
                 problem = "the arc is a half circle (it could turn either way)";
                 return false;
             }
-            clockwise = cross < 0;
-            mid = new V3(cx + bx / b * radius, cy + by / b * radius, (start.Z + end.Z) / 2);
+            clockwise = longWay ? cross > 0 : cross < 0;
+            // At the ends' own distance: a millimetre between radius and ends would bend a gentle arc far off its radius.
+            double r = (rs + re) / 2 * (longWay ? -1 : 1);
+            mid = new V3(cx + bx / b * r, cy + by / b * r, (start.Z + end.Z) / 2);
             return true;
+        }
+
+        /// <summary>Plan distance from a point to the nearest mesh vertex; infinite without a mesh.</summary>
+        private static double MeshDistance(NavisElement e, V3 p)
+        {
+            double[] t = e?.Triangles;
+            if (t == null || t.Length < 3) return double.PositiveInfinity;
+            double best = double.PositiveInfinity;
+            for (int i = 0; i + 2 < t.Length; i += 3)
+            {
+                double dx = t[i] - p.X, dy = t[i + 1] - p.Y, d = dx * dx + dy * dy;
+                if (d < best) best = d;
+            }
+            return Math.Sqrt(best);
         }
 
         private static double Spacing(LinearFit fit) => fit.Barrels.Count < 2 ? 0 : Math.Abs(fit.Barrels[1].u - fit.Barrels[0].u);
