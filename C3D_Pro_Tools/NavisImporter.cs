@@ -463,7 +463,20 @@ namespace C3DProTools
             V3 offset = c.BarrelAxis * u + c.BarrelUp * w;
             V3 a = c.Start + offset, b = c.End + offset;
             ObjectId id = ObjectId.Null;
-            network.AddLinePipe(p.FamilyId, p.SizeId, new LineSegment3d(new Point3d(a.X * s, a.Y * s, a.Z * s), new Point3d(b.X * s, b.Y * s, b.Z * s)), ref id, false);
+            Point3d P(V3 v) => new Point3d(v.X * s, v.Y * s, v.Z * s);
+            // A curved pipe (one barrel) is drawn as Civil 3D's own curved pipe, through its ends and the point halfway along.
+            // The arc is made flat (Civil 3D takes it in plan), then each end gets its own level.
+            if (c.IsCurved && c.Barrels.Count == 1)
+            {
+                V3 m = c.CurveMid + offset;
+                double z = a.Z * s;
+                network.AddCurvePipe(p.FamilyId, p.SizeId, new CircularArc3d(new Point3d(a.X * s, a.Y * s, z), new Point3d(m.X * s, m.Y * s, z), new Point3d(b.X * s, b.Y * s, z)), c.CurveClockwise, ref id, false);
+                Pipe curved = (Pipe)tr.GetObject(id, OpenMode.ForWrite);
+                curved.StartPoint = P(a);
+                curved.EndPoint = P(b);
+            }
+            else
+                network.AddLinePipe(p.FamilyId, p.SizeId, new LineSegment3d(P(a), P(b)), ref id, false);
             Pipe pipe = (Pipe)tr.GetObject(id, OpenMode.ForWrite);
             SetName(pipe, c.Barrels.Count > 1 ? $"{c.Name}-B{barrel + 1}" : c.Name);
             pipe.Description = "Navisworks: " + c.Name;

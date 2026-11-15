@@ -37,6 +37,7 @@ namespace C3DProTools
             if (IsIdentity) return;
             c.Start = Point(c.Start);
             c.End = Point(c.End);
+            if (c.IsCurved) c.CurveMid = Point(c.CurveMid);   // moving and turning keep the arc's turn
             c.BarrelAxis = Direction(c.BarrelAxis);
             c.BarrelUp = Direction(c.BarrelUp);
             V3 at = Point(new V3(c.X, c.Y, 0));
