@@ -23,10 +23,15 @@ its settings in the drawing or remembers your last choices.
 
 Every change is one UNDO step. Data references are never changed.
 
-## Off the ribbon (still work as typed commands)
+## The other panels
 
-`StyleManager`, `C3DDrawingCleaner`, `ProfileViewTools`, `PROFILEMGR`, `PVMGR`, `STYLEMGR`, `PROFILEDIMS`, `C3DPROPV`,
-`C3DPRONET`, `C3DPROLBL`, `C3DProWorkspace`. Their jobs are in Pro Run or not used now.
+| Panel | Buttons |
+|---|---|
+| **Profiles** | Profile View Tools, Profile Manager, Profile Views & TOP Fit, Profile DIMs |
+| **Standards** | Style Manager (tick styles, then Select in drawing, Zoom to, Merge, Delete), Label Style Values, Drawing Cleaner |
+| **Command Runs** | Profile Views Run, Networks Run, Labels Run: the Pro Run steps typed on the command line |
+
+Workspace Palette is in Produce.
 
 ## What is being done now
 
