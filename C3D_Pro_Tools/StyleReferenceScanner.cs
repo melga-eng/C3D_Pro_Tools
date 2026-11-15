@@ -1,4 +1,4 @@
-﻿using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using System;
 using System.Collections.Generic;
@@ -237,12 +237,20 @@ namespace C3DProTools
             return found;
         }
 
+        private static readonly HashSet<string> Features = new HashSet<string>
+        {
+            "SettingsGeneral", "SettingsAlignment", "SettingsProfile", "SettingsProfileView", "SettingsPipeNetwork", "SettingsPressureNetwork",
+            "SettingsSurface", "SettingsPoint", "SettingsParcel", "SettingsSampleLine", "SettingsSection", "SettingsSectionView",
+            "SettingsCorridor", "SettingsAssembly", "SettingsIntersection", "SettingsGrading", "SettingsSite",
+        };
+
         private static IEnumerable<Type> SettingsTypes(Type wrapper)
         {
             Type[] all;
             try { all = wrapper.Assembly.GetTypes(); }
             catch (ReflectionTypeLoadException ex) { all = ex.Types.Where(x => x != null).ToArray(); }
-            return all.Where(t => t.IsClass && !t.IsAbstract && t.Namespace == "Autodesk.Civil.Settings" && t.Name.StartsWith("Settings") && wrapper.IsAssignableFrom(t));
+            // Only the feature settings these drawings use: asking for others (command settings, view frames) crashes Civil 3D.
+            return all.Where(t => t.IsClass && !t.IsAbstract && t.Namespace == "Autodesk.Civil.Settings" && Features.Contains(t.Name) && wrapper.IsAssignableFrom(t));
         }
 
         private static void Walk(object node, int depth, Dictionary<ObjectId, int> found, HashSet<object> visited, ref int unreadable)
@@ -251,11 +259,16 @@ namespace C3DProTools
             foreach (PropertyInfo p in node.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (!p.CanRead || p.GetIndexParameters().Length > 0) continue;
+                // Ambient settings are units and precisions, never styles; reading some of them (Pressure) crashes Civil 3D.
+                if (p.Name == "AmbientSettings") continue;
                 Type type = p.PropertyType;
                 bool id = type == typeof(ObjectId);
                 // Settings values are wrappers (PropertyObjectId and the like) whose Value holds the setting.
                 PropertyInfo wrapped = !id && type.Name.StartsWith("Property") ? type.GetProperty("Value") : null;
-                bool group = !id && wrapped == null && type.IsClass && type.Namespace == "Autodesk.Civil.Settings";
+                // Only groups that hold styles (StyleSettings and the like) are opened: reading other settings (widening,
+                // ambient units) crashes Civil 3D on some drawings, and they never name a style.
+                bool group = !id && wrapped == null && type.IsClass && type.Namespace == "Autodesk.Civil.Settings"
+                             && p.Name.IndexOf("Style", StringComparison.OrdinalIgnoreCase) >= 0;
                 if (!id && (wrapped == null || wrapped.PropertyType != typeof(ObjectId)) && !group) continue;
                 object value;
                 try { value = p.GetValue(node); }

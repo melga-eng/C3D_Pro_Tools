@@ -93,7 +93,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 IReadOnlyList<OperationIssue> ruleIssues = LabelRuleValidation.Validate(rules);
                 if (rules == null || ruleIssues.Count > 0)
                 {
-                    b.AppendLine(rules == null ? "No label rule set in the settings file: nothing planned." : "The rule set has errors: nothing planned.");
+                    b.AppendLine(rules == null ? "No label rules are saved for this drawing: nothing planned." : "The rule set has errors: nothing planned.");
                     foreach (OperationIssue i in ruleIssues) b.AppendLine($"  {i.Code}: {i.Message}");
                     Finish(doc, b, "C3DProPlanLabels.txt");
                     return;

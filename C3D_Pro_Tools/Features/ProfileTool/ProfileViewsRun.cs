@@ -284,7 +284,7 @@ namespace C3DProTools.ProfileTool
         {
             PavementSettings ps = PavementSettings.Load(doc.Name, out string problem);
             if (problem != null) { log.AppendLine($"Pavement: {problem}"); return; }
-            if (!ps.Any) { if (write) log.AppendLine("Pavement: no pavement surfaces set (pavement.zones in the project file)."); return; }
+            if (!ps.Any) { if (write) log.AppendLine("Pavement: no pavement surfaces are set. Open Pro Run, Pavement tab, and add the paved surfaces."); return; }
             Database db = doc.Database;
             using (write ? doc.LockDocument() : null)
             using (Transaction tr = db.TransactionManager.StartTransaction())

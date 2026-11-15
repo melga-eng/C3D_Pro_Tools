@@ -8,7 +8,8 @@ namespace C3DProTools
         /// <summary>Returns the style the entity references, or ObjectId.Null if it is not a tracked entity type.</summary>
         public static ObjectId GetStyleId(DBObject obj)
         {
-            if (obj is Autodesk.Civil.DatabaseServices.Entity civilEnt) return civilEnt.StyleId;
+            // Civil 3D throws for entities that have no style (the API says so); they simply have none.
+            if (obj is Autodesk.Civil.DatabaseServices.Entity civilEnt) { try { return civilEnt.StyleId; } catch (System.Exception) { return ObjectId.Null; } }
             if (obj is MText mText) return mText.TextStyleId;
             if (obj is DBText dbText) return dbText.TextStyleId;
             if (obj is Dimension dim) return dim.DimensionStyle;

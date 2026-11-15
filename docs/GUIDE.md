@@ -1,6 +1,6 @@
 # C3D Pro Tools: how to use it
 
-One tab, **C3D Pro Tools**, two panels, in the order of the work. Nothing needs a file beside the drawing: each tool keeps
+One tab, **C3D Pro Tools**, five panels: Model, Profiles, Produce, Standards, Command Runs. Nothing needs a file beside the drawing: each tool keeps
 its settings in the drawing or remembers your last choices.
 
 ## Model: build and fix the networks
