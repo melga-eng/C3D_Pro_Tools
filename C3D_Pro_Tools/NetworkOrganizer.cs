@@ -108,7 +108,7 @@ namespace C3DProTools
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                NetworkSummary s = new NetworkSummary { Id = netId, Name = net.Name, Pipes = net.GetPipeIds().Count, Structures = net.GetStructureIds().Count };
+                NetworkSummary s = new NetworkSummary { Id = netId, Name = net.Name, Pipes = net.GetPipeIds().Live().Count(), Structures = net.GetStructureIds().Live().Count() };
                 try { s.Reference = net.IsReferenceObject; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 List<string> sizes = new List<string>();
                 foreach (ObjectId id in net.GetPipeIds().Live()) if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) sizes.Add(SizeOf(p));
@@ -237,7 +237,7 @@ namespace C3DProTools
                 foreach (ObjectId netId in networks.Where(n => n != target))
                 {
                     Network net = (Network)tr.GetObject(netId, OpenMode.ForRead);
-                    if (net.GetPipeIds().Count > 0 || net.GetStructureIds().Count > 0) continue;
+                    if (net.GetPipeIds().Live().Count() > 0 || net.GetStructureIds().Live().Count() > 0) continue;
                     try { net.UpgradeOpen(); net.Erase(); result.NetworksDeleted++; }
                     catch (Exception ex) { result.Log.Add($"Network {net.Name} is empty but could not be deleted: {ex.Message}"); }
                 }
@@ -250,7 +250,7 @@ namespace C3DProTools
             int n = 0;
             foreach (ObjectId id in networks)
             {
-                if (!(tr.GetObject(id, OpenMode.ForRead) is Network net) || net.GetPipeIds().Count > 0 || net.GetStructureIds().Count > 0) continue;
+                if (!(tr.GetObject(id, OpenMode.ForRead) is Network net) || net.GetPipeIds().Live().Count() > 0 || net.GetStructureIds().Live().Count() > 0) continue;
                 try { net.UpgradeOpen(); net.Erase(); n++; }
                 catch (Exception ex) { log.Add($"{net.Name}: {ex.Message}"); }
             }
