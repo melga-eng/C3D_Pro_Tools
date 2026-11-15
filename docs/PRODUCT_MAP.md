@@ -13,7 +13,7 @@ Claude keeps this page current. Last update: 2026-11-12.
 A tool moves to **Released** only when its drawing test passes on a copy of a project drawing and you accept the result.
 Nothing is Released yet, because drawing tests started today.
 
-**Ribbon (2026-11-14, your choice):** Model: Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Navisworks Importer. Produce: Pro Run, Annotation Studio, Sheet Manager. Every other tool below is a typed command only. How to use: [GUIDE.md](GUIDE.md).
+**Ribbon (2026-11-15, every tool):** Model (Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Navisworks Importer), Profiles (Profile View Tools, Profile Manager, Profile Views & TOP Fit, Profile DIMs), Produce (Pro Run, Annotation Studio, Sheet Manager, Workspace Palette), Standards (Style Manager, Label Style Values, Drawing Cleaner), Command Runs (Profile Views / Networks / Labels Run). How to use: [GUIDE.md](GUIDE.md).
 
 ## How the plugin is built
 
@@ -69,7 +69,7 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 
 | Tool (command) | What it does | State | Main code |
 |---|---|---|---|
-| Style Manager (`StyleManager`) | Find unused, duplicate and non-standard styles; merge, replace, purge | **Unknown** | `Style*.cs`, `FormStyleManager.cs` |
+| Style Manager (`StyleManager`) | Find unused, duplicate and non-standard styles; merge, replace, purge | **Fixed 2026-11-15** (15 defects found by Codex): the scan crashed Civil 3D (settings walk), select ticked styles, merge, rename, sort, duplicates, purge status, batch, mapping. Test drawing copy: 424 styles scanned, a duplicate merged. Waiting for your try | `Style*.cs`, `FormStyleManager.cs` |
 | Label Style Values (`STYLEMGR`) | Batch-set text heights, arrowheads and other values of label styles | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
 | Drawing Cleaner (`C3DDrawingCleaner`, `CleanSubmittalDrawing`) | Save a cleaned copy for submittal | **Unknown** after the fix of 5 Nov (it could delete layouts from the open drawing) | `DrawingCleanup.cs`, `FormDrawingCleaner.cs` |
 
