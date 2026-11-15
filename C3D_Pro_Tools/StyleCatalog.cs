@@ -89,13 +89,19 @@ namespace C3DProTools
                 AddCivilCollection(Safe(() => root.GetPressureFittingStyles()), "Pressure Fitting", items, seen, tr);
                 AddCivilCollection(Safe(() => root.GetPressureAppurtenanceStyles()), "Pressure Appurtenance", items, seen, tr);
                 AddCivilCollection(Safe(() => root.GetPressurePartLists()), "Pressure Parts Lists", items, seen, tr);
+
+                // These label roots are exposed by methods, so the property walker cannot discover them.
+                Walk(Safe(() => root.LabelStyles.GetPressurePipeLabelStyles()), "Label Styles › Pressure Pipe", 1, items, seen, tr);
+                Walk(Safe(() => root.LabelStyles.GetPressureFittingLabelStyles()), "Label Styles › Pressure Fitting", 1, items, seen, tr);
+                Walk(Safe(() => root.LabelStyles.GetPressureAppurtenanceLabelStyles()), "Label Styles › Pressure Appurtenance", 1, items, seen, tr);
+                Walk(Safe(() => root.LabelStyles.GetSurveyLabelStyles()), "Label Styles › Survey", 1, items, seen, tr);
             }
 
             AddAcad(items, tr, db);
             return items;
         }
 
-        private static IEnumerable Safe(Func<IEnumerable> get)
+        private static T Safe<T>(Func<T> get) where T : class
         {
             try { return get(); } catch (Exception) { return null; }
         }
