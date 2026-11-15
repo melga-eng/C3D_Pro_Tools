@@ -286,7 +286,7 @@ namespace C3DProTools
                     await System.Threading.Tasks.Task.Delay(1);
                     BatchFileResult r = StyleBatch.Process(path, targets?.Targets[Path.GetFullPath(path)], o, template, mapping, s => { _status.Text = $"{Path.GetFileName(path)}: {s}"; _status.Refresh(); });
                     Fill(row, r);
-                    if (r.Status == "Done") done++; else failed++;
+                    if (r.Status.StartsWith("Done")) done++; else failed++;
                     _progress.Value++;
                 }
             }
@@ -314,7 +314,7 @@ namespace C3DProTools
             row.SubItems[5].Text = r.Renamed.ToString();
             row.SubItems[6].Text = r.Deleted.ToString();
             row.SubItems[7].Text = r.Note;
-            row.ForeColor = r.Status == "Failed" ? StyleUi.Danger : r.Status == "Skipped" ? StyleUi.Muted : StyleUi.Text;
+            row.ForeColor = r.Status.StartsWith("Failed") ? StyleUi.Danger : r.Status == "Done with problems" ? StyleUi.Danger : r.Status == "Skipped" ? StyleUi.Muted : StyleUi.Text;
         }
 
         private void ExportResults()
