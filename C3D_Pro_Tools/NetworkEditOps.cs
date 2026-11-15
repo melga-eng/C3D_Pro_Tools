@@ -104,7 +104,7 @@ namespace C3DProTools
         {
             List<StructureFootprint> list = new List<StructureFootprint>();
             if (!(tr.GetObject(networkId, OpenMode.ForRead) is Network network)) return list;
-            foreach (ObjectId id in network.GetStructureIds())
+            foreach (ObjectId id in network.GetStructureIds().Live())
                 if (tr.GetObject(id, OpenMode.ForRead) is Structure st) list.Add(Of(st));
             return list;
         }

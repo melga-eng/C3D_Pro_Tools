@@ -825,13 +825,13 @@ namespace C3DProTools
                 foreach (ObjectId netId in doc.GetPipeNetworkIds())
                 {
                     if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                    foreach (ObjectId id in net.GetPipeIds().Cast<ObjectId>().Concat(net.GetStructureIds().Cast<ObjectId>()))
+                    foreach (ObjectId id in net.GetPipeIds().Live().Concat(net.GetStructureIds().Live()))
                         if (!id.IsErased && tr.GetObject(id, OpenMode.ForRead) is Part p) Add(id, p.GetProfileViewsDisplayingMe);
                 }
                 foreach (ObjectId netId in doc.GetPressurePipeNetworkIds())
                 {
                     if (!(tr.GetObject(netId, OpenMode.ForRead) is PressurePipeNetwork net)) continue;
-                    foreach (ObjectId id in net.GetPipeIds().Cast<ObjectId>().Concat(net.GetFittingIds().Cast<ObjectId>()).Concat(net.GetAppurtenanceIds().Cast<ObjectId>()))
+                    foreach (ObjectId id in net.GetPipeIds().Live().Concat(net.GetFittingIds().Cast<ObjectId>()).Concat(net.GetAppurtenanceIds().Cast<ObjectId>()))
                         if (!id.IsErased && tr.GetObject(id, OpenMode.ForRead) is PressurePart p) Add(id, p.GetProfileViewsDisplayingMe);
                 }
             }

@@ -49,7 +49,7 @@ namespace C3DProTools
             Dictionary<ObjectId, List<Pipe>> connected = structures.ToDictionary(s => s, s => new List<Pipe>());
             foreach (ObjectId netId in networks)
                 if (tr.GetObject(netId, OpenMode.ForRead) is Network net)
-                    foreach (ObjectId pid in net.GetPipeIds())
+                    foreach (ObjectId pid in net.GetPipeIds().Live())
                         if (tr.GetObject(pid, OpenMode.ForRead) is Pipe p)
                             foreach (ObjectId sid in new[] { p.StartStructureId, p.EndStructureId })
                                 if (!sid.IsNull && connected.TryGetValue(sid, out List<Pipe> l) && !l.Contains(p)) l.Add(p);
@@ -131,7 +131,7 @@ namespace C3DProTools
             foreach (ObjectId netId in networks)
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                List<Pipe> pipes = net.GetPipeIds().Cast<ObjectId>().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe).Where(p => p != null).ToList();
+                List<Pipe> pipes = net.GetPipeIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe).Where(p => p != null).ToList();
                 string Key(ObjectId sid, Point3d at) => sid.IsNull
                     ? "P" + Math.Round(at.X, 2).ToString(CultureInfo.InvariantCulture) + "," + Math.Round(at.Y, 2).ToString(CultureInfo.InvariantCulture)
                     : "S" + sid.Handle;

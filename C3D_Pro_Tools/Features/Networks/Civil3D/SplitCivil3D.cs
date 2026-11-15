@@ -100,7 +100,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                     // No pipes chosen: a point may split any gravity pipe of the drawing (as Network Editor does today).
                     if (request.Pipes.Count == 0)
                         foreach (ObjectId netId in CivilDocument.GetCivilDocument(db).GetPipeNetworkIds())
-                            if (tr.GetObject(netId, OpenMode.ForRead) is Network n) pipes.AddRange(n.GetPipeIds().Cast<ObjectId>());
+                            if (tr.GetObject(netId, OpenMode.ForRead) is Network n) pipes.AddRange(n.GetPipeIds().Live());
                     plans = NetworkEditOps.PlanSplitAtPoints(tr, pipes, request.Picks.Select(DrawingRefs3D.Point).ToList(), request.PickTolerance, out missed, cancel);
                 }
                 // The piece limit is applied before any point is made, so a tiny length on a long pipe never builds a huge plan.

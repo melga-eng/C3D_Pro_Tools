@@ -60,7 +60,7 @@ namespace C3DProTools
                 DBObject netObj = tr.GetObject(netId, OpenMode.ForRead);
                 if (netObj is Network gravityNet)
                 {
-                    foreach (ObjectId id in gravityNet.GetPipeIds())
+                    foreach (ObjectId id in gravityNet.GetPipeIds().Live())
                     {
                         if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe pipe)) continue;
                         ArcInfo? arc = null;
@@ -69,7 +69,7 @@ namespace C3DProTools
                         AddIfFound(found, ClassifyPath(alignment, path, reach, tolerance, includeCrossings),
                             id, pipe.Name, "Pipe", gravityNet.Name, path, CountShownIn(pipe.GetProfileViewsDisplayingMe(), alignmentProfileViews));
                     }
-                    foreach (ObjectId id in gravityNet.GetStructureIds())
+                    foreach (ObjectId id in gravityNet.GetStructureIds().Live())
                     {
                         if (!(tr.GetObject(id, OpenMode.ForRead) is Structure structure)) continue;
                         List<Point3d> path = new List<Point3d> { structure.Location };
@@ -79,7 +79,7 @@ namespace C3DProTools
                 }
                 else if (netObj is PressurePipeNetwork pressureNet)
                 {
-                    foreach (ObjectId id in pressureNet.GetPipeIds())
+                    foreach (ObjectId id in pressureNet.GetPipeIds().Live())
                     {
                         if (!(tr.GetObject(id, OpenMode.ForRead) is PressurePipe pipe)) continue;
                         ArcInfo? arc = null;
