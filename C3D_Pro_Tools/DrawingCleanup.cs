@@ -382,15 +382,15 @@ namespace C3DProTools
                 // A network whose parts were all data references is empty after stripping them; it goes too.
                 bool emptied = o.DataReferences == DataReferenceHandling.Strip && net.GetPipeIds().Count == 0 && net.GetStructureIds().Count == 0;
                 if (!o.GravityNetworks.Contains(net.Name) && !emptied) continue;
-                foreach (ObjectId id in net.GetPipeIds()) TryErase(tr, id, report);
-                foreach (ObjectId id in net.GetStructureIds()) TryErase(tr, id, report);
+                foreach (ObjectId id in net.GetPipeIds().Live()) TryErase(tr, id, report);
+                foreach (ObjectId id in net.GetStructureIds().Live()) TryErase(tr, id, report);
                 TryErase(tr, netId, report);
             }
             foreach (ObjectId netId in civil.GetPressurePipeNetworkIds())
             {
                 if (!(OpenForRead(tr, netId) is PressurePipeNetwork net)) continue;
                 if (!o.PressureNetworks.Contains(net.Name)) continue;
-                foreach (ObjectId id in net.GetPipeIds()) TryErase(tr, id, report);
+                foreach (ObjectId id in net.GetPipeIds().Live()) TryErase(tr, id, report);
                 foreach (ObjectId id in net.GetFittingIds()) TryErase(tr, id, report);
                 foreach (ObjectId id in net.GetAppurtenanceIds()) TryErase(tr, id, report);
                 TryErase(tr, netId, report);

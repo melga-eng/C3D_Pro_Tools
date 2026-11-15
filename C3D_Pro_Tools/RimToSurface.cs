@@ -80,7 +80,7 @@ namespace C3DProTools
                 if (structure.IsNull) return;
                 tops[structure] = tops.TryGetValue(structure, out double was) ? Math.Max(was, top) : top;
             }
-            foreach (ObjectId id in net.GetPipeIds())
+            foreach (ObjectId id in net.GetPipeIds().Live())
             {
                 if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
                 double half = CoverRoute.OuterHeightOf(p) / 2.0;

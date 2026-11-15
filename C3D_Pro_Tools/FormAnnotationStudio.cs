@@ -1055,14 +1055,14 @@ namespace C3DProTools
             foreach (ObjectId netId in networkIds)
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                 {
                     if (onSheets == null) { parts.Add(id); continue; }
                     Pipe p = (Pipe)tr.GetObject(id, OpenMode.ForRead);
                     Point3d mid = p.StartPoint + (p.EndPoint - p.StartPoint) / 2;
                     if (onSheets.Any(s => s.Viewports.Any(v => v.Sees(mid) || v.Sees(p.StartPoint) || v.Sees(p.EndPoint)))) parts.Add(id);
                 }
-                foreach (ObjectId id in net.GetStructureIds())
+                foreach (ObjectId id in net.GetStructureIds().Live())
                 {
                     if (onSheets == null) { parts.Add(id); continue; }
                     Structure st = (Structure)tr.GetObject(id, OpenMode.ForRead);

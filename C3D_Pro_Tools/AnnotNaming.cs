@@ -71,8 +71,8 @@ namespace C3DProTools
             foreach (ObjectId netId in networkIds)
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                if (o.Pipes) foreach (ObjectId id in net.GetPipeIds()) values.Add(TypeValue(tr, (Part)tr.GetObject(id, OpenMode.ForRead), o.PipeType));
-                if (o.Structures) foreach (ObjectId id in net.GetStructureIds()) values.Add(TypeValue(tr, (Part)tr.GetObject(id, OpenMode.ForRead), o.StructureType));
+                if (o.Pipes) foreach (ObjectId id in net.GetPipeIds().Live()) values.Add(TypeValue(tr, (Part)tr.GetObject(id, OpenMode.ForRead), o.PipeType));
+                if (o.Structures) foreach (ObjectId id in net.GetStructureIds().Live()) values.Add(TypeValue(tr, (Part)tr.GetObject(id, OpenMode.ForRead), o.StructureType));
             }
             values.Remove("");
             return values;
@@ -103,7 +103,7 @@ namespace C3DProTools
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                 bool reference = net.IsReferenceObject;
                 string netSheet = Regex.Match(net.Name, @"(\d+)(?!.*\d)").Value;
-                List<ObjectId> pipeIds = net.GetPipeIds().Cast<ObjectId>().ToList();
+                List<ObjectId> pipeIds = net.GetPipeIds().Live().ToList();
 
                 // Routes in flow direction (most pipes); main lines first.
                 List<CoverJob> routes = pipeIds.Count == 0 ? new List<CoverJob>() : CoverJobs.FromPipes(tr, pipeIds, gap, centerTolerance, true, net.Name);
@@ -172,7 +172,7 @@ namespace C3DProTools
                         foreach (ObjectId s in forward ? new[] { p.StartStructureId, p.EndStructureId } : new[] { p.EndStructureId, p.StartStructureId })
                             if (!s.IsNull && !order.Contains(s)) order.Add(s);
                     }
-                    foreach (ObjectId s in net.GetStructureIds().Cast<ObjectId>()
+                    foreach (ObjectId s in net.GetStructureIds().Live()
                                  .OrderBy(s => ((Structure)tr.GetObject(s, OpenMode.ForRead)).Location.X).ThenBy(s => ((Structure)tr.GetObject(s, OpenMode.ForRead)).Location.Y))
                         if (!order.Contains(s)) order.Add(s);
                     foreach (ObjectId id in order)
@@ -263,7 +263,7 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                 HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (ObjectId id in net.GetPipeIds().Cast<ObjectId>().Concat(net.GetStructureIds().Cast<ObjectId>()))
+                foreach (ObjectId id in net.GetPipeIds().Live().Concat(net.GetStructureIds().Live()))
                     if (!planned.Contains(id) && tr.GetObject(id, OpenMode.ForRead) is Part p) names.Add(p.Name);
                 kept[net.Name] = names;
             }

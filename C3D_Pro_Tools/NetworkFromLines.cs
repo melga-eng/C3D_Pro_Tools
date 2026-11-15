@@ -615,7 +615,7 @@ namespace C3DProTools
         /// <summary>The split that would put a junction where <paramref name="at"/> meets a pipe of the network mid-span (not one made now), or null.</summary>
         private static NetworkEditOps.SplitPlan MidSpan(Transaction tr, Network network, List<ObjectId> made, Point3d at)
         {
-            List<ObjectId> candidates = network.GetPipeIds().Cast<ObjectId>().Where(id => !made.Contains(id)).ToList();
+            List<ObjectId> candidates = network.GetPipeIds().Live().Where(id => !made.Contains(id)).ToList();
             if (candidates.Count == 0) return null;
             List<NetworkEditOps.SplitPlan> plans = NetworkEditOps.PlanSplitAtPoints(tr, candidates, new List<Point3d> { at }, MidSpanTolerance, out _);
             return plans.Count == 1 && plans[0].Points.Count == 1 ? plans[0] : null;

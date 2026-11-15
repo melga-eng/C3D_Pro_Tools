@@ -175,7 +175,7 @@ namespace C3DProTools
             foreach (ObjectId netId in gravityNets)
             {
                 if (tr.GetObject(netId, OpenMode.ForRead) is Network net)
-                    foreach (ObjectId stId in net.GetStructureIds()) b.ReadHub(tr, stId, reach);
+                    foreach (ObjectId stId in net.GetStructureIds().Live()) b.ReadHub(tr, stId, reach);
             }
             foreach (ObjectId netId in pressureNets)
             {

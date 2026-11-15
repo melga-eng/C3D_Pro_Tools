@@ -425,7 +425,7 @@ namespace C3DProTools
 
             // The pipes that meet a swapped structure, from each network's pipes.
             foreach (ObjectId netId in levels.Keys.Select(id => ((Structure)tr.GetObject(id, OpenMode.ForRead)).NetworkId).Distinct().ToList())
-                foreach (ObjectId pid in ((Network)tr.GetObject(netId, OpenMode.ForRead)).GetPipeIds())
+                foreach (ObjectId pid in ((Network)tr.GetObject(netId, OpenMode.ForRead)).GetPipeIds().Live())
                     if (tr.GetObject(pid, OpenMode.ForRead) is Pipe p && (levels.ContainsKey(p.StartStructureId) || levels.ContainsKey(p.EndStructureId))) KeepEnds(pid);
 
             HashSet<ObjectId> swappedPipes = new HashSet<ObjectId>();

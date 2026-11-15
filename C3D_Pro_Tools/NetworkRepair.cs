@@ -35,7 +35,7 @@ namespace C3DProTools
                 if (!members.TryGetValue(p.NetworkId, out HashSet<ObjectId> set))
                 {
                     set = new HashSet<ObjectId>();
-                    try { if (tr.GetObject(p.NetworkId, OpenMode.ForRead) is Network n) foreach (ObjectId m in n.GetPipeIds()) set.Add(m); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    try { if (tr.GetObject(p.NetworkId, OpenMode.ForRead) is Network n) foreach (ObjectId m in n.GetPipeIds().Live()) set.Add(m); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     members[p.NetworkId] = set;
                 }
                 if (set.Contains(id)) continue;

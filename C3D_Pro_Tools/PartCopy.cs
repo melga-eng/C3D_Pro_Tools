@@ -55,7 +55,7 @@ namespace C3DProTools
                 // Moving the ends of a curved copy keeps it curved; a straight pipe of the same size is copied instead.
                 string size = Safe(() => template.PartSizeName);
                 Network own = (Network)tr.GetObject(template.NetworkId, OpenMode.ForRead);
-                source = own.GetPipeIds().Cast<ObjectId>().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe)
+                source = own.GetPipeIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe)
                             .FirstOrDefault(p => p != null && p.SubEntityType != PipeSubEntityType.Curved && Safe(() => p.PartSizeName) == size)
                          ?? throw new InvalidOperationException($"{template.Name} is curved and its network has no straight pipe of {size} to copy.");
             }
@@ -118,11 +118,11 @@ namespace C3DProTools
             ObjectIdCollection members = net.GetPipeIds();
             string size = Safe(() => template.PartSizeName);
             Pipe source = members.Contains(template.ObjectId) && template.SubEntityType == PipeSubEntityType.Straight ? template
-                : members.Cast<ObjectId>().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe)
+                : members.Live().Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe)
                          .FirstOrDefault(p => p != null && p.SubEntityType == PipeSubEntityType.Straight && Safe(() => p.PartSizeName) == size);
             if (source == null || source.Length2D < 1e-3) return ObjectId.Null;
             ObjectId anchor = !source.StartStructureId.IsNull ? source.StartStructureId : !source.EndStructureId.IsNull ? source.EndStructureId
-                : net.GetStructureIds().Cast<ObjectId>().FirstOrDefault(id => !id.IsErased);
+                : net.GetStructureIds().Live().FirstOrDefault(id => !id.IsErased);
             if (anchor.IsNull) return ObjectId.Null;
 
             Point3d s = source.StartPoint, e = source.EndPoint;

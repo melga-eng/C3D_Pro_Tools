@@ -83,7 +83,7 @@ namespace C3DProTools.ProfileTool
             foreach (ObjectId nid in civil.GetPipeNetworkIds())
             {
                 if (tr.GetObject(nid, OpenMode.ForRead) is not Network net) continue;
-                var netPipes = net.GetPipeIds().Cast<ObjectId>()
+                var netPipes = net.GetPipeIds().Live()
                     .Select(id => tr.GetObject(id, OpenMode.ForRead) as Pipe).Where(p => p != null).ToList();
                 var trims = StructureTrims(tr, netPipes, o.OuterFace);
                 foreach (var p in netPipes)

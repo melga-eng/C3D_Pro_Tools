@@ -403,7 +403,7 @@ namespace C3DProTools
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                 UtilityClass cls = rules.Classify(net.Name, false);
                 double pad = rules.PaddingFor(cls);
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                 {
                     if (exclude.Contains(id) || !(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
                     ArcInfo? arc = null;
@@ -417,7 +417,7 @@ namespace C3DProTools
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is PressurePipeNetwork net)) continue;
                 UtilityClass cls = rules.Classify(net.Name, true);
                 double pad = rules.PaddingFor(cls);
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                 {
                     if (exclude.Contains(id) || !(tr.GetObject(id, OpenMode.ForRead) is PressurePipe p)) continue;
                     ArcInfo? arc = null;

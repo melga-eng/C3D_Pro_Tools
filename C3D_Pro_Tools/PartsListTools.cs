@@ -418,7 +418,7 @@ namespace C3DProTools
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                foreach (ObjectId id in net.GetPipeIds().Cast<ObjectId>().Concat(net.GetStructureIds().Cast<ObjectId>()))
+                foreach (ObjectId id in net.GetPipeIds().Live().Concat(net.GetStructureIds().Live()))
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Part part)) continue;
                     Count(part.PartFamilyId);

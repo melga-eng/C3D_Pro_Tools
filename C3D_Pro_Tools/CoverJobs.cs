@@ -62,7 +62,7 @@ namespace C3DProTools
         public static List<CoverJob> FromNetwork(Transaction tr, ObjectId networkId, double gap, double centerTolerance, bool gravity)
         {
             Network network = (Network)tr.GetObject(networkId, OpenMode.ForRead);
-            List<ObjectId> ids = network.GetPipeIds().Cast<ObjectId>().ToList();
+            List<ObjectId> ids = network.GetPipeIds().Live().ToList();
             return FromPipes(tr, ids, gap, centerTolerance, gravity, $"Network {network.Name}");
         }
 
@@ -92,7 +92,7 @@ namespace C3DProTools
             Pipe start = (Pipe)tr.GetObject(startId, OpenMode.ForRead), end = (Pipe)tr.GetObject(endId, OpenMode.ForRead);
             if (start.NetworkId != end.NetworkId) { error = "The start and end pipes belong to different networks."; return null; }
             Network network = (Network)tr.GetObject(start.NetworkId, OpenMode.ForRead);
-            PipeRunBuilder builder = PipeRunBuilder.Read(tr, network.GetPipeIds().Cast<ObjectId>(), gap, centerTolerance);
+            PipeRunBuilder builder = PipeRunBuilder.Read(tr, network.GetPipeIds().Live(), gap, centerTolerance);
             List<RunStep> steps = builder.FindStraightestPath(builder.IndexOf(startId), builder.IndexOf(endId), gravity);
             if (steps == null)
             {
@@ -229,7 +229,7 @@ namespace C3DProTools
             if (!(tr.GetObject(networkId, OpenMode.ForRead) is Network net)) return ObjectId.Null;
             ObjectId best = ObjectId.Null;
             double bestDist = double.MaxValue;
-            foreach (ObjectId id in net.GetStructureIds())
+            foreach (ObjectId id in net.GetStructureIds().Live())
             {
                 if (!(tr.GetObject(id, OpenMode.ForRead) is Structure st)) continue;
                 double d = new Point2d(st.Location.X, st.Location.Y).GetDistanceTo(p);

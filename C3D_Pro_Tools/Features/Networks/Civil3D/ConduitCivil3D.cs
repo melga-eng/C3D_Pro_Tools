@@ -79,7 +79,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (request.Ends?.MatchUnconnectedEnds == true)
                     foreach (ObjectId netId in networks)
                         if (tr.GetObject(netId, OpenMode.ForRead) is Network net)
-                            foreach (ObjectId sid in net.GetStructureIds())
+                            foreach (ObjectId sid in net.GetStructureIds().Live())
                             {
                                 if (structures.ContainsKey(sid) || !(tr.GetObject(sid, OpenMode.ForRead) is Structure st)) continue;
                                 Point3d at = st.Location;

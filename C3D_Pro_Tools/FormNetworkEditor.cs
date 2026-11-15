@@ -1141,9 +1141,9 @@ namespace C3DProTools
         {
             DBObject net = tr.GetObject(netId, OpenMode.ForRead);
             ObjectIdCollection pipes = net is Network n ? n.GetPipeIds() : net is PressurePipeNetwork pn ? pn.GetPipeIds() : new ObjectIdCollection();
-            foreach (ObjectId id in pipes) if (!_session.Pipes.Contains(id)) _session.Pipes.Add(id);
+            foreach (ObjectId id in pipes.Live()) if (!_session.Pipes.Contains(id)) _session.Pipes.Add(id);
             List<ObjectId> others = new List<ObjectId>();
-            if (net is Network gn) others.AddRange(gn.GetStructureIds().Cast<ObjectId>());
+            if (net is Network gn) others.AddRange(gn.GetStructureIds().Live());
             else if (net is PressurePipeNetwork pnet) { others.AddRange(pnet.GetFittingIds().Cast<ObjectId>()); others.AddRange(pnet.GetAppurtenanceIds().Cast<ObjectId>()); }
             HashSet<ObjectId> have = new HashSet<ObjectId>(_session.Parts);
             foreach (ObjectId id in others) if (have.Add(id)) _session.Parts.Add(id);

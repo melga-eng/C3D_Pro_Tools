@@ -166,7 +166,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 bool reference = false;
                 try { reference = net.IsReferenceObject; } catch (System.Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 if (reference) { references++; continue; }
-                list.Add((nid, net.Name, net.GetPipeIds().Cast<ObjectId>().ToList()));
+                list.Add((nid, net.Name, net.GetPipeIds().Live().ToList()));
             }
             return list;
         }
@@ -412,7 +412,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 var nets = Networks(tr, db, s, out int refs);
                 List<ObjectId> pipes = nets.SelectMany(n => n.pipes).ToList();
                 List<ObjectId> structures = new List<ObjectId>();
-                foreach (var n in nets) structures.AddRange(((Network)tr.GetObject(n.id, OpenMode.ForRead)).GetStructureIds().Cast<ObjectId>());
+                foreach (var n in nets) structures.AddRange(((Network)tr.GetObject(n.id, OpenMode.ForRead)).GetStructureIds().Live());
                 List<RimToSurface.Row> plan = RimToSurface.Plan(tr, pipes, structures, (Surface)tr.GetObject(surfaceId, OpenMode.ForRead), s.AboveSurface);
                 List<RimToSurface.Row> chosen = plan.Where(r => !r.Reference && (r.Check == RimCheck.Adjust || (r.Check == RimCheck.AlreadyMatches && s.FollowSurface))).ToList();
                 List<RimToSurface.Row> tooFar = chosen.Where(r => s.RimMaxChange > 0 && Math.Abs(r.NewRim - r.Rim) > s.RimMaxChange).ToList();

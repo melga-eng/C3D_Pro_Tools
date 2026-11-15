@@ -50,7 +50,7 @@ namespace C3DProTools
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                 {
                     Pipe p = (Pipe)tr.GetObject(id, OpenMode.ForRead);
                     bool shown;

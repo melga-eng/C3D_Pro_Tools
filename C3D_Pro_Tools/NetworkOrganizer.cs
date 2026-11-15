@@ -81,7 +81,7 @@ namespace C3DProTools
             foreach (ObjectId netId in networks)
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is Pipe p)
                         list.Add((new MergePart
                         {
@@ -89,7 +89,7 @@ namespace C3DProTools
                             A = (p.StartPoint.X, p.StartPoint.Y, p.StartPoint.Z), B = (p.EndPoint.X, p.EndPoint.Y, p.EndPoint.Z),
                             Uses = (labels.TryGetValue(id, out int c) ? c : 0) + Views(p)
                         }, id, netId));
-                foreach (ObjectId id in net.GetStructureIds())
+                foreach (ObjectId id in net.GetStructureIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is Structure st)
                         list.Add((new MergePart
                         {
@@ -108,10 +108,10 @@ namespace C3DProTools
             foreach (ObjectId netId in doc.GetPipeNetworkIds())
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                NetworkSummary s = new NetworkSummary { Id = netId, Name = net.Name, Pipes = net.GetPipeIds().Count, Structures = net.GetStructureIds().Count };
+                NetworkSummary s = new NetworkSummary { Id = netId, Name = net.Name, Pipes = net.GetPipeIds().Live().Count(), Structures = net.GetStructureIds().Live().Count() };
                 try { s.Reference = net.IsReferenceObject; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 List<string> sizes = new List<string>();
-                foreach (ObjectId id in net.GetPipeIds()) if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) sizes.Add(SizeOf(p));
+                foreach (ObjectId id in net.GetPipeIds().Live()) if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) sizes.Add(SizeOf(p));
                 s.Sizes = string.Join(", ", sizes.Where(x => x.Length > 0).GroupBy(x => x).OrderByDescending(g => g.Count()).Take(3).Select(g => $"{g.Key} ×{g.Count()}"));
                 list.Add(s);
             }
@@ -158,7 +158,7 @@ namespace C3DProTools
             foreach (ObjectId netId in networks.Where(n => n != target))
             {
                 Network net = (Network)tr.GetObject(netId, OpenMode.ForWrite);
-                HashSet<ObjectId> here = new HashSet<ObjectId>(net.GetPipeIds().Cast<ObjectId>().Concat(net.GetStructureIds().Cast<ObjectId>()));
+                HashSet<ObjectId> here = new HashSet<ObjectId>(net.GetPipeIds().Live().Concat(net.GetStructureIds().Live()));
                 List<ObjectId> ids = here.Where(id => move.Contains(id) && !delete.ContainsKey(id)).ToList();
                 if (ids.Count == 0) continue;
                 try
@@ -186,7 +186,7 @@ namespace C3DProTools
                 foreach (ObjectId netId in new[] { target }.Concat(networks).Distinct())
                 {
                     if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                    foreach (ObjectId pid in net.GetPipeIds())
+                    foreach (ObjectId pid in net.GetPipeIds().Live())
                     {
                         if (delete.ContainsKey(pid) || !(tr.GetObject(pid, OpenMode.ForRead) is Pipe pipe)) continue;
                         foreach (ConnectorPositionType end in new[] { ConnectorPositionType.Start, ConnectorPositionType.End })
@@ -216,7 +216,7 @@ namespace C3DProTools
             if (connectEnds)
             {
                 List<StructureFootprint> structures = StructureFootprint.OfNetwork(tr, target);
-                foreach (ObjectId pid in targetNet.GetPipeIds())
+                foreach (ObjectId pid in targetNet.GetPipeIds().Live())
                 {
                     if (!(tr.GetObject(pid, OpenMode.ForRead) is Pipe pipe)) continue;
                     foreach (bool atStart in new[] { true, false })
@@ -237,7 +237,7 @@ namespace C3DProTools
                 foreach (ObjectId netId in networks.Where(n => n != target))
                 {
                     Network net = (Network)tr.GetObject(netId, OpenMode.ForRead);
-                    if (net.GetPipeIds().Count > 0 || net.GetStructureIds().Count > 0) continue;
+                    if (net.GetPipeIds().Live().Count() > 0 || net.GetStructureIds().Live().Count() > 0) continue;
                     try { net.UpgradeOpen(); net.Erase(); result.NetworksDeleted++; }
                     catch (Exception ex) { result.Log.Add($"Network {net.Name} is empty but could not be deleted: {ex.Message}"); }
                 }
@@ -250,7 +250,7 @@ namespace C3DProTools
             int n = 0;
             foreach (ObjectId id in networks)
             {
-                if (!(tr.GetObject(id, OpenMode.ForRead) is Network net) || net.GetPipeIds().Count > 0 || net.GetStructureIds().Count > 0) continue;
+                if (!(tr.GetObject(id, OpenMode.ForRead) is Network net) || net.GetPipeIds().Live().Count() > 0 || net.GetStructureIds().Live().Count() > 0) continue;
                 try { net.UpgradeOpen(); net.Erase(); n++; }
                 catch (Exception ex) { log.Add($"{net.Name}: {ex.Message}"); }
             }
@@ -264,7 +264,7 @@ namespace C3DProTools
             foreach (ObjectId netId in networks)
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                foreach (ObjectId id in net.GetPipeIds().Cast<ObjectId>().Concat(net.GetStructureIds().Cast<ObjectId>()))
+                foreach (ObjectId id in net.GetPipeIds().Live().Concat(net.GetStructureIds().Live()))
                 {
                     try
                     {

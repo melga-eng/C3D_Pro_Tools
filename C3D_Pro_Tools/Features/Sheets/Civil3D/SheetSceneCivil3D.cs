@@ -202,7 +202,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                     if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                     List<ScenePipe> pipes = new List<ScenePipe>();
                     List<SceneStructure> structures = new List<SceneStructure>();
-                    foreach (ObjectId id in net.GetPipeIds())
+                    foreach (ObjectId id in net.GetPipeIds().Live())
                     {
                         if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
                         try
@@ -213,7 +213,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                         }
                         catch (Exception ex) { Warn($"Pipe {p.Name} could not be read.", ex, p); }
                     }
-                    foreach (ObjectId id in net.GetStructureIds())
+                    foreach (ObjectId id in net.GetStructureIds().Live())
                     {
                         if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Structure s)) continue;
                         try
@@ -405,7 +405,7 @@ namespace C3DProTools.Features.Sheets.Civil3D
                 foreach (ObjectId netId in networkIds)
                 {
                     if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
-                    foreach (ObjectId id in net.GetPipeIds())
+                    foreach (ObjectId id in net.GetPipeIds().Live())
                     {
                         if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Pipe pipe)) continue;
                         try

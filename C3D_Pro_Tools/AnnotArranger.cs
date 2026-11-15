@@ -114,9 +114,9 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                 int parts = 0;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is Pipe p && (Shows(p.StartPoint) || Shows(p.EndPoint) || Shows(new Point3d((p.StartPoint.X + p.EndPoint.X) / 2, (p.StartPoint.Y + p.EndPoint.Y) / 2, 0)))) parts++;
-                foreach (ObjectId id in net.GetStructureIds())
+                foreach (ObjectId id in net.GetStructureIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is Structure st && Shows(st.Location)) parts++;
                 labelsOf.TryGetValue(netId, out int labels);
                 if (parts > 0 || labels > 0) scan.Networks.Add((net.Name, parts, labels));
@@ -125,7 +125,7 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is PressurePipeNetwork net)) continue;
                 int parts = 0;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is PressurePipe p && (Shows(p.StartPoint) || Shows(p.EndPoint))) parts++;
                 if (parts > 0) scan.Networks.Add((net.Name, parts, 0));
             }
@@ -149,7 +149,7 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net) || !networks.Contains(net.Name)) continue;
                 List<(ObjectId id, ((double X, double Y) a, (double X, double Y) b) line)> pipes = new List<(ObjectId, ((double, double), (double, double)))>();
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is Pipe p) pipes.Add((id, ((p.StartPoint.X, p.StartPoint.Y), (p.EndPoint.X, p.EndPoint.Y))));
                 var lines = pipes.Select(x => x.line).ToList();
                 for (int i = 0; i < pipes.Count; i++)
@@ -269,7 +269,7 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is Network net)) continue;
                 s.NetworkNames[netId] = net.Name;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
                     s.NetworkOf[id] = netId;
@@ -280,7 +280,7 @@ namespace C3DProTools
                     for (int i = 1; i < path.Count; i++) s.Parts.Add((Band(path[i - 1], path[i], half), id, netId));
                     if (profiles) { try { ObjectIdCollection v = p.GetProfileViewsDisplayingMe(); if (v.Count > 0) profilePipes.Add((p, v)); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { } }
                 }
-                foreach (ObjectId id in net.GetStructureIds())
+                foreach (ObjectId id in net.GetStructureIds().Live())
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Structure st)) continue;
                     s.NetworkOf[id] = netId;
@@ -292,7 +292,7 @@ namespace C3DProTools
             {
                 if (!(tr.GetObject(netId, OpenMode.ForRead) is PressurePipeNetwork net)) continue;
                 s.NetworkNames[netId] = net.Name;
-                foreach (ObjectId id in net.GetPipeIds())
+                foreach (ObjectId id in net.GetPipeIds().Live())
                     if (tr.GetObject(id, OpenMode.ForRead) is PressurePipe p)
                     {
                         s.NetworkOf[id] = netId;
