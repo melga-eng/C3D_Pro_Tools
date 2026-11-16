@@ -52,8 +52,11 @@ namespace C3DProTools
             {
                 using (doc.LockDocument())
                 {
-                    var pairs = arg.Split(',').Select(x => x.Split('=')).Where(x => x.Length == 2)
-                                   .Select(x => (from: x[0].Trim(), to: x[1].Trim())).Where(x => x.from.Length > 0 && x.to.Length > 0).ToList();
+                    // Every entry must be old=new: a malformed one stops the whole request before anything changes.
+                    string[] entries = arg.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+                    string bad = entries.FirstOrDefault(x => x.Split('=').Length != 2 || x.Split('=').Any(part => part.Trim().Length == 0));
+                    if (bad != null) { log.AppendLine($"C3DPROSHEETS failed: \"{bad}\" is not old=new; nothing was changed."); return log.ToString(); }
+                    var pairs = entries.Select(x => x.Split('=')).Select(x => (from: x[0].Trim(), to: x[1].Trim())).ToList();
                     if (mode != "Report" && pairs.Count == 0) { log.AppendLine($"C3DPROSHEETS failed: nothing to {mode.ToLowerInvariant()} in \"{arg}\"."); return log.ToString(); }
                     var touched = new List<string>();
                     if (mode != "Report")

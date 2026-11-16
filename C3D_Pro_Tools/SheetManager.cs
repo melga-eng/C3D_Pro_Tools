@@ -469,11 +469,13 @@ namespace C3DProTools
         public static SheetRecord Duplicate(Transaction tr, Database db, SheetRecord source, string newName, SheetProfile p)
         {
             LayoutManager lm = LayoutManager.Current;
+            // The source's number tag, before the copy carries the new name (review finding, 2026-11-16).
+            string numberTag = NumberTagOf(source, p);
             lm.CloneLayout(source.Layout, newName, source.Tab + 1);
             Layout lay = (Layout)tr.GetObject(lm.GetLayoutId(newName), OpenMode.ForRead);
             SheetRecord copy = ReadOne(tr, lay, p);
             // Its number, and no match lines: the source's neighbours are not the copy's.
-            Dictionary<string, string> v = new Dictionary<string, string> { [NumberTagOf(copy, p)] = newName };
+            Dictionary<string, string> v = new Dictionary<string, string> { [numberTag] = newName };
             foreach (string tag in new[] { p.MatchRightTag, p.MatchLeftTag, p.MatchUpTag, p.MatchDownTag }) if (!string.IsNullOrEmpty(tag)) v[tag] = "";
             SetAttributes(tr, copy, v);
             return copy;
@@ -1042,8 +1044,9 @@ namespace C3DProTools
         public static string NumberTagOf(SheetRecord s, SheetProfile p)
         {
             if (s.HasAttr(p.NumberTag) || s.Attributes.Count == 0) return p.NumberTag;
-            return s.Attributes.Where(a => a.Value == s.Layout).Select(a => a.Key).FirstOrDefault()
-                ?? s.Attributes.Where(a => Regex.IsMatch(a.Key, "DRAW.*N(O|UM)|DWG.*N(O|UM)", RegexOptions.IgnoreCase)).Select(a => a.Key).FirstOrDefault()
+            // By name first: a value equal to the layout name can be another field (review finding, 2026-11-16).
+            return s.Attributes.Where(a => Regex.IsMatch(a.Key, "DRAW.*N(O|UM)|DWG.*N(O|UM)", RegexOptions.IgnoreCase)).Select(a => a.Key).FirstOrDefault()
+                ?? s.Attributes.Where(a => a.Value == s.Layout).Select(a => a.Key).FirstOrDefault()
                 ?? p.NumberTag;
         }
 
