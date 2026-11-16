@@ -79,7 +79,8 @@ namespace C3DProTools.Features.CadExport
 
         /// <summary>
         /// The turn to explode one label at. In order: a profile-kind label, or one inside a profile view, at 0; one inside a
-        /// turned viewport at that viewport's twist (the most used one when several show it); otherwise the plan twist.
+        /// turned viewport at that viewport's twist (the most used one when several show it); one shown only in north-up
+        /// viewports at 0; otherwise the plan twist. The windows are those of the sheets being exported.
         /// </summary>
         public static double For(double x, double y, bool profileKind, bool insideProfileView, IReadOnlyList<ViewportWindow> windows, double planTwist)
         {
@@ -87,6 +88,8 @@ namespace C3DProTools.Features.CadExport
             var turned = windows.Where(w => Math.Abs(Normal(w.Twist)) > Tol && w.Contains(x, y)).ToList();
             if (turned.Count > 0)
                 return turned.GroupBy(w => Math.Round(Normal(w.Twist), 6)).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).First().First().Twist;
+            // Shown only in north-up viewports of the chosen sheets: north up (review finding, 2026-11-16).
+            if (windows.Any(w => w.Contains(x, y))) return 0.0;
             return planTwist;
         }
 

@@ -56,20 +56,23 @@ namespace C3DProTools.Features.CadExport
             kw.Keywords.Add("Export");
             PromptResult kr = ed.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK) return;
-            var s = new CadExportSettings();
+            // Names and folder may come as @file (UTF-8): a script is ASCII, and a non-English name would turn into ? (a wildcard).
+            PromptResult lr = ed.GetString(new PromptStringOptions("\nLayouts (| between names, wildcards allowed, or @file): ") { AllowSpaces = true });
+            if (lr.Status != PromptStatus.OK) return;
+            var s = new CadExportSettings
+            {
+                Layouts = FromFile(lr.StringResult).Split('|', '\n', '\r').Select(n => n.Trim()).Where(n => n.Length > 0).ToList(),
+            };
             if (kr.StringResult == "Export")
             {
-                PromptResult lr = ed.GetString(new PromptStringOptions("\nLayouts (| between names, wildcards allowed): ") { AllowSpaces = true });
-                if (lr.Status != PromptStatus.OK) return;
-                PromptResult fr = ed.GetString(new PromptStringOptions("\nOutput folder: ") { AllowSpaces = true });
+                PromptResult fr = ed.GetString(new PromptStringOptions("\nOutput folder (or @file): ") { AllowSpaces = true });
                 if (fr.Status != PromptStatus.OK) return;
-                s.Layouts = lr.StringResult.Split('|').Select(n => n.Trim()).Where(n => n.Length > 0).ToList();
-                s.Folder = fr.StringResult.Trim().Trim('"');
+                s.Folder = FromFile(fr.StringResult).Trim().Trim('"');
             }
             // The background console moves TEMP into its own folder, so the window names the report file it will read.
             PromptResult rr = ed.GetString(new PromptStringOptions("\nReport file <none>: ") { AllowSpaces = true });
             if (rr.Status != PromptStatus.OK) return;
-            string report = kr.StringResult == "Export" ? Export(doc, s) : Explode(doc);
+            string report = kr.StringResult == "Export" ? Export(doc, s) : Explode(doc, s.Layouts);
             string reportFile = rr.StringResult.Trim().Trim('"');
             if (reportFile.Length > 0)
                 try { File.AppendAllText(reportFile, report); }
@@ -77,15 +80,34 @@ namespace C3DProTools.Features.CadExport
             ed.WriteMessage("\n" + RunReport.Write(report, Command, kr.StringResult) + "\n");
         }
 
-        /// <summary>Step 1: every Civil 3D label exploded as its sheet shows it. The open drawing must be a disposable copy.</summary>
-        internal static string Explode(Document doc)
+        /// <summary>
+        /// Whether a typed or sent name picks a layout: the exact name when a layout has it (a sheet name may hold * or ?),
+        /// otherwise as wildcards.
+        /// </summary>
+        internal static bool Picks(string pattern, string layout, IReadOnlyCollection<string> all) =>
+            all.Contains(pattern, StringComparer.OrdinalIgnoreCase)
+                ? string.Equals(pattern, layout, StringComparison.OrdinalIgnoreCase)
+                : NamePatterns.Matches(pattern, layout);
+
+        /// <summary>A prompt answer, or the UTF-8 text of the file it names after @.</summary>
+        private static string FromFile(string answer)
+        {
+            string a = (answer ?? "").Trim();
+            return a.StartsWith("@") ? File.ReadAllText(a.Substring(1).Trim('"'), Encoding.UTF8).Trim() : a;
+        }
+
+        /// <summary>
+        /// Step 1: every Civil 3D label exploded as the chosen sheets show it (only their viewports decide a label's turn). The
+        /// open drawing must be a disposable copy.
+        /// </summary>
+        internal static string Explode(Document doc, List<string> layouts)
         {
             var log = new StringBuilder();
             log.AppendLine($"{Command} on {Path.GetFileName(doc.Name)}");
             var clock = Stopwatch.StartNew();
             try
             {
-                using (doc.LockDocument()) ExplodeLabels(doc, log);
+                using (doc.LockDocument()) ExplodeLabels(doc, layouts, log);
                 log.AppendLine($"  labels done after {clock.Elapsed.TotalSeconds:0} s");
             }
             catch (System.Exception ex)
@@ -109,14 +131,18 @@ namespace C3DProTools.Features.CadExport
                 Directory.CreateDirectory(work);
 
                 List<string> all = LayoutNames(doc.Database);
-                List<string> chosen = all.Where(n => s.Layouts.Any(p => NamePatterns.Matches(p, n))).ToList();
-                foreach (string missing in s.Layouts.Where(p => !all.Any(n => NamePatterns.Matches(p, n))))
+                List<string> chosen = all.Where(n => s.Layouts.Any(p => Picks(p, n, all))).ToList();
+                foreach (string missing in s.Layouts.Where(p => !all.Any(n => Picks(p, n, all))))
                     log.AppendLine($"Not found: no layout is named \"{missing}\".");
                 if (chosen.Count == 0) { log.AppendLine("Failed: none of the chosen layouts is in the drawing."); return log.ToString(); }
 
                 using (doc.LockDocument())
                 {
                     string exported = Path.Combine(work, "export.dwg");
+                    // Exported from Model: from a sheet, EXPORTTOAUTOCAD stalls in the background at _MSPACE (tile 124 and
+                    // 000501 copies, 2026-11-16).
+                    if (!string.Equals(LayoutManager.Current.CurrentLayout, "Model", StringComparison.OrdinalIgnoreCase))
+                        LayoutManager.Current.CurrentLayout = "Model";
                     ExportToAutoCad(doc, exported);
                     if (!File.Exists(exported)) { log.AppendLine("Failed: EXPORTTOAUTOCAD wrote no file."); return log.ToString(); }
                     log.AppendLine($"  exported to AutoCAD 2018 after {clock.Elapsed.TotalSeconds:0} s ({new FileInfo(exported).Length / 1048576} MB)");
@@ -198,7 +224,7 @@ namespace C3DProTools.Features.CadExport
         /// with the model view turned to it so Civil 3D draws each label as its sheet shows it. Locked layers are unlocked for
         /// the explode and locked again.
         /// </summary>
-        private static void ExplodeLabels(Document doc, StringBuilder log)
+        private static void ExplodeLabels(Document doc, List<string> layouts, StringBuilder log)
         {
             Database db = doc.Database;
             var groups = new Dictionary<double, List<ObjectId>>();
@@ -206,7 +232,9 @@ namespace C3DProTools.Features.CadExport
             double planTwist;
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                List<ViewportWindow> windows = Windows(db, tr);
+                List<string> names = LayoutNames(db);
+                List<ViewportWindow> windows = Windows(db, tr)
+                    .Where(w => layouts.Count == 0 || layouts.Any(p => Picks(p, w.Layout, names))).ToList();
                 planTwist = SheetTwist.PlanTwist(windows);
                 var profileViews = new List<Extents3d>();
                 var labels = new List<(ObjectId Id, string Kind)>();
@@ -371,7 +399,9 @@ namespace C3DProTools.Features.CadExport
         /// <summary>EXPORTTOAUTOCAD to the given file, AutoCAD 2018 format.</summary>
         private static void ExportToAutoCad(Document doc, string file)
         {
-            doc.Editor.Command("_.-EXPORTTOAUTOCAD", "_Format", "2018", "", file);
+            // Xrefs are not bound: binding an unloaded xref from the copy fails (eWrongDatabase on the user's 000501 drawing,
+            // 2026-11-16) and EXPORTTOAUTOCAD then writes no file. The sheets carry no xrefs.
+            doc.Editor.Command("_.-EXPORTTOAUTOCAD", "_Format", "2018", "_Bind", "_No", "", file);
         }
 
         /// <summary>
@@ -394,10 +424,31 @@ namespace C3DProTools.Features.CadExport
                         lm.DeleteLayout(other);
                     int purged = Purge(db);
                     db.SaveAs(target, DwgVersion.AC1032);
+                    HostApplicationServices.WorkingDatabase = previous;
+                    OpenOnSheet(target);
                     return purged;
                 }
                 finally { HostApplicationServices.WorkingDatabase = previous; }
             }
+        }
+
+        /// <summary>
+        /// The saved sheet set to open on its one layout (Model tab off). The layout made current in the split's side database
+        /// does not stick (102059 opened on Model, 2026-11-16), and TILEMODE set there crashed the background Civil 3D, so the
+        /// file is read again on its own and saved once more.
+        /// </summary>
+        private static void OpenOnSheet(string file)
+        {
+            string temp = file + ".c3dpro.tmp";
+            using (var db = new Database(false, true))
+            {
+                db.ReadDwgFile(file, FileOpenMode.OpenForReadAndAllShare, true, "");
+                db.CloseInput(true);
+                db.TileMode = false;
+                db.SaveAs(temp, DwgVersion.AC1032);
+            }
+            File.Copy(temp, file, true);
+            File.Delete(temp);
         }
 
         /// <summary>PURGE all: unused blocks, layers, linetypes, text, dimension, multileader, table and multiline styles, until none is left.</summary>

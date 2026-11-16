@@ -18,13 +18,15 @@ namespace C3DProTools.Features.CadExport
         private readonly TextBox _folder = StyleUi.Box("Folder for the CAD sheets");
         private readonly Label _count = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(3, 9, 3, 3) };
         private bool _filling;
+        private readonly string _source;
 
         public List<string> Chosen => _layouts.Where(_ticked.Contains).ToList();
         public string Folder => _folder.Text.Trim().Trim('"');
 
-        public FormCadExport(List<string> layouts, IEnumerable<string> lastTicked, string folder)
+        public FormCadExport(List<string> layouts, IEnumerable<string> lastTicked, string folder, string source)
         {
             _layouts = layouts;
+            _source = source ?? "";
             _ticked = new HashSet<string>((lastTicked ?? Enumerable.Empty<string>()).Where(layouts.Contains), StringComparer.Ordinal);
             Text = "CAD Sheets";
             Font = StyleUi.Base;
@@ -134,6 +136,10 @@ namespace C3DProTools.Features.CadExport
                 MessageBox.Show(this, $"The folder cannot be used: {ex.Message}", Text);
                 return;
             }
+            // Never over the drawing the sheets are made from (review finding: a sheet named like the drawing, in its folder).
+            string clash = chosen.Select(SheetTwist.FileName).FirstOrDefault(f => _source.Length > 0 &&
+                string.Equals(Path.GetFullPath(Path.Combine(Folder, f)), Path.GetFullPath(_source), StringComparison.OrdinalIgnoreCase));
+            if (clash != null) { MessageBox.Show(this, $"{clash} would replace the drawing the sheets are made from. Choose another folder.", Text); return; }
             List<string> existing = chosen.Select(SheetTwist.FileName).Where(f => File.Exists(Path.Combine(Folder, f))).ToList();
             if (existing.Count > 0 && MessageBox.Show(this,
                     $"{existing.Count} of these files are already in the folder and will be replaced:\n\n" + string.Join("\n", existing.Take(8)) +

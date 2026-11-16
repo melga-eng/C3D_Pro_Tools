@@ -51,6 +51,14 @@ namespace C3D_Pro_Tools.Tests
         }
 
         [Fact]
+        public void LabelOnlyOnANorthUpChosenSheetStaysNorthUp()
+        {
+            // Sheet A shows the area north up and is the one exported; sheet B (turned) is not chosen, so it is not in the list.
+            var windows = new List<ViewportWindow> { ViewportWindow.Of("A", 520, 260, 0, 0, 130, 1000, 2000, 0) };
+            Assert.Equal(0, SheetTwist.For(1000, 2000, false, false, windows, Plan));
+        }
+
+        [Fact]
         public void NorthUpDrawingHasNoPlanTwist()
         {
             Assert.Equal(0, SheetTwist.PlanTwist(new[] { ProfileWindow() }));

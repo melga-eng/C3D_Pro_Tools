@@ -46,7 +46,7 @@ namespace C3DProTools.Features.CadExport
             List<string> layouts = CadExportRun.LayoutNames(doc.Database);
             if (layouts.Count == 0) { WinForms.MessageBox.Show("The drawing has no layouts.", "CAD Sheets"); return; }
             Remembered last = Remembered.Load(source);
-            using var form = new FormCadExport(layouts, last.Layouts, string.IsNullOrWhiteSpace(last.Folder) ? Path.GetDirectoryName(source) : last.Folder);
+            using var form = new FormCadExport(layouts, last.Layouts, string.IsNullOrWhiteSpace(last.Folder) ? Path.GetDirectoryName(source) : last.Folder, source);
             if (AcApp.ShowModalDialog(form) != WinForms.DialogResult.OK) return;
             Remembered.Save(source, new Remembered { Folder = form.Folder, Layouts = form.Chosen });
 
@@ -95,11 +95,15 @@ namespace C3DProTools.Features.CadExport
                 {
                     Source = source, Started = DateTime.Now, _dir = dir, _folder = folder, _console = console, _acadDir = acadDir, _copy = copy,
                 };
+                // Sheet names and the folder go in UTF-8 files: the script is ASCII, where É would become ? (a wildcard).
+                string layoutsFile = Path.Combine(dir, "layouts.txt"), folderFile = Path.Combine(dir, "folder.txt");
+                File.WriteAllLines(layoutsFile, layouts, System.Text.Encoding.UTF8);
+                File.WriteAllText(folderFile, folder, System.Text.Encoding.UTF8);
                 job._exportScript = new[]
                 {
-                    "SECURELOAD", "0", "NETLOAD", dll, CadExportRun.Command, "Export", string.Join("|", layouts), folder, job.ReportFile, "_QUIT", "_Y",
+                    "SECURELOAD", "0", "NETLOAD", dll, CadExportRun.Command, "Export", "@" + layoutsFile, "@" + folderFile, job.ReportFile, "_QUIT", "_Y",
                 };
-                job.Run(1, new[] { "SECURELOAD", "0", "NETLOAD", dll, CadExportRun.Command, "Explode", job.ReportFile, "_QSAVE", "_QUIT" });
+                job.Run(1, new[] { "SECURELOAD", "0", "NETLOAD", dll, CadExportRun.Command, "Explode", "@" + layoutsFile, job.ReportFile, "_QSAVE", "_QUIT" });
                 job._timer = new WinForms.Timer { Interval = 3000 };
                 job._timer.Tick += (s, e) => job.Check();
                 job._timer.Start();
