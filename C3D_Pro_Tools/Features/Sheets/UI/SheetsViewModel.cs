@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -323,23 +323,20 @@ namespace C3DProTools.Features.Sheets.UI
                 return;
             }
 
+            // The same steps as C3DProBuildSheets (drawing test on 102054, 2026-11-16).
             var steps = specificSteps ?? new HashSet<BuildStep>
             {
                 BuildStep.PlanLabels,
-                BuildStep.ProfileViews,
                 BuildStep.ProfileLabels,
-                BuildStep.Dims,
-                BuildStep.SheetData,
                 BuildStep.Arrange
             };
 
-            var ruleSet = new LabelRuleSet("SyntheticRules", 1, new List<LabelRule>());
             var request = new BuildSheetsRequest
             {
                 Drawing = ActiveDrawing,
                 Layouts = targetLayouts,
                 Steps = steps,
-                Rules = ruleSet,
+                Rules = null,
                 Settings = BuildSettings.Default
             };
 
@@ -355,8 +352,8 @@ namespace C3DProTools.Features.Sheets.UI
             {
                 Drawing = ActiveDrawing,
                 Layouts = targetLayouts,
-                Steps = new HashSet<BuildStep> { BuildStep.PlanLabels },
-                Rules = new LabelRuleSet("TestRules", 1, new List<LabelRule>()),
+                Steps = new HashSet<BuildStep> { BuildStep.PlanLabels, BuildStep.Arrange },
+                Rules = null,
                 Settings = BuildSettings.Default
             };
 
@@ -445,6 +442,17 @@ namespace C3DProTools.Features.Sheets.UI
             PreviewItems.Clear();
             if (preview == null) return;
 
+            // The preview's issues are shown for every status (review finding, 2026-11-11): a Succeeded or NoChange preview can
+            // still have skipped rules or an Arrange left out (an unreadable style), and the banner says so.
+            AllIssues.Clear();
+            foreach (var issue in preview.Issues) AllIssues.Add(new IssueItemViewModel(issue));
+            ApplyIssueFilter();
+            OnPropertyChanged(nameof(TotalErrorCount));
+            OnPropertyChanged(nameof(TotalWarningCount));
+            OnPropertyChanged(nameof(TotalInfoCount));
+            int problems = preview.Issues.Count(i => i.Severity != IssueSeverity.Info);
+            string skipped = problems > 0 ? $" {problems} issue(s): some work was skipped, see Issues." : "";
+
             // Correct handling of every preview status: Succeeded, NoChange, Rejected, Cancelled, OutcomeUnknown
             switch (preview.Status)
             {
@@ -459,7 +467,7 @@ namespace C3DProTools.Features.Sheets.UI
                     ShowStatusBanner(
                         OperationStatus.Succeeded,
                         "Preview Ready",
-                        $"Planned {totalChanges} change(s) across {preview.Items.Count} item(s). Review changes below and click Apply."
+                        $"Planned {totalChanges} change(s) across {preview.Items.Count} item(s). Review changes below and click Apply." + skipped
                     );
                     break;
 
@@ -467,7 +475,7 @@ namespace C3DProTools.Features.Sheets.UI
                     ShowStatusBanner(
                         OperationStatus.NoChange,
                         "No Changes Needed",
-                        "The drawing linework and annotations already match current rules. No changes planned."
+                        "The drawing linework and annotations already match current rules. No changes planned." + skipped
                     );
                     break;
 
@@ -737,21 +745,26 @@ namespace C3DProTools.Features.Sheets.UI
             if (issue == null || !issue.HasLocation || IsOperationRunning) return;
 
             string layout = issue.Layout;
-            var steps = new HashSet<BuildStep>();
 
             if (issue.Code.StartsWith("dims.", StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(BuildStep.Dims);
+                LastFeedbackMessage = "The Dims step is not built yet.";
+                ShowStatusBanner(OperationStatus.Rejected, "Step Not Built", "The Dims step is not built yet; it cannot be fixed automatically.");
+                return;
             }
-            else if (issue.Code.StartsWith("continuation.", StringComparison.OrdinalIgnoreCase))
+
+            if (issue.Code.StartsWith("continuation.", StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(BuildStep.SheetData);
+                LastFeedbackMessage = "The SheetData step is not built yet.";
+                ShowStatusBanner(OperationStatus.Rejected, "Step Not Built", "The SheetData step is not built yet; it cannot be fixed automatically.");
+                return;
             }
-            else
+
+            var steps = new HashSet<BuildStep>
             {
-                steps.Add(BuildStep.PlanLabels);
-                steps.Add(BuildStep.Arrange);
-            }
+                BuildStep.PlanLabels,
+                BuildStep.Arrange
+            };
 
             LastFeedbackMessage = $"Fixing issue '{issue.Code}' on sheet {layout}...";
             await BuildSelectedAsync(new[] { layout }, steps);

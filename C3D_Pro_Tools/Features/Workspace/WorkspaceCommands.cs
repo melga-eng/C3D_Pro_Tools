@@ -16,5 +16,11 @@ namespace C3DProTools.Features.Workspace
         {
             WorkspacePaletteHost.Show();
         }
+
+        [CommandMethod("C3DProWorkspaceDemo")]
+        public void ShowWorkspaceDemo()
+        {
+            WorkspacePaletteHost.ShowDemo();
+        }
     }
 }

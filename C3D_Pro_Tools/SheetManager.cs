@@ -172,6 +172,12 @@ namespace C3DProTools
             {
                 s.Tile = tm.Groups["tile"].Value; s.Part = tm.Groups["part"].Value; s.TileSource = "title block";
             }
+            // A profile sheet's title names its tile ("PROFILE SHEET 123 - PART 1"); before the key plan, which on tile 124's
+            // drawing showed 159 on two sheets titled 123 (2026-11-16): the title is the sheet's own statement.
+            if (s.Tile.Length == 0 && Regex.Match(s.Attr(p.SheetTitleTag), @"\bSHEET\s+(\d+)\b", RegexOptions.IgnoreCase) is Match st && st.Success)
+            {
+                s.Tile = st.Groups[1].Value; s.TileSource = "sheet title (tile only)";
+            }
             if (s.Tile.Length == 0 && s.KeyTexts.Count > 0) { s.Tile = s.KeyTexts[0].tile; s.TileSource = "key plan (tile only)"; }
             return s;
         }
@@ -807,6 +813,10 @@ namespace C3DProTools
                         Add(s, $"The key plan marks part {marked}, the sheet is {s.TilePart}.", "Move the key plan hatch", t => UpdateKeyPlan(t, s, p, null));
                     if (s.KeyTexts.Any(k => k.tile != s.Tile)) Add(s, $"The key plan shows another tile than {s.Tile}.", "Rewrite the key plan", t => UpdateKeyPlan(t, s, p, null));
                 }
+                // A profile or detail sheet: its title names the tile, the key plan should show the same one. Reported only (the
+                // plan-part rewrite moves part hatches a profile sheet does not have).
+                else if (s.TileSource == "sheet title (tile only)" && s.KeyTexts.Count > 0 && s.KeyTexts[0].tile != s.Tile)
+                    Add(s, $"The key plan shows tile {s.KeyTexts[0].tile}; the sheet title says {s.Tile}.");
                 if (s.IsPart && sheets.Count(x => x.IsPart && x.Tile == s.Tile && x.Part.Equals(s.Part, StringComparison.OrdinalIgnoreCase)) > 1)
                     Add(s, $"Another sheet is also {s.TilePart}.");
                 if (s.ViewportId.IsNull) Add(s, "No model viewport.");
