@@ -61,18 +61,18 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 | Profile View Tools (`ProfileViewTools`) | Match one profile view's style, bands and profiles to others; split long views | Match: cause of the 11 Nov problem found (template surface names); fixed in `C3DPROPV Match`, the form still has it. Split: **Unknown** | `ProfileViewMatch.cs`, `ProfileViewSplit.cs`, `ProfileViewRecipe.cs` |
 | Profile DIMs (`PROFILEDIMS`) | Cover and clearance dimensions in profile views | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
 | Annotation Studio (`AnnotationStudio`) | Add labels, arrange them inside viewports, reset, rename parts | Reset: **Works**. Arrange: 102054 copy 31 of 33 placed (2 by hand), waiting for your try. Rename: same engine as C3DPROLBL Rename, drawing test passes. Add labels: a pipe row can be left out where the pipe starts / ends / either at a manhole (tile 124 copy: 103 labelled, 25 left out) | `FormAnnotationStudio.cs`, `AnnotArranger.cs`, `LabelLayout.cs`, `AnnotNaming.cs` |
-| Sheet Manager (`SheetManager`) | List, rename, copy, create layouts by tile and part | **Unknown** | `SheetManager.cs`, `FormSheetManager.cs` |
-| CAD Sheets (`C3DPROCAD`, background step `C3DPROCADRUN`) | One AutoCAD 2018 DWG per chosen layout, named after it: labels exploded as each sheet shows them (plan at the viewport twist, profile at true north), EXPORTTOAUTOCAD, that layout only and current, purged. Runs in a background Civil 3D on a copy of the saved drawing. Replaces SplitSheets.lsp | **In drawing test** (tile 124 copy, 102054 plan + 434132 profile) | `Features/CadExport/` |
-| Build Sheets (`C3DProBuildSheets`, `C3DProPlanLabels`) | One run that makes plan labels, profile labels and arranges them for chosen sheets | **Not proven**: never run on tile 124 | `Features/Sheets/` |
-| Workspace Palette (`C3DProWorkspace`) | New docked panel for Build Sheets | **Not proven**; its finished version is on an unmerged branch | `Features/Workspace/`, `Features/Sheets/UI/` |
+| Sheet Manager (`SheetManager`, report `C3DPROSHEETS`) | List, rename, copy, create layouts by tile and part; checks | **Reading and checks pass** (tile 124 copy, 2026-11-16: 44 sheets, 24 plan parts right; profile sheets now take the tile from their title, 434101/434102 key plans show tile 159 and are reported). Rename, copy, create: **not yet tested** | `SheetManager.cs`, `SheetManagerRun.cs`, `FormSheetManager.cs` |
+| CAD Sheets (`C3DPROCAD`, background steps `C3DPROCADRUN Explode/Export`) | One AutoCAD 2018 DWG per chosen layout, named after it: labels exploded as each sheet shows them (plan at the viewport twist, profile at true north) and flattened to text and lines, EXPORTTOAUTOCAD, that layout only and current, purged. Two background Civil 3D runs on a copy of the saved drawing. Replaces SplitSheets.lsp | **Explode passes** (tile 124 copy: 2560 profile + 675 plan labels). Export step: **not yet finished in a test** (EXPORTTOAUTOCAD runs over 25 min on the 150 MB drawing); window and launch not tried live | `Features/CadExport/` |
+| Build Sheets (`C3DProBuildSheets`, `C3DProPlanLabels`) | One run that makes plan labels, profile labels and arranges them for chosen sheets | **Drawing test passes** (tile 124 copy, 102054, 2026-11-16: preview 13 changes, apply added 12 and arranged 7; a second preview adds nothing) | `Features/Sheets/` |
+| Workspace Palette (`C3DProWorkspace`) | Docked panel for Build Sheets | **Merged 2026-11-16** with the review finding fixed (issues shown for every preview status). Needs a live check (a palette cannot run in the background test) | `Features/Workspace/`, `Features/Sheets/UI/` |
 
 ## Standards: styles and cleanup
 
 | Tool (command) | What it does | State | Main code |
 |---|---|---|---|
 | Style Manager (`StyleManager`) | Find unused, duplicate and non-standard styles; merge, replace, purge | **Fixed 2026-11-15** (15 defects found by Codex): the scan crashed Civil 3D (settings walk), select ticked styles, merge, rename, sort, duplicates, purge status, batch, mapping. Test drawing copy: 424 styles scanned, a duplicate merged. Waiting for your try | `Style*.cs`, `FormStyleManager.cs` |
-| Label Style Values (`STYLEMGR`) | Batch-set text heights, arrowheads and other values of label styles | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
-| Drawing Cleaner (`C3DDrawingCleaner`, `CleanSubmittalDrawing`) | Save a cleaned copy for submittal | **Unknown** after the fix of 5 Nov (it could delete layouts from the open drawing) | `DrawingCleanup.cs`, `FormDrawingCleaner.cs` |
+| Label Style Values (`STYLEMGR`, no window `C3DPROSTYLEVAL`) | Batch-set text heights, arrowheads and other values of label styles | **Drawing test passes** (Test.dwg copy, 2026-11-16: 6 structure text heights 2.5 -> 3 mm, read back). The window itself not tried | `Features/ProfileTool/` |
+| Drawing Cleaner (`C3DDrawingCleaner`, `CleanSubmittalDrawing`, no window `C3DPROCLEAN`) | Save a cleaned copy for submittal | **Drawing test passes** on Test.dwg (2026-11-16, Networks only: 263 deleted, open drawing kept its 3 layouts). Not yet on the 150 MB tile drawing | `DrawingCleanup.cs`, `FormDrawingCleaner.cs`, `DrawingCleanerCommand.cs` |
 
 ## Known overlaps to merge
 
@@ -87,5 +87,5 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 
 | Branch | Holds | Plan |
 |---|---|---|
-| `ui/palette-real-service` (Antigravity) | Palette wired to the real Build Sheets | Merge when Build Sheets passes on tile 124 |
-| `feature/ict-pilot-placement`, `ui/arrange-labels-demo` | New Arrange Labels operation and screen | Decide in release 3: finish or drop in favour of Build Sheets |
+| `ui/palette-real-service` (Antigravity) | Palette wired to the real Build Sheets | Merged into `feature/cad-sheet-export` 2026-11-16 |
+| `feature/ict-pilot-placement`, `ui/arrange-labels-demo` | New Arrange Labels operation and screen | Dropped 2026-11-16: C3DPROLBL Arrange and Build Sheets cover it (branches kept, not merged) |
