@@ -559,7 +559,7 @@ namespace C3DProTools
                 Change("Creating the sheet", tr =>
                 {
                     SheetRecord made = fromFile ? SheetManager.FromTemplate(tr, _doc.Database, path.Text, src, newName, P) : SheetManager.Duplicate(tr, _doc.Database, Sheet(src), newName, P);
-                    SheetManager.SetAttributes(tr, made, new Dictionary<string, string> { [P.NumberTag] = newName });
+                    SheetManager.SetAttributes(tr, made, new Dictionary<string, string> { [SheetManager.NumberTagOf(made, P)] = newName });
                     List<string> log = new List<string>();
                     if (t.Length > 0 || pt.Length > 0) SheetManager.SetTilePart(tr, made, t.Length > 0 ? t : made.Tile, pt.Length > 0 ? pt : made.Part, P, log);
                     List<SheetRecord> all = SheetManager.Read(tr, _doc.Database, P);

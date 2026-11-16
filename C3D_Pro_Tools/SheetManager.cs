@@ -321,7 +321,7 @@ namespace C3DProTools
                 lm.RenameLayout(temp[kv.Key], kv.Value);
                 map[kv.Key.Layout] = kv.Value;
                 log.Add($"{kv.Key.Layout} → {kv.Value}");
-                SetAttributes(tr, kv.Key, new Dictionary<string, string> { [p.NumberTag] = kv.Value });
+                SetAttributes(tr, kv.Key, new Dictionary<string, string> { [NumberTagOf(kv.Key, p)] = kv.Value });
                 kv.Key.Layout = kv.Value;
             }
             // Match lines pointing at a renamed sheet.
@@ -469,11 +469,13 @@ namespace C3DProTools
         public static SheetRecord Duplicate(Transaction tr, Database db, SheetRecord source, string newName, SheetProfile p)
         {
             LayoutManager lm = LayoutManager.Current;
+            // The source's number tag, before the copy carries the new name (review finding, 2026-11-16).
+            string numberTag = NumberTagOf(source, p);
             lm.CloneLayout(source.Layout, newName, source.Tab + 1);
             Layout lay = (Layout)tr.GetObject(lm.GetLayoutId(newName), OpenMode.ForRead);
             SheetRecord copy = ReadOne(tr, lay, p);
             // Its number, and no match lines: the source's neighbours are not the copy's.
-            Dictionary<string, string> v = new Dictionary<string, string> { [p.NumberTag] = newName };
+            Dictionary<string, string> v = new Dictionary<string, string> { [numberTag] = newName };
             foreach (string tag in new[] { p.MatchRightTag, p.MatchLeftTag, p.MatchUpTag, p.MatchDownTag }) if (!string.IsNullOrEmpty(tag)) v[tag] = "";
             SetAttributes(tr, copy, v);
             return copy;
@@ -796,9 +798,9 @@ namespace C3DProTools
             foreach (SheetRecord s in sheets)
             {
                 if (s.TitleBlockId.IsNull) { Add(s, $"No title block ({(string.IsNullOrWhiteSpace(p.TitleBlock) ? "no block with attributes" : "\"" + p.TitleBlock + "\" not found")})."); continue; }
-                if (s.HasAttr(p.NumberTag) && s.Attr(p.NumberTag) != s.Layout)
-                    Add(s, $"Drawing number \"{s.Attr(p.NumberTag)}\" differs from the layout name.", "Set it to the layout name",
-                        t => SetAttributes(t, s, new Dictionary<string, string> { [p.NumberTag] = s.Layout }));
+                if (NumberTagOf(s, p) is string numberTag && s.HasAttr(numberTag) && s.Attr(numberTag) != s.Layout)
+                    Add(s, $"Drawing number \"{s.Attr(numberTag)}\" differs from the layout name.", "Set it to the layout name",
+                        t => SetAttributes(t, s, new Dictionary<string, string> { [numberTag] = s.Layout }));
                 foreach (string tag in p.RequiredTags.Where(t => s.HasAttr(t) && string.IsNullOrWhiteSpace(s.Attr(t))))
                     Add(s, $"{tag} is empty.");
                 if (s.IsPart)
@@ -842,7 +844,7 @@ namespace C3DProTools
                         if (matchRx.Match(s.Attr(tag)) is Match m && m.Success && !names.Contains(m.Groups["number"].Value.Trim()))
                             Add(s, $"{tag} refers to {m.Groups["number"].Value.Trim()}, which is not a sheet of this drawing.");
             }
-            foreach (IGrouping<string, SheetRecord> g in sheets.Where(s => s.HasAttr(p.NumberTag)).GroupBy(s => s.Attr(p.NumberTag), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            foreach (IGrouping<string, SheetRecord> g in sheets.Where(s => s.HasAttr(NumberTagOf(s, p))).GroupBy(s => s.Attr(NumberTagOf(s, p)), StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
                 foreach (SheetRecord s in g) Add(s, $"Drawing number {g.Key} is on {g.Count()} sheets.");
             List<SheetRecord> numbered = sheets.Where(s => NumberOf(s.Layout, p) >= 0).ToList();
             if (numbered.Select(s => s.Layout).SequenceEqual(numbered.OrderBy(s => s.Layout, Comparer<string>.Create(Natural)).Select(s => s.Layout)) == false)
@@ -1033,6 +1035,21 @@ namespace C3DProTools
         /// A profile read from a sheet: its title block (the block with the most attributes) and the tags holding the drawing
         /// number, sheet title, scale, revision and revision rows, found by their values and names.
         /// </summary>
+        /// <summary>
+        /// The tag holding this sheet's drawing number: the configured one when the title block has it, otherwise the one
+        /// Detect would find (the attribute equal to the layout name, else a tag named like a drawing number). The settings
+        /// saved on this computer named DR_NO, which the KSIA block does not have (DRAWING_NUMBER), so rename and copy left the
+        /// number unchanged (tile 124 copy, 2026-11-16).
+        /// </summary>
+        public static string NumberTagOf(SheetRecord s, SheetProfile p)
+        {
+            if (s.HasAttr(p.NumberTag) || s.Attributes.Count == 0) return p.NumberTag;
+            // By name first: a value equal to the layout name can be another field (review finding, 2026-11-16).
+            return s.Attributes.Where(a => Regex.IsMatch(a.Key, "DRAW.*N(O|UM)|DWG.*N(O|UM)", RegexOptions.IgnoreCase)).Select(a => a.Key).FirstOrDefault()
+                ?? s.Attributes.Where(a => a.Value == s.Layout).Select(a => a.Key).FirstOrDefault()
+                ?? p.NumberTag;
+        }
+
         public static SheetProfile Detect(Transaction tr, Layout lay, SheetProfile start)
         {
             SheetProfile p = start.Copy();

@@ -44,6 +44,13 @@ foreach ($p in @($console, $Drawing, $Script, (Join-Path $pluginOut 'C3D_Pro_Too
 # Everything runs in a fresh temp folder: the drawing copy, the plugin copy, the log.
 $run = Join-Path ([IO.Path]::GetTempPath()) ("c3dpro-test-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force "$run\bin", "$run\iso" | Out-Null
+# The isolated profile has its own AppData: Sheet Manager's settings (title block tags) are copied in, so tests read the
+# user's tags (DR_NO), not the defaults.
+$sheetSettings = Join-Path $env:APPDATA 'C3DProTools\SheetManager.json'
+if (Test-Path -LiteralPath $sheetSettings) {
+    New-Item -ItemType Directory -Force "$run\iso\Roaming\C3DProTools" | Out-Null
+    Copy-Item -LiteralPath $sheetSettings "$run\iso\Roaming\C3DProTools\SheetManager.json"
+}
 $dwg = Join-Path $run 'test.dwg'
 Copy-Item -LiteralPath $Drawing $dwg
 Copy-Item "$pluginOut\*" "$run\bin" -Recurse
