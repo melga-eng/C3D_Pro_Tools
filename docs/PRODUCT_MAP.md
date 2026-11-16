@@ -13,7 +13,7 @@ Claude keeps this page current. Last update: 2026-11-12.
 A tool moves to **Released** only when its drawing test passes on a copy of a project drawing and you accept the result.
 Nothing is Released yet, because drawing tests started today.
 
-**Ribbon (2026-11-15, every tool):** Model (Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Navisworks Importer), Profiles (Profile View Tools, Profile Manager, Profile Views & TOP Fit, Profile DIMs), Produce (Pro Run, Annotation Studio, Sheet Manager, Workspace Palette), Standards (Style Manager, Label Style Values, Drawing Cleaner), Command Runs (Profile Views / Networks / Labels Run). How to use: [GUIDE.md](GUIDE.md).
+**Ribbon (2026-11-15, every tool):** Model (Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Navisworks Importer), Profiles (Profile View Tools, Profile Manager, Profile Views & TOP Fit, Profile DIMs), Produce (Pro Run, Annotation Studio, Sheet Manager, CAD Sheets, Workspace Palette), Standards (Style Manager, Label Style Values, Drawing Cleaner), Command Runs (Profile Views / Networks / Labels Run). How to use: [GUIDE.md](GUIDE.md).
 
 ## How the plugin is built
 
@@ -62,6 +62,7 @@ Ribbon button → Command → Form (settings) → Operation → Drawing reader/w
 | Profile DIMs (`PROFILEDIMS`) | Cover and clearance dimensions in profile views | **Not proven** (built 11 Nov) | `Features/ProfileTool/` |
 | Annotation Studio (`AnnotationStudio`) | Add labels, arrange them inside viewports, reset, rename parts | Reset: **Works**. Arrange: 102054 copy 31 of 33 placed (2 by hand), waiting for your try. Rename: same engine as C3DPROLBL Rename, drawing test passes. Add labels: a pipe row can be left out where the pipe starts / ends / either at a manhole (tile 124 copy: 103 labelled, 25 left out) | `FormAnnotationStudio.cs`, `AnnotArranger.cs`, `LabelLayout.cs`, `AnnotNaming.cs` |
 | Sheet Manager (`SheetManager`) | List, rename, copy, create layouts by tile and part | **Unknown** | `SheetManager.cs`, `FormSheetManager.cs` |
+| CAD Sheets (`C3DPROCAD`, background step `C3DPROCADRUN`) | One AutoCAD 2018 DWG per chosen layout, named after it: labels exploded as each sheet shows them (plan at the viewport twist, profile at true north), EXPORTTOAUTOCAD, that layout only and current, purged. Runs in a background Civil 3D on a copy of the saved drawing. Replaces SplitSheets.lsp | **In drawing test** (tile 124 copy, 102054 plan + 434132 profile) | `Features/CadExport/` |
 | Build Sheets (`C3DProBuildSheets`, `C3DProPlanLabels`) | One run that makes plan labels, profile labels and arranges them for chosen sheets | **Not proven**: never run on tile 124 | `Features/Sheets/` |
 | Workspace Palette (`C3DProWorkspace`) | New docked panel for Build Sheets | **Not proven**; its finished version is on an unmerged branch | `Features/Workspace/`, `Features/Sheets/UI/` |
 

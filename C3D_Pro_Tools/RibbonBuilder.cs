@@ -82,6 +82,7 @@ namespace C3DProTools
             produce.Items.Add(Large("Pro\nRun", "C3DPRORUN ", "Profile views (TOP fit, match, split, DIMs, pavement labels), network checks and cover, labels (add, arrange, reset, rename) in one window. Settings are saved in the drawing."));
             produce.Items.Add(Large("Annotation\nStudio", "AnnotationStudio ", "Add labels from label sets, arrange them inside the viewports, reset, rename parts."));
             produce.Items.Add(Large("Sheet\nManager", "SheetManager ", "List, rename, copy and create layouts by tile and part."));
+            produce.Items.Add(Large("CAD\nSheets", "C3DPROCAD ", "One AutoCAD 2018 drawing per chosen sheet, named after it: labels exploded as each sheet shows them, that sheet only, unused items purged. Runs in the background on a copy; your drawing is not changed."));
             produce.Items.Add(Large("Workspace\nPalette", "C3DProWorkspace ", "Docked panel for building sheets."));
 
             RibbonPanelSource standards = new RibbonPanelSource { Title = "Standards" };
