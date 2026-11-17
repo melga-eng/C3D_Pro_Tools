@@ -93,6 +93,7 @@ namespace C3DProTools
             string cls = e.ClassName ?? "";
             if (cls == "AECC_PIPE" && p.Has("Pipe Start Easting")) ReadCivilPipe(c, p);
             else if (cls == "AECC_STRUCTURE" && p.Has("Structure Easting")) ReadCivilStructure(c, p);
+            else if (IsPressurePipe(cls)) ReadPressurePipe(c, p);
             else ReadFromGeometry(c, p);
 
             c.Action = c.Detected;
@@ -123,29 +124,7 @@ namespace C3DProTools
                 c.Notes.Add($"{shape} section is brought in as circular.");
 
             // A curved pipe: built as an arc from its properties. The straight mesh fit does not apply to it.
-            double radius = p.LenWhere(n => n.IndexOf("Radius", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("Point", StringComparison.OrdinalIgnoreCase) < 0);
-            double cx = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("East", StringComparison.OrdinalIgnoreCase) >= 0);
-            double cy = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("North", StringComparison.OrdinalIgnoreCase) >= 0);
-            if (radius > 0 && !double.IsNaN(cx) && !double.IsNaN(cy))
-            {
-                if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
-                {
-                    // A bend over half a circle: the model (mesh) shows which way the pipe goes.
-                    if (Arc(c.Start, c.End, cx, cy, radius, out V3 longMid, out bool longClockwise, out _, longWay: true)
-                        && MeshDistance(c.Source, longMid) < MeshDistance(c.Source, mid))
-                    {
-                        mid = longMid;
-                        clockwise = longClockwise;
-                    }
-                    c.CurveRadius = radius;
-                    c.CurveMid = mid;
-                    c.CurveClockwise = clockwise;
-                    c.Notes.Add($"Curved pipe, radius {radius:0.000} m: built as a curved pipe.");
-                    c.Fit = Fit(c.Source);
-                    return;
-                }
-                c.Notes.Add($"Has a radius ({radius:0.000} m) but {problem}; brought in straight.");
-            }
+            if (TryCurve(c, p)) { c.Fit = Fit(c.Source); return; }
 
             LinearFit fit = c.Fit = Fit(c.Source);
             if (fit == null) { c.Notes.Add("The mesh could not be measured; the Civil 3D properties are used as they are."); c.Confidence = ImportConfidence.Medium; return; }
@@ -172,6 +151,37 @@ namespace C3DProTools
             if (sizeError > HighTolerance)
                 c.Notes.Add($"Property size differs from the model by {sizeError * 1000:0} mm.");
             c.Deviation = Math.Max(endError, sizeError);
+        }
+
+        /// <summary>
+        /// A curved pipe from its radius and radius point properties (gravity and pressure pipes alike): the curve fields set
+        /// and true; false, with a note when a radius was there but did not fit the ends, for a straight pipe.
+        /// </summary>
+        private static bool TryCurve(ImportCandidate c, Props p)
+        {
+            double radius = p.LenWhere(n => n.IndexOf("Radius", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("Point", StringComparison.OrdinalIgnoreCase) < 0);
+            double cx = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("East", StringComparison.OrdinalIgnoreCase) >= 0);
+            double cy = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("North", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (radius > 0 && !double.IsNaN(cx) && !double.IsNaN(cy))
+            {
+                if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
+                {
+                    // A bend over half a circle: the model (mesh) shows which way the pipe goes.
+                    if (Arc(c.Start, c.End, cx, cy, radius, out V3 longMid, out bool longClockwise, out _, longWay: true)
+                        && MeshDistance(c.Source, longMid) < MeshDistance(c.Source, mid))
+                    {
+                        mid = longMid;
+                        clockwise = longClockwise;
+                    }
+                    c.CurveRadius = radius;
+                    c.CurveMid = mid;
+                    c.CurveClockwise = clockwise;
+                    c.Notes.Add($"Curved pipe, radius {radius:0.000} m: built as a curved pipe.");
+                    return true;
+                }
+                c.Notes.Add($"Has a radius ({radius:0.000} m) but {problem}; brought in straight.");
+            }
+            return false;
         }
 
         /// <summary>
@@ -220,6 +230,58 @@ namespace C3DProTools
         }
 
         private static double Spacing(LinearFit fit) => fit.Barrels.Count < 2 ? 0 : Math.Abs(fit.Barrels[1].u - fit.Barrels[0].u);
+
+        // ---------------- Civil 3D pressure pipes ----------------
+
+        /// <summary>A Civil 3D pressure pipe (not a fitting or appurtenance), by its object class in Navisworks.</summary>
+        internal static bool IsPressurePipe(string cls) =>
+            !string.IsNullOrEmpty(cls) && cls.IndexOf("PRESSURE", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            cls.IndexOf("PIPE", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            cls.IndexOf("FITTING", StringComparison.OrdinalIgnoreCase) < 0 && cls.IndexOf("APPURTENANCE", StringComparison.OrdinalIgnoreCase) < 0 &&
+            cls.IndexOf("NETWORK", StringComparison.OrdinalIgnoreCase) < 0;
+
+        /// <summary>
+        /// A pressure pipe, brought in as an ordinary (gravity) pipe with its own ends, size and name: for coordination the
+        /// kind does not matter (user, 2026-11-17). Its mesh has bells and joints, so the straight-pipe fit refused it and it
+        /// came in as a structure. Ends and sizes from its properties when Navisworks carries them, else from the mesh's axis.
+        /// </summary>
+        private static void ReadPressurePipe(ImportCandidate c, Props p)
+        {
+            c.Origin = "Civil 3D";
+            LinearFit fit = c.Fit = Fit(c.Source);
+            bool Has(string n, string part) => n.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0;
+            V3? End(string which)
+            {
+                double x = p.NumWhere(n => Has(n, which) && (Has(n, "Easting") || Has(n, " X")));
+                double y = p.NumWhere(n => Has(n, which) && (Has(n, "Northing") || Has(n, " Y")));
+                double z = p.NumWhere(n => Has(n, which) && (Has(n, "Centerline") || Has(n, "Elevation") || Has(n, " Z")) && !Has(n, "Invert") && !Has(n, "Crown"));
+                return double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(z) ? (V3?)null : new V3(x, y, z);
+            }
+            V3? start = End("Start"), end = End("End");
+            if (start.HasValue && end.HasValue && (end.Value - start.Value).Length > 0.01) { c.Start = start.Value; c.End = end.Value; }
+            else if (fit != null && fit.Length > 0.01) { c.Start = fit.Start; c.End = fit.End; c.Notes.Add("End points measured from the model (no end coordinates in its properties)."); }
+            else { c.Detected = ImportKind.Solid; c.Notes.Add("Pressure pipe without end points or a measurable axis: brought in as an exact solid."); return; }
+
+            c.Circular = true;
+            c.OuterWidth = p.FirstLen("Outer Diameter", "Outside Diameter", "Outer Diameter or Width");
+            c.InnerWidth = p.FirstLen("Inner Diameter", "Inside Diameter", "Inner Diameter or Width");
+            if (c.OuterWidth <= 0) c.OuterWidth = p.FirstLen("Nominal Diameter", "Diameter");
+            bool sizeFromMesh = false;
+            if (c.OuterWidth <= 0 && fit != null) { c.OuterWidth = fit.Shape == FitShape.Circular ? fit.OuterDiameter : Math.Max(fit.Width, fit.Height); sizeFromMesh = true; }
+            if (c.InnerWidth <= 0 || c.InnerWidth >= c.OuterWidth) c.InnerWidth = 0;
+            c.InnerHeight = c.InnerWidth;
+            c.OuterHeight = c.OuterWidth;
+            c.Wall = c.InnerWidth > 0 ? (c.OuterWidth - c.InnerWidth) / 2 : 0;
+            c.Detected = ImportKind.Pipe;
+            c.Notes.Add("Civil 3D pressure pipe: brought in as a pipe (same ends, size and name).");
+            if (c.InnerWidth <= 0) c.Notes.Add("Inner size unknown: matched by outer size.");
+            // Curved like a gravity pipe (review finding: a bend came in as its chord).
+            if (TryCurve(c, p)) return;
+            if (fit != null) c.Deviation = EndError(c.Start, c.End, fit);
+            if (fit != null && !fit.Straight) { c.Notes.Add("The model is not straight and has no radius properties: brought in straight between its ends; check it."); c.Confidence = ImportConfidence.Low; }
+            // A size measured from the mesh takes in the bells and joints (review finding): flagged, not trusted.
+            if (sizeFromMesh) { c.Notes.Add("Outer size measured from the model (no diameter property); bells and joints can make it too large, check it."); c.Confidence = ImportConfidence.Low; }
+        }
 
         // ---------------- Civil 3D structures ----------------
 

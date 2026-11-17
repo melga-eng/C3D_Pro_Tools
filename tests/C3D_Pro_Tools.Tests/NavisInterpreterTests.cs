@@ -42,6 +42,98 @@ namespace C3DProTools.Tests
             Assert.Equal(key, NavisInterpreter.MaterialKey(material));
         }
 
+        /// <summary>A pressure pipe's mesh: the barrel plus a wider bell at its start, as Civil 3D draws a socket joint.</summary>
+        private static double[] BelledPipe(V3 a, V3 b, double radius)
+        {
+            V3 bellEnd = a + (b - a) * (0.4 / (b - a).Length);
+            var mesh = new List<double>(Meshes.Cylinder(a, b, radius));
+            mesh.AddRange(Meshes.Cylinder(a, bellEnd, radius * 1.4));
+            return mesh.ToArray();
+        }
+
+        [Fact]
+        public void PressurePipe_WithEndProperties_IsAPipeWithItsEndsAndSize()
+        {
+            // User, 2026-11-17: pressure pipes came in as structures and could not be switched to pipes.
+            V3 a = new V3(1000, 2000, 50), b = new V3(1030, 2010, 49.5);
+            var e = new NavisElement
+            {
+                Guid = "pp-1", Name = "Pressure Pipe - (7)", ClassName = "AECC_PRESSUREPIPE", Triangles = BelledPipe(a, b, 0.0825),
+                Props = new List<NavisProp>
+                {
+                    Civil("Start Point Easting", "", a.X), Civil("Start Point Northing", "", a.Y), Civil("Start Point Elevation", "", a.Z),
+                    Civil("End Point Easting", "", b.X), Civil("End Point Northing", "", b.Y), Civil("End Point Elevation", "", b.Z),
+                    Civil("Outer Diameter", "165.000mm"), Civil("Inner Diameter", "150.000mm"), Civil("Network name", "Water"),
+                }
+            };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal("Civil 3D", c.Origin);
+            Assert.Equal(a.X, c.Start.X, 6); Assert.Equal(b.Z, c.End.Z, 6);
+            Assert.Equal(0.165, c.OuterWidth, 6);
+            Assert.Equal(0.150, c.InnerWidth, 6);
+            Assert.Equal("Water", c.Network);
+        }
+
+        [Fact]
+        public void PressurePipe_WithoutEndProperties_TakesItsEndsFromTheMesh()
+        {
+            V3 a = new V3(1000, 2000, 50), b = new V3(1030, 2000, 50);
+            var e = new NavisElement
+            {
+                Guid = "pp-2", Name = "Pressure Pipe - (8)", ClassName = "AECC_PRESSUREPIPE", Triangles = BelledPipe(a, b, 0.1),
+                Props = new List<NavisProp> { Civil("Outer Diameter", "200.000mm") }
+            };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal(0.2, c.OuterWidth, 6);
+            Assert.True(c.Length > 29 && c.Length < 31, $"length {c.Length}");
+        }
+
+        [Fact]
+        public void PressurePipe_SizedFromTheMeshOnly_IsLowConfidence()
+        {
+            // The bell is in the mesh: a size measured from it is flagged, not trusted (review finding).
+            V3 a = new V3(1000, 2000, 50), b = new V3(1030, 2000, 50);
+            var e = new NavisElement { Guid = "pp-3", Name = "Pressure Pipe - (9)", ClassName = "AECC_PRESSUREPIPE", Triangles = BelledPipe(a, b, 0.1), Props = new List<NavisProp>() };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal(ImportConfidence.Low, c.Confidence);
+        }
+
+        [Fact]
+        public void PressurePipe_WithRadius_IsCurved()
+        {
+            // A quarter circle of radius 10 around (1000, 2000): built as a curve, not its chord (review finding).
+            V3 a = new V3(1010, 2000, 50), b = new V3(1000, 2010, 50);
+            var e = new NavisElement
+            {
+                Guid = "pp-4", Name = "Pressure Pipe - (10)", ClassName = "AECC_PRESSUREPIPE", Triangles = Meshes.Cylinder(a, b, 0.1),
+                Props = new List<NavisProp>
+                {
+                    Civil("Start Point Easting", "", a.X), Civil("Start Point Northing", "", a.Y), Civil("Start Point Elevation", "", a.Z),
+                    Civil("End Point Easting", "", b.X), Civil("End Point Northing", "", b.Y), Civil("End Point Elevation", "", b.Z),
+                    Civil("Outer Diameter", "200.000mm"), Civil("Radius", "10.000m"),
+                    Civil("Radius Point Easting", "", 1000), Civil("Radius Point Northing", "", 2000),
+                }
+            };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal(10, c.CurveRadius, 6);
+        }
+
+        [Theory]
+        [InlineData("AECC_PRESSUREPIPE", true)]
+        [InlineData("AECC_PRESSURE_PIPE", true)]
+        [InlineData("AECC_FITTING", false)]
+        [InlineData("AECC_PRESSUREPIPES_NETWORK", false)]
+        [InlineData("AECC_PIPE", false)]
+        public void PressurePipeClass(string cls, bool expected) => Assert.Equal(expected, NavisInterpreter.IsPressurePipe(cls));
+
         [Fact]
         public void CivilPipe_MatchingMesh_IsExactAndHighConfidence()
         {
