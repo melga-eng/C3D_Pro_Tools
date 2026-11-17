@@ -82,13 +82,19 @@ namespace C3DProTools.Features.Networks.Civil3D
 
         private static List<Network> Chosen(Transaction tr, CivilDocument civil, Func<Network, bool> pick)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var list = new List<Network>();
+            // A dead reference is listed twice, one copy empty; which comes first changes between sessions (000004 after a
+            // restart, 2026-11-17: the empty one, so nothing was rebuilt). Of a name, the copy holding the most parts is taken.
+            var byName = new Dictionary<string, (Network net, int parts)>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
             foreach (ObjectId id in civil.GetPipeNetworkIds())
-                if (tr.GetObject(id, OpenMode.ForRead) is Network n && !n.Name.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase) &&
-                    pick(n) && seen.Add(n.Name))
-                    list.Add(n);
-            return list;
+                if (tr.GetObject(id, OpenMode.ForRead) is Network n && !n.Name.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase) && pick(n))
+                {
+                    int count = 0;
+                    try { count = n.GetStructureIds().Count + n.GetPipeIds().Count; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    if (!byName.TryGetValue(n.Name, out var had)) { byName[n.Name] = (n, count); order.Add(n.Name); }
+                    else if (count > had.parts) byName[n.Name] = (n, count);
+                }
+            return order.Select(name => byName[name].net).ToList();
         }
 
         /// <summary>One network the window lists.</summary>
