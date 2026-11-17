@@ -247,6 +247,12 @@ namespace C3DProTools.Features.Networks.Civil3D
             foreach (Structure st in allStructures)
                 if (doneStructures.TryGetValue(st.Name, out var ids) && ids.Count == 1 && allStructures.Count(x => x.Name == st.Name) == 1) map[st.ObjectId] = ids[0];
             int before = map.Count;
+            // Structures of earlier runs are not this run's to change (review finding: an engineer may have adjusted them): what
+            // they are now is kept and put back if connecting a pipe moves them.
+            var earlier = new Dictionary<ObjectId, (Point3d at, double rim, double sump, StructureControlSumpType by, double depth)>();
+            foreach (ObjectId id in map.Values.Distinct())
+                if (tr.GetObject(id, OpenMode.ForRead) is Structure es) earlier[id] = (es.Location, es.RimElevation, es.SumpElevation, es.ControlSumpBy, es.SumpDepth);
+            var created = new HashSet<ObjectId>();
             int joined = 0, sourceJoined = 0;
             foreach (Structure st in structures)
             {
@@ -263,8 +269,33 @@ namespace C3DProTools.Features.Networks.Civil3D
                     if (!ns.Location.IsEqualTo(st.Location)) ns.Location = st.Location;
                     CopyLook(st, ns);
                     map[st.ObjectId] = id;
+                    created.Add(st.ObjectId);
                 }
                 catch (Exception ex) { failures.Add($"structure {st.Name}: {ex.Message}"); }
+            }
+            // Pipes of an earlier run (pipes first, structures now) are connected to the structures made now, ends kept exact
+            // (review finding: they stayed unconnected for good).
+            int reconnected = 0, tried = 0;
+            if (target != null && created.Count > 0)
+            {
+                var srcByName = allPipes.GroupBy(p => p.Name).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First());
+                foreach (ObjectId id in net.GetPipeIds().Live())
+                {
+                    if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe q) || !srcByName.TryGetValue(q.Name, out Pipe sp)) continue;
+                    bool start = q.StartStructureId.IsNull && created.Contains(sp.StartStructureId), end = q.EndStructureId.IsNull && created.Contains(sp.EndStructureId);
+                    if (!start && !end) continue;
+                    q.UpgradeOpen();
+                    Point3d s = q.StartPoint, e = q.EndPoint;
+                    if (start) Connect(q, ConnectorPositionType.Start, sp.StartStructureId, map);
+                    if (end) Connect(q, ConnectorPositionType.End, sp.EndStructureId, map);
+                    if (!q.StartPoint.IsEqualTo(s)) q.StartPoint = s;
+                    if (!q.EndPoint.IsEqualTo(e)) q.EndPoint = e;
+                    // Counted after the ends are put back: an end far from its structure lets go again (as on a first run).
+                    reconnected += (start && !q.StartStructureId.IsNull ? 1 : 0) + (end && !q.EndStructureId.IsNull ? 1 : 0);
+                    tried += (start ? 1 : 0) + (end ? 1 : 0);
+                }
+                if (tried > 0) log.AppendLine($"{reconnected} of {tried} end(s) of pipes rebuilt before connected to the structures made now" +
+                                              (reconnected < tried ? " (the others are away from their structure; ends kept exact)" : ""));
             }
             foreach (Pipe p in pipes)
             {
@@ -297,7 +328,20 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             // Connecting pipes lets Civil 3D move a sump set by depth (2.3 m on Test.dwg, 2026-11-17): rim and sump are set
             // again once every pipe is in, the sump by elevation, so each structure is exactly as the original.
-            foreach (Structure st in allStructures.Where(s => map.ContainsKey(s.ObjectId)))
+            foreach (KeyValuePair<ObjectId, (Point3d at, double rim, double sump, StructureControlSumpType by, double depth)> kv in earlier)
+            {
+                var es = (Structure)tr.GetObject(kv.Key, OpenMode.ForRead);
+                if (es.Location.IsEqualTo(kv.Value.at) && Math.Abs(es.RimElevation - kv.Value.rim) < 0.0005 && Math.Abs(es.SumpElevation - kv.Value.sump) < 0.0005) continue;
+                try
+                {
+                    es.UpgradeOpen();
+                    if (!es.Location.IsEqualTo(kv.Value.at)) es.Location = kv.Value.at;
+                    es.RimElevation = kv.Value.rim;
+                    if (kv.Value.by == StructureControlSumpType.ByElevation) es.SumpElevation = kv.Value.sump; else es.SumpDepth = kv.Value.depth;
+                }
+                catch (Exception ex) { failures.Add($"structure {es.Name} (rebuilt before) could not be kept as it was ({ex.Message})"); }
+            }
+            foreach (Structure st in allStructures.Where(s => created.Contains(s.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForWrite);
                 try
@@ -314,7 +358,7 @@ namespace C3DProTools.Features.Networks.Civil3D
 
             // Checked against the original: the largest difference in structure place, rim and sump, and in pipe ends.
             double place = 0, rim = 0, sump = 0;
-            foreach (Structure st in allStructures.Where(s => map.ContainsKey(s.ObjectId)))
+            foreach (Structure st in allStructures.Where(s => created.Contains(s.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForRead);
                 place = Math.Max(place, ns.Location.DistanceTo(st.Location));
@@ -327,7 +371,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             // The footprint: outer width and length as the original's (review finding: a fallback could grow it).
             double footprint = 0;
-            foreach (Structure st in allStructures.Where(x => map.ContainsKey(x.ObjectId)))
+            foreach (Structure st in allStructures.Where(x => created.Contains(x.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForRead);
                 footprint = Math.Max(footprint, Math.Max(Math.Abs(ns.DiameterOrWidth - st.DiameterOrWidth), Math.Abs(ns.Length - st.Length)));
