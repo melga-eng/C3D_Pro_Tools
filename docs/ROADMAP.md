@@ -58,7 +58,7 @@ Tests always run on copies.
 ## After release 4 (2026-11-17)
 
 - Navisworks Importer: pressure pipes import as pipes, Import as Pipe sticks (your report). Merged.
-- Rebuild Network (`C3DPROREBUILD`): dead data-shortcut networks rebuilt as ordinary ones (your request). Merged; needs your try on a Metric-catalog drawing.
+- Rebuild Network (window `RebuildNetwork`, command line `C3DPROREBUILD`): dead data-shortcut networks rebuilt as ordinary ones (your request). Merged, window added; needs your try on a Metric-catalog drawing.
 - New size: Method A no longer crashes; the reason is named (a drawing on the US Imperial catalog cannot make metric sizes).
 
 ## Later (not before release 4)

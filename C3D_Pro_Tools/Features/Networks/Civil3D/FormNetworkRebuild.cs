@@ -129,9 +129,10 @@ namespace C3DProTools.Features.Networks.Civil3D
             Cursor = Cursors.WaitCursor;
             _report.Text = write ? "Rebuilding..." : "Checking...";
             _report.Refresh();
+            // Execute never throws (it reports its own failure); anything after it only shows the result.
+            string log = NetworkRebuild.Execute(_doc, ticked.Select(r => r.Name).ToList(), write);
             try
             {
-                string log = NetworkRebuild.Execute(_doc, ticked.Select(r => r.Name).ToList(), write);
                 string summary = RunReport.Write(log, "C3DPROREBUILD", write ? "Rebuild" : "Report");
                 string file = summary.Split('\n').LastOrDefault(l => l.StartsWith("Full report: ", StringComparison.Ordinal));
                 _report.Text = log.Replace("\r\n", "\n").Replace("\n", Environment.NewLine) + (file != null ? Environment.NewLine + file : "");
@@ -144,7 +145,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             catch (Exception ex)
             {
                 C3DProLogger.Error("Rebuild Network window failed", ex);
-                _report.Text = $"Rebuild Network failed: {ex.Message}. Nothing was changed.";
+                _report.Text = log.Replace("\r\n", "\n").Replace("\n", Environment.NewLine) + Environment.NewLine + $"(The window could not refresh: {ex.Message}. Close and reopen it.)";
             }
             finally { Cursor = Cursors.Default; }
         }
