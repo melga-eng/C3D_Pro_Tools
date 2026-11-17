@@ -78,17 +78,27 @@ namespace C3DProTools
             string temp = Path.Combine(Path.GetTempPath(), $"c3dpro-clean-{Guid.NewGuid():N}.dwg");
             try
             {
-                // 1. The drawing as it is in memory, written out without touching it (Wblock only reads the database).
-                using (doc.LockDocument())
-                using (Database snapshot = doc.Database.Wblock())
-                    snapshot.SaveAs(temp, DwgVersion.Current);
+                // 1. The copy to clean. A drawing with no unsaved changes: its saved file, an exact copy. Wblock leaves Civil 3D
+                // objects out (753 of 14277 on the user's 000501 drawing, 2026-11-17), which the copy check then refuses.
+                // With unsaved changes: the drawing as it is in memory (Wblock only reads the database).
+                bool saved = Path.IsPathRooted(source) && File.Exists(source) &&
+                             Convert.ToInt32(Autodesk.AutoCAD.ApplicationServices.Core.Application.GetSystemVariable("DBMOD")) == 0;
+                if (saved) File.Copy(source, temp, true);
+                else
+                    using (doc.LockDocument())
+                    using (Database snapshot = doc.Database.Wblock())
+                        snapshot.SaveAs(temp, DwgVersion.Current);
 
                 // 2. Cleaned as a side database, then saved where asked.
                 using (Database side = new Database(false, true))
                 {
                     side.ReadDwgFile(temp, FileOpenMode.OpenForReadAndAllShare, true, null);
                     side.CloseInput(true);
-                    VerifyCopy(doc.Database, side, report);
+                    try { VerifyCopy(doc.Database, side, report); }
+                    catch (InvalidOperationException ex) when (!saved)
+                    {
+                        throw new InvalidOperationException(ex.Message + " Save the drawing and run again: a saved drawing is copied exactly.");
+                    }
 
                     Database previous = HostApplicationServices.WorkingDatabase;
                     HostApplicationServices.WorkingDatabase = side;
@@ -564,6 +574,8 @@ namespace C3DProTools
         private static int DeepPurgeDatabase(Database db, CleanupReport report)
         {
             int total = 0;
+            var erased = new HashSet<ObjectId>();
+            var byKind = new Dictionary<string, int>();
             for (int pass = 0; pass < 5; pass++)
             {
                 int purged = 0;
@@ -580,18 +592,24 @@ namespace C3DProTools
                     foreach (ObjectId id in candidates)
                     {
                         // One that refuses (layer 0, the current layer...) is simply kept: not a failure worth reporting.
+                        // Counted once, when it really goes: the count was 979961 for 786 blocks on the tile 124 copy (2026-11-17).
+                        if (id.IsErased || !erased.Add(id)) continue;
                         try
                         {
                             tr.GetObject(id, OpenMode.ForWrite).Erase(true);
                             purged++;
+                            string kind = id.ObjectClass.DxfName;
+                            byKind[kind] = byKind.TryGetValue(kind, out int k) ? k + 1 : 1;
                         }
-                        catch (RuntimeException) { }
+                        catch (RuntimeException) { erased.Remove(id); }
                     }
                     tr.Commit();
                 }
                 total += purged;
                 if (purged == 0) break;
             }
+            if (byKind.Count > 0)
+                report.Notes.Add("Purged: " + string.Join(", ", byKind.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Value} {kv.Key}")));
             return total;
         }
     }

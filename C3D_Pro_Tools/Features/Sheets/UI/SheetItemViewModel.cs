@@ -18,6 +18,25 @@ namespace C3DProTools.Features.Sheets.UI
         public string Tile => Status.Tile;
         public string Part => Status.Part;
         public string DrawingNumber => Status.DrawingNumber;
+
+        /// <summary>
+        /// What fits in the sheet list: the last part of a long layout name (SW00670060000C-…-102054 shows 102054), the whole name
+        /// otherwise. The full name is the row's tooltip.
+        /// </summary>
+        public string ShortName
+        {
+            get
+            {
+                string name = Layout ?? "";
+                int dash = name.LastIndexOf('-');
+                return name.Length > 16 && dash >= 0 && dash < name.Length - 1 ? name.Substring(dash + 1) : name;
+            }
+        }
+
+        /// <summary>"Plan 124-D", "Profile 124", or the kind alone when the tile is unknown.</summary>
+        public string KindText =>
+            (Kind == SheetKind.Plan ? "Plan" : "Profile") +
+            (string.IsNullOrEmpty(Tile) ? "" : " " + Tile + (string.IsNullOrEmpty(Part) ? "" : "-" + Part));
         public int IssueCount => Status.IssueCount;
 
         public bool IsSelected

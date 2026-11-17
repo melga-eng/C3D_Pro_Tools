@@ -395,7 +395,7 @@ namespace C3DProTools.Features.Sheets.UI
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Checkbox
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100, GridUnitType.Pixel) }); // Layout & Kind
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 100 }); // Layout & Kind
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Step Pills
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Issues Badge
 
@@ -411,10 +411,11 @@ namespace C3DProTools.Features.Sheets.UI
             Grid.SetColumn(chk, 0);
 
             // Layout & Kind
-            var nameStack = new StackPanel { Orientation = WpfOrientation.Vertical, VerticalAlignment = WpfVerticalAlignment.Center };
+            // Long KSIA layout names do not fit: the sheet number shows, the full name is the tooltip (user's screenshot, 2026-11-17).
+            var nameStack = new StackPanel { Orientation = WpfOrientation.Vertical, VerticalAlignment = WpfVerticalAlignment.Center, ToolTip = sheet.Layout, Margin = new Thickness(0, 0, 10, 0) };
             var txtLayout = new TextBlock
             {
-                Text = sheet.Layout,
+                Text = sheet.ShortName,
                 FontFamily = WpfStyle.Segoe,
                 FontWeight = FontWeights.Bold,
                 FontSize = WpfStyle.BaseFontSize,
@@ -423,7 +424,7 @@ namespace C3DProTools.Features.Sheets.UI
             nameStack.Children.Add(txtLayout);
 
             var kindPill = WpfStyle.CreatePill(
-                sheet.Kind == SheetKind.Plan ? "Plan" : "Profile",
+                sheet.KindText,
                 sheet.Kind == SheetKind.Plan ? WpfStyle.SuccessBrush : WpfStyle.AccentBrush,
                 sheet.Kind == SheetKind.Plan ? WpfStyle.SuccessSoftBrush : WpfStyle.AccentSoftBrush,
                 fontSize: 10
