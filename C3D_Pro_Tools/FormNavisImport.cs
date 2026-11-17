@@ -899,7 +899,21 @@ namespace C3DProTools
         {
             switch (kind)
             {
-                case ImportKind.Pipe: return c.Fit != null && c.Circular && (c.Detected == ImportKind.Pipe || c.Detected == ImportKind.Box || c.Origin == "Civil 3D" && c.Detected == ImportKind.Pipe);
+                case ImportKind.Pipe:
+                    if (c.Detected == ImportKind.Pipe) return true;
+                    // Your choice wins over the shape guess (a pressure pipe's bells made it a structure, and the choice reverted:
+                    // user, 2026-11-17). Any object with a measurable axis can be a pipe; its ends and size come from that axis.
+                    if (c.Fit == null && c.Source.Triangles.Length >= 18) c.Fit = NavisGeometryFit.FitLinear(c.Source.Triangles);
+                    if (c.Fit == null || c.Fit.Length < 0.01) return false;
+                    if (c.Detected != ImportKind.Box)
+                    {
+                        c.Start = c.Fit.Start; c.End = c.Fit.End;
+                        c.Circular = true;
+                        c.OuterWidth = c.OuterHeight = c.Fit.Shape == FitShape.Circular ? c.Fit.OuterDiameter : Math.Max(c.Fit.Width, c.Fit.Height);
+                        if (c.InnerWidth >= c.OuterWidth) c.InnerWidth = c.InnerHeight = 0;
+                    }
+                    c.Circular = true;
+                    return true;
                 case ImportKind.Box: return c.Fit != null && !c.Circular && (c.Detected == ImportKind.Box || c.Detected == ImportKind.Pipe);
                 case ImportKind.Structure:
                     if (c.Footprint == null && c.Source.Triangles.Length >= 9)

@@ -93,6 +93,7 @@ namespace C3DProTools
             string cls = e.ClassName ?? "";
             if (cls == "AECC_PIPE" && p.Has("Pipe Start Easting")) ReadCivilPipe(c, p);
             else if (cls == "AECC_STRUCTURE" && p.Has("Structure Easting")) ReadCivilStructure(c, p);
+            else if (IsPressurePipe(cls)) ReadPressurePipe(c, p);
             else ReadFromGeometry(c, p);
 
             c.Action = c.Detected;
@@ -220,6 +221,52 @@ namespace C3DProTools
         }
 
         private static double Spacing(LinearFit fit) => fit.Barrels.Count < 2 ? 0 : Math.Abs(fit.Barrels[1].u - fit.Barrels[0].u);
+
+        // ---------------- Civil 3D pressure pipes ----------------
+
+        /// <summary>A Civil 3D pressure pipe (not a fitting or appurtenance), by its object class in Navisworks.</summary>
+        internal static bool IsPressurePipe(string cls) =>
+            !string.IsNullOrEmpty(cls) && cls.IndexOf("PRESSURE", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            cls.IndexOf("PIPE", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            cls.IndexOf("FITTING", StringComparison.OrdinalIgnoreCase) < 0 && cls.IndexOf("APPURTENANCE", StringComparison.OrdinalIgnoreCase) < 0 &&
+            cls.IndexOf("NETWORK", StringComparison.OrdinalIgnoreCase) < 0;
+
+        /// <summary>
+        /// A pressure pipe, brought in as an ordinary (gravity) pipe with its own ends, size and name: for coordination the
+        /// kind does not matter (user, 2026-11-17). Its mesh has bells and joints, so the straight-pipe fit refused it and it
+        /// came in as a structure. Ends and sizes from its properties when Navisworks carries them, else from the mesh's axis.
+        /// </summary>
+        private static void ReadPressurePipe(ImportCandidate c, Props p)
+        {
+            c.Origin = "Civil 3D";
+            LinearFit fit = c.Fit = Fit(c.Source);
+            bool Has(string n, string part) => n.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0;
+            V3? End(string which)
+            {
+                double x = p.NumWhere(n => Has(n, which) && (Has(n, "Easting") || Has(n, " X")));
+                double y = p.NumWhere(n => Has(n, which) && (Has(n, "Northing") || Has(n, " Y")));
+                double z = p.NumWhere(n => Has(n, which) && (Has(n, "Centerline") || Has(n, "Elevation") || Has(n, " Z")) && !Has(n, "Invert") && !Has(n, "Crown"));
+                return double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(z) ? (V3?)null : new V3(x, y, z);
+            }
+            V3? start = End("Start"), end = End("End");
+            if (start.HasValue && end.HasValue && (end.Value - start.Value).Length > 0.01) { c.Start = start.Value; c.End = end.Value; }
+            else if (fit != null && fit.Length > 0.01) { c.Start = fit.Start; c.End = fit.End; c.Notes.Add("End points measured from the model (no end coordinates in its properties)."); }
+            else { c.Detected = ImportKind.Solid; c.Notes.Add("Pressure pipe without end points or a measurable axis: brought in as an exact solid."); return; }
+
+            c.Circular = true;
+            c.OuterWidth = p.FirstLen("Outer Diameter", "Outside Diameter", "Outer Diameter or Width");
+            c.InnerWidth = p.FirstLen("Inner Diameter", "Inside Diameter", "Inner Diameter or Width");
+            if (c.OuterWidth <= 0 && fit != null) c.OuterWidth = fit.Shape == FitShape.Circular ? fit.OuterDiameter : Math.Max(fit.Width, fit.Height);
+            if (c.OuterWidth <= 0) c.OuterWidth = p.FirstLen("Nominal Diameter", "Diameter");
+            if (c.InnerWidth <= 0 || c.InnerWidth >= c.OuterWidth) c.InnerWidth = 0;
+            c.InnerHeight = c.InnerWidth;
+            c.OuterHeight = c.OuterWidth;
+            c.Wall = c.InnerWidth > 0 ? (c.OuterWidth - c.InnerWidth) / 2 : 0;
+            c.Detected = ImportKind.Pipe;
+            c.Notes.Add("Civil 3D pressure pipe: brought in as a pipe (same ends, size and name).");
+            if (c.InnerWidth <= 0) c.Notes.Add("Inner size unknown: matched by outer size.");
+            if (fit != null) c.Deviation = EndError(c.Start, c.End, fit);
+        }
 
         // ---------------- Civil 3D structures ----------------
 
