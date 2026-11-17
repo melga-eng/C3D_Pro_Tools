@@ -15,7 +15,7 @@ namespace C3DProTools
         public static string Write(string log, string command, string mode)
         {
             string file = File(command, mode);
-            try { System.IO.File.WriteAllText(file, log); } catch (IOException) { file = null; }
+            try { System.IO.File.WriteAllText(file, log); } catch (System.Exception ex) when (ex is IOException || ex is System.UnauthorizedAccessException) { file = null; }
             return Summary(log) + (file != null ? $"\nFull report: {file}" : "");
         }
     }

@@ -46,19 +46,62 @@ namespace C3DProTools.Features.Networks.Civil3D
             if (write) ViewHelper.Regen(doc);
         }
 
+        /// <summary>The Rebuild Network window (the ribbon button); C3DPROREBUILD is the same on the command line.</summary>
+        [CommandMethod("C3DPRO", "RebuildNetwork", CommandFlags.Modal)]
+        public void Window()
+        {
+            Document doc = AcApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            using (var form = new FormNetworkRebuild(doc)) AcApp.ShowModalDialog(form);
+        }
+
         /// <summary>
         /// The networks to rebuild: those named (wildcards), or every data-shortcut reference when no name is given; each name
         /// once (a dead reference is listed twice by Civil 3D) and never one this tool made.
         /// </summary>
-        internal static List<Network> Chosen(Transaction tr, CivilDocument civil, string names)
+        internal static List<Network> Chosen(Transaction tr, CivilDocument civil, string names) =>
+            Chosen(tr, civil, n => names.Length == 0 ? IsReference(n) : NamePatterns.Matches(names, n.Name));
+
+        private static List<Network> Chosen(Transaction tr, CivilDocument civil, Func<Network, bool> pick)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var list = new List<Network>();
             foreach (ObjectId id in civil.GetPipeNetworkIds())
                 if (tr.GetObject(id, OpenMode.ForRead) is Network n && !n.Name.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase) &&
-                    (names.Length == 0 ? IsReference(n) : NamePatterns.Matches(names, n.Name)) && seen.Add(n.Name))
+                    pick(n) && seen.Add(n.Name))
                     list.Add(n);
             return list;
+        }
+
+        /// <summary>One network the window lists.</summary>
+        internal sealed class NetworkRow
+        {
+            public string Name;
+            public bool Reference;
+            public int Structures, Pipes;
+            public bool HasRebuilt;
+        }
+
+        /// <summary>Every network the window can offer (each name once, never one this tool made), references first.</summary>
+        internal static List<NetworkRow> Inventory(Document doc)
+        {
+            var rows = new List<NetworkRow>();
+            using (doc.LockDocument())
+            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+            {
+                CivilDocument civil = CivilDocument.GetCivilDocument(doc.Database);
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (ObjectId id in civil.GetPipeNetworkIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Network n) names.Add(n.Name);
+                foreach (Network n in Chosen(tr, civil, _ => true))
+                {
+                    int s = 0, p = 0;
+                    try { s = n.GetStructureIds().Live().Count(); p = n.GetPipeIds().Live().Count(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    rows.Add(new NetworkRow { Name = n.Name, Reference = IsReference(n), Structures = s, Pipes = p, HasRebuilt = names.Contains(n.Name + Suffix) });
+                }
+                tr.Commit();
+            }
+            return rows.OrderByDescending(r => r.Reference).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         internal static bool IsReference(Network n)
@@ -66,18 +109,30 @@ namespace C3DProTools.Features.Networks.Civil3D
             try { return n.IsReferenceObject; } catch (Exception) { return false; }
         }
 
-        internal static string Execute(Document doc, string names, bool write)
+        internal static string Execute(Document doc, string names, bool write) =>
+            Execute(doc, names.Length == 0 ? "every data-shortcut reference" : names, tr => Chosen(tr, CivilDocument.GetCivilDocument(doc.Database), names),
+                    names.Length == 0 ? "the drawing has no data-shortcut reference network." : $"no network is named \"{names}\".", write);
+
+        /// <summary>The window's run: exactly the networks ticked (names are not patterns there).</summary>
+        internal static string Execute(Document doc, IReadOnlyCollection<string> exact, bool write)
+        {
+            var set = new HashSet<string>(exact, StringComparer.OrdinalIgnoreCase);
+            return Execute(doc, string.Join(", ", exact), tr => Chosen(tr, CivilDocument.GetCivilDocument(doc.Database), n => set.Contains(n.Name)),
+                           "none of those ticked is in the drawing any more.", write);
+        }
+
+        private static string Execute(Document doc, string label, Func<Transaction, List<Network>> choose, string none, bool write)
         {
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROREBUILD {(write ? "Rebuild" : "Report")} on {Path.GetFileName(doc.Name)}, networks \"{(names.Length == 0 ? "every data-shortcut reference" : names)}\"");
+            log.AppendLine($"C3DPROREBUILD {(write ? "Rebuild" : "Report")} on {Path.GetFileName(doc.Name)}, networks \"{label}\"");
             try
             {
                 using (doc.LockDocument())
                 using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
                 {
                     CivilDocument civil = CivilDocument.GetCivilDocument(doc.Database);
-                    List<Network> nets = Chosen(tr, civil, names);
-                    if (nets.Count == 0) log.AppendLine("No network to rebuild" + (names.Length == 0 ? ": the drawing has no data-shortcut reference network." : $" is named \"{names}\"."));
+                    List<Network> nets = choose(tr);
+                    if (nets.Count == 0) log.AppendLine("No network to rebuild: " + none);
                     var parts = new Dictionary<string, (ObjectId fam, ObjectId size, string error)>();
                     bool ok = true;
                     foreach (Network n in nets) ok &= Rebuild(tr, civil, n, write, parts, log);
@@ -124,7 +179,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                     // families have no metric sizes and cannot hold the any-size families (they are made from metric ones).
                     string catalogs = CatalogNames();
                     log.AppendLine($"To rebuild: this drawing uses the {catalogs} part catalogs. Set Pipe Network Catalog (Home > Create Design) to Metric Pipes and " +
-                                   "Metric Structures, set up the any-size families once (Parts Lists window > \"Set up Method A\") and restart Civil 3D, then run C3DPROREBUILD again.");
+                                   "Metric Structures, set up the any-size families once (Parts Lists window > \"Set up Method A\") and restart Civil 3D, then run Rebuild Network again.");
                 }
                 return failures.Count == 0;
             }
