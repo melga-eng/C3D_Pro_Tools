@@ -68,6 +68,7 @@ namespace C3DProTools
             model.Items.Add(Large("Network\nOrganizer", "NetworkOrganizer ", "Organize parts and networks."));
             model.Items.Add(Large("Networks from\nFeature Lines", "NetworkFromFeatureLines ", "Build pipe networks from feature lines."));
             model.Items.Add(Large("Profile &\nCover Designer", "ProfileCoverDesigner ", "Set pipe levels along a route for cover, slope and clearances."));
+            model.Items.Add(Large("Rebuild\nNetwork", "C3DPROREBUILD ", "Rebuild a network that cannot be edited (a data-shortcut reference whose source is gone) as an ordinary network: same structures, pipes, levels and connections. Report first, then Rebuild."));
             model.Items.Add(Large("Navisworks\nImporter", "ImportNavisPipe ", "Import pipes and structures from Navisworks."));
 
             RibbonPanelSource profiles = new RibbonPanelSource { Title = "Profiles" };
