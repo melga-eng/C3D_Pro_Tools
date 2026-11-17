@@ -65,6 +65,14 @@ namespace C3DProTools
                     return (ObjectId.Null, ObjectId.Null);
                 }
                 ObjectId famId = PartsListTools.EnsureFamily(tr, partsListId, fam.Domain, def.Guid, out bool added);
+                // Civil 3D can accept the family and still not list it in the parts list (your structure size, 2026-11-17: the
+                // empty id then crashed with eNullObjectId).
+                if (famId.IsNull)
+                {
+                    error = $"Civil 3D did not put \"{def.Description}\" in this parts list; this drawing's pipe catalog may not hold the C3D Pro any-size families " +
+                            "(Parts Lists window → \"Set up Method A\" for the catalog the drawing uses, then restart Civil 3D)";
+                    return (ObjectId.Null, ObjectId.Null);
+                }
                 if (added) log.Add($"Added the family \"{def.Description}\" to the parts list.");
                 PartFamily any = (PartFamily)tr.GetObject(famId, OpenMode.ForWrite);
                 ObjectId size = PartsListTools.AddSize(tr, any, values, out error);

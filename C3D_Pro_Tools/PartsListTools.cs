@@ -297,15 +297,24 @@ namespace C3DProTools
                 }
                 catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             }
-            if (!Same(values, ReadValues(fam, size.SizeDataRecord)))
+            Dictionary<PartContextType, double> built = ReadValues(fam, size.SizeDataRecord);
+            if (!Same(values, built))
             {
                 try { fam.RemovePartSize(added); } catch (Exception) { }  // cleanup: nothing more to undo if this fails
-                error = "Civil 3D built a different size from these values.";
+                string fields = "";
+                try { fields = string.Join("; ", size.SizeDataRecord.GetAllDataFields().Select(df => $"{df.Name}={df.Value}")); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                string sizeName = "";
+                try { sizeName = size.Name; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { sizeName = "unreadable: the family's catalog is not the drawing's"; }
+                error = $"Civil 3D built {DescribeAll(built)} (size \"{sizeName}\"{(fields.Length > 0 ? ", fields " + fields : "")}) from {DescribeAll(values)}.";
                 return ObjectId.Null;
             }
             CopyLook(tr, template, size);
             return added;
         }
+
+        /// <summary>Every value by name, in mm: "PipeInnerDiameter 110, WallThickness 0".</summary>
+        private static string DescribeAll(Dictionary<PartContextType, double> v) =>
+            v.Count == 0 ? "(no values)" : string.Join(", ", v.Select(kv => $"{kv.Key} {Math.Round(kv.Value * 1000, 1)}"));
 
         /// <summary>Gives a new size the style, rules and render material of another size of its family.</summary>
         private static void CopyLook(Transaction tr, ObjectId templateId, PartSize size)
