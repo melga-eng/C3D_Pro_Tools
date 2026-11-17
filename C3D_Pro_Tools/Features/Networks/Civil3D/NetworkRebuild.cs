@@ -178,6 +178,9 @@ namespace C3DProTools.Features.Networks.Civil3D
                     // Connecting may pull an end onto the structure: the rebuilt pipe keeps the original's 3D ends.
                     if (!np.StartPoint.IsEqualTo(s)) np.StartPoint = s;
                     if (!np.EndPoint.IsEqualTo(e)) np.EndPoint = e;
+                    // Putting an end back where the original's is drops the connection when that point is far from the structure
+                    // (3 MV ducts on Test.dwg, 3.5 m away, 2026-11-17); connecting again would pull the end there. The exact end
+                    // is kept and the pipe is listed below as not connected.
                     CopyLook(p, np);
                 }
                 catch (Exception ex) { failures.Add($"pipe {p.Name}: {ex.Message}"); }
@@ -212,7 +215,38 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (ds > 0.001) log.AppendLine($"  note: {st.Name} sump {ns.SumpElevation:0.000} (original {st.SumpElevation:0.000}, {ds * 1000:0} mm lower): Civil 3D keeps a sump at or below the lowest connected pipe invert");
                 sump = Math.Max(sump, ds);
             }
-            double stMax = Math.Max(place, rim);
+            // The footprint: outer width and length as the original's (review finding: a fallback could grow it).
+            double footprint = 0;
+            foreach (Structure st in structures.Where(x => map.ContainsKey(x.ObjectId)))
+            {
+                var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForRead);
+                footprint = Math.Max(footprint, Math.Max(Math.Abs(ns.DiameterOrWidth - st.DiameterOrWidth), Math.Abs(ns.Length - st.Length)));
+            }
+            log.AppendLine($"  structure footprint differs by up to {footprint * 1000:0.#} mm");
+            double stMax = Math.Max(place, Math.Max(rim, footprint));
+
+            // Every pipe end connected where the original's is, checked after all geometry changes (review finding).
+            int lost = 0, wrong = 0;
+            var rebuiltByName = net.GetPipeIds().Live().Select(id => (Pipe)tr.GetObject(id, OpenMode.ForRead)).GroupBy(q => q.Name).ToDictionary(g => g.Key, g => g.ToList());
+            foreach (Pipe p in pipes)
+            {
+                if (!rebuiltByName.TryGetValue(p.Name, out List<Pipe> same) || same.Count != 1) continue;
+                Pipe q = same[0];
+                // A connection to another structure than the original's is wrong and refused; one left off (the original end
+                // is far from its structure, where Civil 3D will not connect without moving it) is listed.
+                bool Wrong(ObjectId was, ObjectId now) => !now.IsNull && !(map.TryGetValue(was, out ObjectId m) && m == now);
+                if (Wrong(p.StartStructureId, q.StartStructureId) || Wrong(p.EndStructureId, q.EndStructureId)) wrong++;
+                bool startOk = p.StartStructureId.IsNull || map.TryGetValue(p.StartStructureId, out ObjectId s1) && q.StartStructureId == s1;
+                bool endOk = p.EndStructureId.IsNull || map.TryGetValue(p.EndStructureId, out ObjectId e1) && q.EndStructureId == e1;
+                if (!startOk || !endOk)
+                {
+                    lost++;
+                    string N(ObjectId id) => id.IsNull ? "-" : ((Structure)tr.GetObject(id, OpenMode.ForRead)).Name;
+                    if (lost <= 5) log.AppendLine($"  pipe {p.Name} is not connected as the original (end kept exact): original {N(p.StartStructureId)} -> {N(p.EndStructureId)}, rebuilt {N(q.StartStructureId)} -> {N(q.EndStructureId)}");
+                }
+            }
+            if (wrong > 0) failures.Add($"{wrong} pipe(s) are connected to another structure than in the original");
+            if (lost > wrong) log.AppendLine($"  note: {lost - wrong} pipe end(s) left unconnected (listed above): exact geometry kept, the original end is away from its structure");
             var rebuiltPipes = net.GetPipeIds().Live().Select(id => (Pipe)tr.GetObject(id, OpenMode.ForRead)).ToList();
             double pMax = pipes.Select(p => rebuiltPipes.Where(q => q.Name == p.Name)
                                                         .Select(q => Math.Max(q.StartPoint.DistanceTo(p.StartPoint), q.EndPoint.DistanceTo(p.EndPoint)))
@@ -227,7 +261,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             // More than a millimetre anywhere is a wrong rebuild: nothing is kept.
             if (stMax > 0.001 || pMax > 0.001) failures.Add($"the rebuilt network differs from the original by up to {Math.Max(stMax, pMax) * 1000:0} mm");
             log.AppendLine($"Rebuilt as {name}: {map.Count} of {structures.Count} structures, {net.GetPipeIds().Count} of {pipes.Count} pipes, " +
-                           $"{joined} of {sourceJoined} pipe ends connected to structures" + (failures.Count > 0 ? $"; {failures.Count} not rebuilt" : "") + ".");
+                           $"{FinalJoined(tr, net)} of {sourceJoined} pipe ends connected to structures" + (failures.Count > 0 ? $"; {failures.Count} not rebuilt" : "") + ".");
             foreach (string f in failures.Take(20)) log.AppendLine("  not rebuilt " + f);
             return failures.Count == 0;
         }
@@ -253,10 +287,13 @@ namespace C3DProTools.Features.Networks.Civil3D
 
             DomainType domain = part is Pipe ? DomainType.Pipe : DomainType.Structure;
             bool round;
+            SweptShapeType pipeShape = SweptShapeType.Circular;
             var v = new Dictionary<PartContextType, double>();
             if (part is Pipe p)
             {
-                round = p.CrossSectionalShape == SweptShapeType.Circular;
+                // The exact section shape: an egg or elliptical pipe must not become a box (review finding).
+                pipeShape = p.CrossSectionalShape;
+                round = pipeShape == SweptShapeType.Circular;
                 if (round) v[PartContextType.PipeInnerDiameter] = p.InnerDiameterOrWidth;
                 else { v[PartContextType.PipeInnerWidth] = p.InnerDiameterOrWidth; v[PartContextType.PipeInnerHeight] = p.InnerHeight; }
                 // The wall always, 0 included: a default wall would change the outer size and the inverts (duct banks have
@@ -273,10 +310,10 @@ namespace C3DProTools.Features.Networks.Civil3D
                 double width = inner ? st.InnerDiameterOrWidth : st.DiameterOrWidth, length = inner && st.InnerLength > 0 ? st.InnerLength : st.Length;
                 if (round) v[PartContextType.StructInnerDiameter] = width;
                 else { v[PartContextType.StructInnerWidth] = width; v[PartContextType.StructInnerLength] = length > 0 ? length : width; }
-                double wall = inner ? (st.DiameterOrWidth - st.InnerDiameterOrWidth) / 2 : 0;
-                if (wall > 0) v[PartContextType.WallThickness] = wall;
+                // The wall always, 0 for an outer-size fallback: a catalog wall would make the part bigger (review finding).
+                v[PartContextType.WallThickness] = inner ? Math.Max(0, (st.DiameterOrWidth - st.InnerDiameterOrWidth) / 2) : 0;
             }
-            string key = $"{domain} {(round ? "round" : "box")} {PartsListTools.Describe(v)}";
+            string key = $"{domain} {(domain == DomainType.Pipe ? pipeShape.ToString() : round ? "round" : "box")} {PartsListTools.Describe(v)}";
             if (cache.TryGetValue(key, out var hit))
             {
                 if (hit.size.IsNull) throw new InvalidOperationException(hit.error);
@@ -293,7 +330,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                 catch (Exception ex) { reasons.Add($"{description}: {ex.Message}"); continue; }
                 if (famId.IsNull) { reasons.Add($"{description}: not added to the parts list"); continue; }
                 var fam = (PartFamily)tr.GetObject(famId, OpenMode.ForWrite);
-                if (domain == DomainType.Pipe ? (fam.SweptShape == SweptShapeType.Circular) != round : (fam.BoundingShape == BoundingShapeType.Cylinder) != round)
+                if (domain == DomainType.Pipe ? fam.SweptShape != pipeShape : (fam.BoundingShape == BoundingShapeType.Cylinder) != round)
                 {
                     if (added) Remove(list, famId);
                     continue;
@@ -310,8 +347,9 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             // Last: the C3D Pro any-size family of that shape (Method A), which takes any dimensions.
             PartFamily shaped = PartsListTools.Families(tr, listId, domain)
-                .FirstOrDefault(f => domain == DomainType.Pipe ? (f.SweptShape == SweptShapeType.Circular) == round : (f.BoundingShape == BoundingShapeType.Cylinder) == round);
-            if (shaped != null)
+                .FirstOrDefault(f => domain == DomainType.Pipe ? f.SweptShape == pipeShape : (f.BoundingShape == BoundingShapeType.Cylinder) == round);
+            // The any-size families are circular or box only.
+            if (shaped != null && (domain == DomainType.Structure || pipeShape == SweptShapeType.Circular || pipeShape == SweptShapeType.Rectangular))
             {
                 var notes = new List<string>();
                 (ObjectId anyFam, ObjectId anySize) = PartSizeCreator.Create(tr, listId, shaped, v, NewSizeMethod.AnySizeFamily, notes, out string anyError);
@@ -343,6 +381,11 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             return PartsListTools.CatalogFamilies(domain).OrderBy(f => Rank(f.description)).ThenBy(f => f.description, StringComparer.OrdinalIgnoreCase);
         }
+
+        /// <summary>Pipe ends connected to a structure in the network as it is now (after every end was put back).</summary>
+        private static int FinalJoined(Transaction tr, Network net) =>
+            net.GetPipeIds().Live().Select(id => (Pipe)tr.GetObject(id, OpenMode.ForRead))
+               .Sum(q => (q.StartStructureId.IsNull ? 0 : 1) + (q.EndStructureId.IsNull ? 0 : 1));
 
         /// <summary>"Metric Pipes / Metric Structures": the drawing's active part catalogs.</summary>
         private static string CatalogNames()
