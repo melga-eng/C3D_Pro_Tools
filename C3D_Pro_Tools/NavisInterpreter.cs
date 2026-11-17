@@ -124,29 +124,7 @@ namespace C3DProTools
                 c.Notes.Add($"{shape} section is brought in as circular.");
 
             // A curved pipe: built as an arc from its properties. The straight mesh fit does not apply to it.
-            double radius = p.LenWhere(n => n.IndexOf("Radius", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("Point", StringComparison.OrdinalIgnoreCase) < 0);
-            double cx = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("East", StringComparison.OrdinalIgnoreCase) >= 0);
-            double cy = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("North", StringComparison.OrdinalIgnoreCase) >= 0);
-            if (radius > 0 && !double.IsNaN(cx) && !double.IsNaN(cy))
-            {
-                if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
-                {
-                    // A bend over half a circle: the model (mesh) shows which way the pipe goes.
-                    if (Arc(c.Start, c.End, cx, cy, radius, out V3 longMid, out bool longClockwise, out _, longWay: true)
-                        && MeshDistance(c.Source, longMid) < MeshDistance(c.Source, mid))
-                    {
-                        mid = longMid;
-                        clockwise = longClockwise;
-                    }
-                    c.CurveRadius = radius;
-                    c.CurveMid = mid;
-                    c.CurveClockwise = clockwise;
-                    c.Notes.Add($"Curved pipe, radius {radius:0.000} m: built as a curved pipe.");
-                    c.Fit = Fit(c.Source);
-                    return;
-                }
-                c.Notes.Add($"Has a radius ({radius:0.000} m) but {problem}; brought in straight.");
-            }
+            if (TryCurve(c, p)) { c.Fit = Fit(c.Source); return; }
 
             LinearFit fit = c.Fit = Fit(c.Source);
             if (fit == null) { c.Notes.Add("The mesh could not be measured; the Civil 3D properties are used as they are."); c.Confidence = ImportConfidence.Medium; return; }
@@ -173,6 +151,37 @@ namespace C3DProTools
             if (sizeError > HighTolerance)
                 c.Notes.Add($"Property size differs from the model by {sizeError * 1000:0} mm.");
             c.Deviation = Math.Max(endError, sizeError);
+        }
+
+        /// <summary>
+        /// A curved pipe from its radius and radius point properties (gravity and pressure pipes alike): the curve fields set
+        /// and true; false, with a note when a radius was there but did not fit the ends, for a straight pipe.
+        /// </summary>
+        private static bool TryCurve(ImportCandidate c, Props p)
+        {
+            double radius = p.LenWhere(n => n.IndexOf("Radius", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("Point", StringComparison.OrdinalIgnoreCase) < 0);
+            double cx = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("East", StringComparison.OrdinalIgnoreCase) >= 0);
+            double cy = p.NumWhere(n => n.IndexOf("Radius Point", StringComparison.OrdinalIgnoreCase) >= 0 && n.IndexOf("North", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (radius > 0 && !double.IsNaN(cx) && !double.IsNaN(cy))
+            {
+                if (Arc(c.Start, c.End, cx, cy, radius, out V3 mid, out bool clockwise, out string problem))
+                {
+                    // A bend over half a circle: the model (mesh) shows which way the pipe goes.
+                    if (Arc(c.Start, c.End, cx, cy, radius, out V3 longMid, out bool longClockwise, out _, longWay: true)
+                        && MeshDistance(c.Source, longMid) < MeshDistance(c.Source, mid))
+                    {
+                        mid = longMid;
+                        clockwise = longClockwise;
+                    }
+                    c.CurveRadius = radius;
+                    c.CurveMid = mid;
+                    c.CurveClockwise = clockwise;
+                    c.Notes.Add($"Curved pipe, radius {radius:0.000} m: built as a curved pipe.");
+                    return true;
+                }
+                c.Notes.Add($"Has a radius ({radius:0.000} m) but {problem}; brought in straight.");
+            }
+            return false;
         }
 
         /// <summary>
@@ -256,8 +265,9 @@ namespace C3DProTools
             c.Circular = true;
             c.OuterWidth = p.FirstLen("Outer Diameter", "Outside Diameter", "Outer Diameter or Width");
             c.InnerWidth = p.FirstLen("Inner Diameter", "Inside Diameter", "Inner Diameter or Width");
-            if (c.OuterWidth <= 0 && fit != null) c.OuterWidth = fit.Shape == FitShape.Circular ? fit.OuterDiameter : Math.Max(fit.Width, fit.Height);
             if (c.OuterWidth <= 0) c.OuterWidth = p.FirstLen("Nominal Diameter", "Diameter");
+            bool sizeFromMesh = false;
+            if (c.OuterWidth <= 0 && fit != null) { c.OuterWidth = fit.Shape == FitShape.Circular ? fit.OuterDiameter : Math.Max(fit.Width, fit.Height); sizeFromMesh = true; }
             if (c.InnerWidth <= 0 || c.InnerWidth >= c.OuterWidth) c.InnerWidth = 0;
             c.InnerHeight = c.InnerWidth;
             c.OuterHeight = c.OuterWidth;
@@ -265,7 +275,12 @@ namespace C3DProTools
             c.Detected = ImportKind.Pipe;
             c.Notes.Add("Civil 3D pressure pipe: brought in as a pipe (same ends, size and name).");
             if (c.InnerWidth <= 0) c.Notes.Add("Inner size unknown: matched by outer size.");
+            // Curved like a gravity pipe (review finding: a bend came in as its chord).
+            if (TryCurve(c, p)) return;
             if (fit != null) c.Deviation = EndError(c.Start, c.End, fit);
+            if (fit != null && !fit.Straight) { c.Notes.Add("The model is not straight and has no radius properties: brought in straight between its ends; check it."); c.Confidence = ImportConfidence.Low; }
+            // A size measured from the mesh takes in the bells and joints (review finding): flagged, not trusted.
+            if (sizeFromMesh) { c.Notes.Add("Outer size measured from the model (no diameter property); bells and joints can make it too large, check it."); c.Confidence = ImportConfidence.Low; }
         }
 
         // ---------------- Civil 3D structures ----------------

@@ -92,6 +92,40 @@ namespace C3DProTools.Tests
             Assert.True(c.Length > 29 && c.Length < 31, $"length {c.Length}");
         }
 
+        [Fact]
+        public void PressurePipe_SizedFromTheMeshOnly_IsLowConfidence()
+        {
+            // The bell is in the mesh: a size measured from it is flagged, not trusted (review finding).
+            V3 a = new V3(1000, 2000, 50), b = new V3(1030, 2000, 50);
+            var e = new NavisElement { Guid = "pp-3", Name = "Pressure Pipe - (9)", ClassName = "AECC_PRESSUREPIPE", Triangles = BelledPipe(a, b, 0.1), Props = new List<NavisProp>() };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal(ImportConfidence.Low, c.Confidence);
+        }
+
+        [Fact]
+        public void PressurePipe_WithRadius_IsCurved()
+        {
+            // A quarter circle of radius 10 around (1000, 2000): built as a curve, not its chord (review finding).
+            V3 a = new V3(1010, 2000, 50), b = new V3(1000, 2010, 50);
+            var e = new NavisElement
+            {
+                Guid = "pp-4", Name = "Pressure Pipe - (10)", ClassName = "AECC_PRESSUREPIPE", Triangles = Meshes.Cylinder(a, b, 0.1),
+                Props = new List<NavisProp>
+                {
+                    Civil("Start Point Easting", "", a.X), Civil("Start Point Northing", "", a.Y), Civil("Start Point Elevation", "", a.Z),
+                    Civil("End Point Easting", "", b.X), Civil("End Point Northing", "", b.Y), Civil("End Point Elevation", "", b.Z),
+                    Civil("Outer Diameter", "200.000mm"), Civil("Radius", "10.000m"),
+                    Civil("Radius Point Easting", "", 1000), Civil("Radius Point Northing", "", 2000),
+                }
+            };
+            ImportCandidate c = NavisInterpreter.Read(e);
+
+            Assert.Equal(ImportKind.Pipe, c.Action);
+            Assert.Equal(10, c.CurveRadius, 6);
+        }
+
         [Theory]
         [InlineData("AECC_PRESSUREPIPE", true)]
         [InlineData("AECC_PRESSURE_PIPE", true)]

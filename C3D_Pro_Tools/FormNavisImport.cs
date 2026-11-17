@@ -905,16 +905,21 @@ namespace C3DProTools
                     // user, 2026-11-17). Any object with a measurable axis can be a pipe; its ends and size come from that axis.
                     if (c.Fit == null && c.Source.Triangles.Length >= 18) c.Fit = NavisGeometryFit.FitLinear(c.Source.Triangles);
                     if (c.Fit == null || c.Fit.Length < 0.01) return false;
-                    if (c.Detected != ImportKind.Box)
-                    {
-                        c.Start = c.Fit.Start; c.End = c.Fit.End;
-                        c.Circular = true;
-                        c.OuterWidth = c.OuterHeight = c.Fit.Shape == FitShape.Circular ? c.Fit.OuterDiameter : Math.Max(c.Fit.Width, c.Fit.Height);
-                        if (c.InnerWidth >= c.OuterWidth) c.InnerWidth = c.InnerHeight = 0;
-                    }
+                    // A box or structure becomes a round pipe sized to its section; the measured box is kept on the row (Fit),
+                    // so it can be switched back (review finding).
+                    c.Start = c.Fit.Start; c.End = c.Fit.End;
                     c.Circular = true;
+                    c.OuterWidth = c.OuterHeight = c.Fit.Shape == FitShape.Circular ? c.Fit.OuterDiameter : Math.Max(c.Fit.Width, c.Fit.Height);
+                    if (c.InnerWidth >= c.OuterWidth) c.InnerWidth = c.InnerHeight = 0;
                     return true;
-                case ImportKind.Box: return c.Fit != null && !c.Circular && (c.Detected == ImportKind.Box || c.Detected == ImportKind.Pipe);
+                case ImportKind.Box:
+                    if (c.Fit == null || c.Detected != ImportKind.Box) return c.Fit != null && !c.Circular && c.Detected == ImportKind.Pipe;
+                    // Back to the box it was measured as.
+                    c.Start = c.Fit.Start; c.End = c.Fit.End;
+                    c.Circular = false;
+                    c.OuterWidth = c.Fit.Width; c.OuterHeight = c.Fit.Height;
+                    c.InnerWidth = c.Fit.InnerWidth; c.InnerHeight = c.Fit.InnerHeight;
+                    return true;
                 case ImportKind.Structure:
                     if (c.Footprint == null && c.Source.Triangles.Length >= 9)
                     {
