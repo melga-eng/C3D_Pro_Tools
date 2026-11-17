@@ -27,6 +27,18 @@ namespace C3DProTools.Features.Networks.Civil3D
     public sealed class NetworkRebuild
     {
         public const string Suffix = " - REBUILT";
+        /// <summary>The parts list made for networks whose own list is gone (a dead reference has none).</summary>
+        public const string RebuildList = "C3D Pro Rebuild";
+
+        /// <summary>Which parts are rebuilt: structures, pipes, or both; only the picked ones when parts were picked.</summary>
+        internal sealed class RebuildScope
+        {
+            public bool Structures = true, Pipes = true;
+            public HashSet<ObjectId> Picked;
+            public bool Includes(Part p) => (p is Structure ? Structures : Pipes) && (Picked == null || Picked.Contains(p.ObjectId));
+            public override string ToString() =>
+                (Picked != null ? $"{Picked.Count} picked part(s)" : "all parts") + (Structures && Pipes ? "" : Structures ? ", structures only" : ", pipes only");
+        }
 
         [CommandMethod("C3DPRO", "C3DPROREBUILD", CommandFlags.Modal)]
         public void Run()
@@ -42,7 +54,13 @@ namespace C3DProTools.Features.Networks.Civil3D
             bool write = kr.StringResult == "Rebuild";
             PromptResult nr = ed.GetString(new PromptStringOptions("\nNetworks (wildcards; Enter for every data-shortcut reference) <refs>: ") { AllowSpaces = true });
             if (nr.Status != PromptStatus.OK) return;
-            ed.WriteMessage("\n" + RunReport.Write(Execute(doc, nr.StringResult.Trim(), write), "C3DPROREBUILD", write ? "Rebuild" : "Report") + "\n");
+            var pk = new PromptKeywordOptions("\nParts") { AllowNone = true };
+            pk.Keywords.Add("All"); pk.Keywords.Add("Structures"); pk.Keywords.Add("Pipes");
+            pk.Keywords.Default = "All";
+            PromptResult pr = ed.GetKeywords(pk);
+            if (pr.Status != PromptStatus.OK && pr.Status != PromptStatus.None) return;
+            var scope = new RebuildScope { Structures = pr.StringResult != "Pipes", Pipes = pr.StringResult != "Structures" };
+            ed.WriteMessage("\n" + RunReport.Write(Execute(doc, nr.StringResult.Trim(), write, scope), "C3DPROREBUILD", write ? "Rebuild" : "Report") + "\n");
             if (write) ViewHelper.Regen(doc);
         }
 
@@ -109,22 +127,22 @@ namespace C3DProTools.Features.Networks.Civil3D
             try { return n.IsReferenceObject; } catch (Exception) { return false; }
         }
 
-        internal static string Execute(Document doc, string names, bool write) =>
+        internal static string Execute(Document doc, string names, bool write, RebuildScope scope = null) =>
             Execute(doc, names.Length == 0 ? "every data-shortcut reference" : names, tr => Chosen(tr, CivilDocument.GetCivilDocument(doc.Database), names),
-                    names.Length == 0 ? "the drawing has no data-shortcut reference network." : $"no network is named \"{names}\".", write);
+                    names.Length == 0 ? "the drawing has no data-shortcut reference network." : $"no network is named \"{names}\".", write, scope ?? new RebuildScope());
 
         /// <summary>The window's run: exactly the networks ticked (names are not patterns there).</summary>
-        internal static string Execute(Document doc, IReadOnlyCollection<string> exact, bool write)
+        internal static string Execute(Document doc, IReadOnlyCollection<string> exact, bool write, RebuildScope scope)
         {
             var set = new HashSet<string>(exact, StringComparer.OrdinalIgnoreCase);
             return Execute(doc, string.Join(", ", exact), tr => Chosen(tr, CivilDocument.GetCivilDocument(doc.Database), n => set.Contains(n.Name)),
-                           "none of those ticked is in the drawing any more.", write);
+                           "none of those ticked is in the drawing any more.", write, scope);
         }
 
-        private static string Execute(Document doc, string label, Func<Transaction, List<Network>> choose, string none, bool write)
+        private static string Execute(Document doc, string label, Func<Transaction, List<Network>> choose, string none, bool write, RebuildScope scope)
         {
             var log = new StringBuilder();
-            log.AppendLine($"C3DPROREBUILD {(write ? "Rebuild" : "Report")} on {Path.GetFileName(doc.Name)}, networks \"{label}\"");
+            log.AppendLine($"C3DPROREBUILD {(write ? "Rebuild" : "Report")} on {Path.GetFileName(doc.Name)}, networks \"{label}\", {scope}");
             try
             {
                 using (doc.LockDocument())
@@ -135,7 +153,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                     if (nets.Count == 0) log.AppendLine("No network to rebuild: " + none);
                     var parts = new Dictionary<string, (ObjectId fam, ObjectId size, string error)>();
                     bool ok = true;
-                    foreach (Network n in nets) ok &= Rebuild(tr, civil, n, write, parts, log);
+                    foreach (Network n in nets) ok &= Rebuild(tr, civil, n, write, scope, parts, log);
                     // All or nothing: a network left half built would be worse than none.
                     if (write && ok) tr.Commit(); else tr.Abort();
                     if (write && !ok) log.AppendLine("Nothing was changed: a network could not be rebuilt completely (see above).");
@@ -150,29 +168,58 @@ namespace C3DProTools.Features.Networks.Civil3D
         }
 
         /// <summary>Rebuilds one network (or, without <paramref name="write"/>, says what it holds and which part each size gets). False when not complete.</summary>
-        private static bool Rebuild(Transaction tr, CivilDocument civil, Network src, bool write, Dictionary<string, (ObjectId fam, ObjectId size, string error)> parts, StringBuilder log)
+        private static bool Rebuild(Transaction tr, CivilDocument civil, Network src, bool write, RebuildScope scope,
+            Dictionary<string, (ObjectId fam, ObjectId size, string error)> parts, StringBuilder log)
         {
-            List<Structure> structures = src.GetStructureIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead)).OfType<Structure>().ToList();
-            List<Pipe> pipes = src.GetPipeIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead)).OfType<Pipe>().ToList();
-            int curved = pipes.Count(p => p.SubEntityType == PipeSubEntityType.Curved);
-            log.AppendLine($"{src.Name}{(IsReference(src) ? " (data-shortcut reference)" : "")}: {structures.Count} structures, {pipes.Count} pipes ({curved} curved).");
+            List<Structure> allStructures = src.GetStructureIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead)).OfType<Structure>().ToList();
+            List<Pipe> allPipes = src.GetPipeIds().Live().Select(id => tr.GetObject(id, OpenMode.ForRead)).OfType<Pipe>().ToList();
 
+            // Parts go into the network rebuilt before, when there is one, and those already in it (same name) are skipped:
+            // structures one day and pipes the next end up in one network, connected.
+            string name = src.Name + Suffix;
+            Network target = civil.GetPipeNetworkIds().Cast<ObjectId>().Select(id => tr.GetObject(id, OpenMode.ForRead)).OfType<Network>()
+                                  .FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var doneStructures = new Dictionary<string, List<ObjectId>>(StringComparer.Ordinal);
+            var donePipes = new HashSet<string>(StringComparer.Ordinal);
+            if (target != null)
+            {
+                foreach (ObjectId id in target.GetStructureIds().Live())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Structure s) { if (!doneStructures.TryGetValue(s.Name, out var l)) doneStructures[s.Name] = l = new List<ObjectId>(); l.Add(id); }
+                foreach (ObjectId id in target.GetPipeIds().Live())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Pipe q) donePipes.Add(q.Name);
+            }
+            List<Structure> structures = allStructures.Where(s => scope.Includes(s) && !doneStructures.ContainsKey(s.Name)).ToList();
+            List<Pipe> pipes = allPipes.Where(p => scope.Includes(p) && !donePipes.Contains(p.Name)).ToList();
+            int skipped = allStructures.Count(s => scope.Includes(s)) + allPipes.Count(p => scope.Includes(p)) - structures.Count - pipes.Count;
+            int curved = pipes.Count(p => p.SubEntityType == PipeSubEntityType.Curved);
+            log.AppendLine($"{src.Name}{(IsReference(src) ? " (data-shortcut reference)" : "")}: {allStructures.Count} structures, {allPipes.Count} pipes; " +
+                           $"to rebuild: {structures.Count} structures, {pipes.Count} pipes ({curved} curved)" +
+                           (skipped > 0 ? $"; {skipped} already in {name}, skipped" : "") + ".");
+            if (structures.Count == 0 && pipes.Count == 0) return true;
+
+            // The network's own parts list; one rebuilt before keeps its list; otherwise a list of its own (a dead reference has
+            // none, and an old drawing list may take no new family at all: "Standard" in 000004 added nothing, 2026-11-17).
             ObjectId listId = ObjectId.Null;
-            try { listId = src.PartsListId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-            if (listId.IsNull || !listId.IsValid) listId = civil.Styles.PartsListSet.Cast<ObjectId>().FirstOrDefault();
-            if (listId.IsNull) { log.AppendLine($"  the drawing has no parts list to build the parts from."); return false; }
+            try { listId = target != null ? target.PartsListId : src.PartsListId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            if (Environment.GetEnvironmentVariable("C3DPRO_TEST_REBUILD_DEAD") == "1") listId = ObjectId.Null;  // drawing test: act as a dead reference
+            if (listId.IsNull || !listId.IsValid || listId.IsErased) listId = RebuildPartsList(tr, civil, log);
 
             // Every size first, so a report says what each one becomes and a rebuild stops before drawing anything.
             var failures = new List<string>();
+            var failed = new List<(string part, string reason)>();
             foreach (Part part in structures.Cast<Part>().Concat(pipes))
             {
                 try { PartFor(tr, listId, part, parts, log); }
-                catch (Exception ex) { failures.Add($"{part.Name}: {ex.Message}"); }
+                catch (Exception ex) { failed.Add((part.Name, ex.Message)); failures.Add(part.Name); }
             }
             if (failures.Count > 0 || !write)
             {
-                foreach (string f in failures.Take(10)) log.AppendLine("  cannot be made: " + f);
-                if (failures.Count > 10) log.AppendLine($"  ... {failures.Count - 10} more");
+                // One line per reason (one per size), not one per part: 1,265 parts of 3 sizes read as 3 lines (000004, 2026-11-17).
+                foreach (var g in failed.GroupBy(f => f.reason).OrderByDescending(g => g.Count()))
+                {
+                    List<string> names = g.Select(f => f.part).ToList();
+                    log.AppendLine($"{names.Count} part(s) cannot be made ({string.Join(", ", names.Take(3))}{(names.Count > 3 ? ", ..." : "")}): {g.Key}");
+                }
                 if (failures.Count > 0 && CatalogNames().IndexOf("Imperial", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     // The usual cause (AF00020136002H 000004, 2026-11-17): the drawing's pipe catalog is the imperial one, whose
@@ -184,14 +231,28 @@ namespace C3DProTools.Features.Networks.Civil3D
                 return failures.Count == 0;
             }
 
-            string name = src.Name + Suffix;
-            ObjectId newId = Network.Create(civil, ref name);
-            var net = (Network)tr.GetObject(newId, OpenMode.ForWrite);
-            net.PartsListId = listId;
-            try { if (!src.ReferenceSurfaceId.IsNull) net.ReferenceSurfaceId = src.ReferenceSurfaceId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-            try { net.ReferenceAlignmentId = src.ReferenceAlignmentId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            Network net;
+            if (target != null) { net = target; net.UpgradeOpen(); }
+            else
+            {
+                ObjectId newId = Network.Create(civil, ref name);
+                net = (Network)tr.GetObject(newId, OpenMode.ForWrite);
+                net.PartsListId = listId;
+                try { if (!src.ReferenceSurfaceId.IsNull) net.ReferenceSurfaceId = src.ReferenceSurfaceId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                try { net.ReferenceAlignmentId = src.ReferenceAlignmentId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            }
 
+            // Structures rebuilt before (one of that name) take the pipes this run connects to them.
             var map = new Dictionary<ObjectId, ObjectId>();
+            foreach (Structure st in allStructures)
+                if (doneStructures.TryGetValue(st.Name, out var ids) && ids.Count == 1 && allStructures.Count(x => x.Name == st.Name) == 1) map[st.ObjectId] = ids[0];
+            int before = map.Count;
+            // Structures of earlier runs are not this run's to change (review finding: an engineer may have adjusted them): what
+            // they are now is kept and put back if connecting a pipe moves them.
+            var earlier = new Dictionary<ObjectId, (Point3d at, double rim, double sump, StructureControlSumpType by, double depth)>();
+            foreach (ObjectId id in map.Values.Distinct())
+                if (tr.GetObject(id, OpenMode.ForRead) is Structure es) earlier[id] = (es.Location, es.RimElevation, es.SumpElevation, es.ControlSumpBy, es.SumpDepth);
+            var created = new HashSet<ObjectId>();
             int joined = 0, sourceJoined = 0;
             foreach (Structure st in structures)
             {
@@ -208,8 +269,33 @@ namespace C3DProTools.Features.Networks.Civil3D
                     if (!ns.Location.IsEqualTo(st.Location)) ns.Location = st.Location;
                     CopyLook(st, ns);
                     map[st.ObjectId] = id;
+                    created.Add(st.ObjectId);
                 }
                 catch (Exception ex) { failures.Add($"structure {st.Name}: {ex.Message}"); }
+            }
+            // Pipes of an earlier run (pipes first, structures now) are connected to the structures made now, ends kept exact
+            // (review finding: they stayed unconnected for good).
+            int reconnected = 0, tried = 0;
+            if (target != null && created.Count > 0)
+            {
+                var srcByName = allPipes.GroupBy(p => p.Name).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First());
+                foreach (ObjectId id in net.GetPipeIds().Live())
+                {
+                    if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe q) || !srcByName.TryGetValue(q.Name, out Pipe sp)) continue;
+                    bool start = q.StartStructureId.IsNull && created.Contains(sp.StartStructureId), end = q.EndStructureId.IsNull && created.Contains(sp.EndStructureId);
+                    if (!start && !end) continue;
+                    q.UpgradeOpen();
+                    Point3d s = q.StartPoint, e = q.EndPoint;
+                    if (start) Connect(q, ConnectorPositionType.Start, sp.StartStructureId, map);
+                    if (end) Connect(q, ConnectorPositionType.End, sp.EndStructureId, map);
+                    if (!q.StartPoint.IsEqualTo(s)) q.StartPoint = s;
+                    if (!q.EndPoint.IsEqualTo(e)) q.EndPoint = e;
+                    // Counted after the ends are put back: an end far from its structure lets go again (as on a first run).
+                    reconnected += (start && !q.StartStructureId.IsNull ? 1 : 0) + (end && !q.EndStructureId.IsNull ? 1 : 0);
+                    tried += (start ? 1 : 0) + (end ? 1 : 0);
+                }
+                if (tried > 0) log.AppendLine($"{reconnected} of {tried} end(s) of pipes rebuilt before connected to the structures made now" +
+                                              (reconnected < tried ? " (the others are away from their structure; ends kept exact)" : ""));
             }
             foreach (Pipe p in pipes)
             {
@@ -227,7 +313,7 @@ namespace C3DProTools.Features.Networks.Civil3D
                     else using (var line = new LineSegment3d(s, e)) net.AddLinePipe(fam, size, line, ref id, false);
                     if (id.IsNull) throw new InvalidOperationException("Civil 3D did not return the new pipe");
                     var np = (Pipe)tr.GetObject(id, OpenMode.ForWrite);
-                    sourceJoined += (p.StartStructureId.IsNull ? 0 : 1) + (p.EndStructureId.IsNull ? 0 : 1);
+                    sourceJoined += (map.ContainsKey(p.StartStructureId) ? 1 : 0) + (map.ContainsKey(p.EndStructureId) ? 1 : 0);
                     joined += Connect(np, ConnectorPositionType.Start, p.StartStructureId, map);
                     joined += Connect(np, ConnectorPositionType.End, p.EndStructureId, map);
                     // Connecting may pull an end onto the structure: the rebuilt pipe keeps the original's 3D ends.
@@ -242,7 +328,20 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             // Connecting pipes lets Civil 3D move a sump set by depth (2.3 m on Test.dwg, 2026-11-17): rim and sump are set
             // again once every pipe is in, the sump by elevation, so each structure is exactly as the original.
-            foreach (Structure st in structures.Where(s => map.ContainsKey(s.ObjectId)))
+            foreach (KeyValuePair<ObjectId, (Point3d at, double rim, double sump, StructureControlSumpType by, double depth)> kv in earlier)
+            {
+                var es = (Structure)tr.GetObject(kv.Key, OpenMode.ForRead);
+                if (es.Location.IsEqualTo(kv.Value.at) && Math.Abs(es.RimElevation - kv.Value.rim) < 0.0005 && Math.Abs(es.SumpElevation - kv.Value.sump) < 0.0005) continue;
+                try
+                {
+                    es.UpgradeOpen();
+                    if (!es.Location.IsEqualTo(kv.Value.at)) es.Location = kv.Value.at;
+                    es.RimElevation = kv.Value.rim;
+                    if (kv.Value.by == StructureControlSumpType.ByElevation) es.SumpElevation = kv.Value.sump; else es.SumpDepth = kv.Value.depth;
+                }
+                catch (Exception ex) { failures.Add($"structure {es.Name} (rebuilt before) could not be kept as it was ({ex.Message})"); }
+            }
+            foreach (Structure st in allStructures.Where(s => created.Contains(s.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForWrite);
                 try
@@ -259,7 +358,7 @@ namespace C3DProTools.Features.Networks.Civil3D
 
             // Checked against the original: the largest difference in structure place, rim and sump, and in pipe ends.
             double place = 0, rim = 0, sump = 0;
-            foreach (Structure st in structures.Where(s => map.ContainsKey(s.ObjectId)))
+            foreach (Structure st in allStructures.Where(s => created.Contains(s.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForRead);
                 place = Math.Max(place, ns.Location.DistanceTo(st.Location));
@@ -272,7 +371,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             }
             // The footprint: outer width and length as the original's (review finding: a fallback could grow it).
             double footprint = 0;
-            foreach (Structure st in structures.Where(x => map.ContainsKey(x.ObjectId)))
+            foreach (Structure st in allStructures.Where(x => created.Contains(x.ObjectId)))
             {
                 var ns = (Structure)tr.GetObject(map[st.ObjectId], OpenMode.ForRead);
                 footprint = Math.Max(footprint, Math.Max(Math.Abs(ns.DiameterOrWidth - st.DiameterOrWidth), Math.Abs(ns.Length - st.Length)));
@@ -291,8 +390,9 @@ namespace C3DProTools.Features.Networks.Civil3D
                 // is far from its structure, where Civil 3D will not connect without moving it) is listed.
                 bool Wrong(ObjectId was, ObjectId now) => !now.IsNull && !(map.TryGetValue(was, out ObjectId m) && m == now);
                 if (Wrong(p.StartStructureId, q.StartStructureId) || Wrong(p.EndStructureId, q.EndStructureId)) wrong++;
-                bool startOk = p.StartStructureId.IsNull || map.TryGetValue(p.StartStructureId, out ObjectId s1) && q.StartStructureId == s1;
-                bool endOk = p.EndStructureId.IsNull || map.TryGetValue(p.EndStructureId, out ObjectId e1) && q.EndStructureId == e1;
+                // An end whose structure is not rebuilt (pipes only, or not picked) is not expected to be connected.
+                bool startOk = !map.TryGetValue(p.StartStructureId, out ObjectId s1) || q.StartStructureId == s1;
+                bool endOk = !map.TryGetValue(p.EndStructureId, out ObjectId e1) || q.EndStructureId == e1;
                 if (!startOk || !endOk)
                 {
                     lost++;
@@ -315,8 +415,11 @@ namespace C3DProTools.Features.Networks.Civil3D
             log.AppendLine($"  largest difference from the original: structure place {place * 1000:0.#} mm, rim {rim * 1000:0.#} mm, sump {sump * 1000:0.#} mm; pipe ends {pMax * 1000:0.#} mm, pipe section {section * 1000:0.#} mm");
             // More than a millimetre anywhere is a wrong rebuild: nothing is kept.
             if (stMax > 0.001 || pMax > 0.001) failures.Add($"the rebuilt network differs from the original by up to {Math.Max(stMax, pMax) * 1000:0} mm");
-            log.AppendLine($"Rebuilt as {name}: {map.Count} of {structures.Count} structures, {net.GetPipeIds().Count} of {pipes.Count} pipes, " +
-                           $"{FinalJoined(tr, net)} of {sourceJoined} pipe ends connected to structures" + (failures.Count > 0 ? $"; {failures.Count} not rebuilt" : "") + ".");
+            var thisRun = new HashSet<string>(pipes.Select(p => p.Name), StringComparer.Ordinal);
+            List<Pipe> madePipes = rebuiltPipes.Where(q => thisRun.Contains(q.Name)).ToList();
+            log.AppendLine($"Rebuilt {(target != null ? "into" : "as")} {name}: {map.Count - before} of {structures.Count} structures, {madePipes.Count} of {pipes.Count} pipes, " +
+                           $"{madePipes.Sum(q => (map.ContainsValue(q.StartStructureId) ? 1 : 0) + (map.ContainsValue(q.EndStructureId) ? 1 : 0))} of {sourceJoined} pipe ends connected to structures" +
+                           (failures.Count > 0 ? $"; {failures.Count} not rebuilt" : "") + ".");
             foreach (string f in failures.Take(20)) log.AppendLine("  not rebuilt " + f);
             return failures.Count == 0;
         }
@@ -330,7 +433,7 @@ namespace C3DProTools.Features.Networks.Civil3D
         private static (ObjectId family, ObjectId size) PartFor(Transaction tr, ObjectId listId, Part part, Dictionary<string, (ObjectId fam, ObjectId size, string error)> cache, StringBuilder log)
         {
             ObjectId own = part.PartFamilyId;
-            if (PartCopy.IsFamily(tr, own))
+            if (PartCopy.IsFamily(tr, own) && Environment.GetEnvironmentVariable("C3DPRO_TEST_REBUILD_DEAD") != "1")
             {
                 ObjectId size = ObjectId.Null;
                 try { size = part.GetPartSizeId(); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
@@ -401,18 +504,28 @@ namespace C3DProTools.Features.Networks.Civil3D
                 if (added) Remove(list, famId);
             }
             // Last: the C3D Pro any-size family of that shape (Method A), which takes any dimensions.
-            PartFamily shaped = PartsListTools.Families(tr, listId, domain)
-                .FirstOrDefault(f => domain == DomainType.Pipe ? f.SweptShape == pipeShape : (f.BoundingShape == BoundingShapeType.Cylinder) == round);
-            // The any-size families are circular or box only.
-            if (shaped != null && (domain == DomainType.Structure || pipeShape == SweptShapeType.Circular || pipeShape == SweptShapeType.Rectangular))
+            // The any-size families are circular or box only. Added straight by shape: the list may hold no family of it yet.
+            if (domain == DomainType.Structure || pipeShape == SweptShapeType.Circular || pipeShape == SweptShapeType.Rectangular)
             {
-                var notes = new List<string>();
-                (ObjectId anyFam, ObjectId anySize) = PartSizeCreator.Create(tr, listId, shaped, v, NewSizeMethod.AnySizeFamily, notes, out string anyError);
-                if (!anySize.IsNull)
+                string anyKey = domain == DomainType.Pipe ? (round ? "circle" : "box") : (round ? "cyl" : "rect");
+                AnySizeFamily def = NavisCatalogEditor.AnySize.First(f => f.Key == anyKey);
+                string anyError;
+                if (!PartSizeCreator.AnySizeLoaded(def))
+                    anyError = "the C3D Pro any-size family for this shape is not loaded. Set it up once (Parts Lists window → \"Set up Method A\") and restart Civil 3D";
+                else
                 {
-                    cache[key] = (anyFam, anySize, null);
-                    log.AppendLine($"  {key} -> any-size family (Method A)");
-                    return (anyFam, anySize);
+                    ObjectId anyFam = PartsListTools.EnsureFamily(tr, listId, domain, def.Guid, out _);
+                    if (anyFam.IsNull) anyError = $"Civil 3D did not put \"{def.Description}\" in the parts list";
+                    else
+                    {
+                        ObjectId anySize = PartsListTools.AddSize(tr, (PartFamily)tr.GetObject(anyFam, OpenMode.ForWrite), v, out anyError);
+                        if (!anySize.IsNull)
+                        {
+                            cache[key] = (anyFam, anySize, null);
+                            log.AppendLine($"  {key} -> \"{def.Description}\" (Method A)");
+                            return (anyFam, anySize);
+                        }
+                    }
                 }
                 reasons.Insert(0, $"any-size family (Method A): {anyError}");
             }
@@ -437,10 +550,15 @@ namespace C3DProTools.Features.Networks.Civil3D
             return PartsListTools.CatalogFamilies(domain).OrderBy(f => Rank(f.description)).ThenBy(f => f.description, StringComparer.OrdinalIgnoreCase);
         }
 
-        /// <summary>Pipe ends connected to a structure in the network as it is now (after every end was put back).</summary>
-        private static int FinalJoined(Transaction tr, Network net) =>
-            net.GetPipeIds().Live().Select(id => (Pipe)tr.GetObject(id, OpenMode.ForRead))
-               .Sum(q => (q.StartStructureId.IsNull ? 0 : 1) + (q.EndStructureId.IsNull ? 0 : 1));
+        /// <summary>The "C3D Pro Rebuild" parts list, made empty when missing; families are added to it as sizes need them.</summary>
+        private static ObjectId RebuildPartsList(Transaction tr, CivilDocument civil, StringBuilder log)
+        {
+            foreach (ObjectId id in civil.Styles.PartsListSet)
+                if (tr.GetObject(id, OpenMode.ForRead) is PartsList pl && pl.Name.Equals(RebuildList, StringComparison.OrdinalIgnoreCase)) return id;
+            ObjectId made = civil.Styles.PartsListSet.Add(RebuildList);
+            log.AppendLine($"  parts list \"{RebuildList}\" made for the rebuilt parts");
+            return made;
+        }
 
         /// <summary>"Metric Pipes / Metric Structures": the drawing's active part catalogs.</summary>
         private static string CatalogNames()

@@ -4,6 +4,13 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.Civil.DatabaseServices;
+using Exception = System.Exception;
+using Label = System.Windows.Forms.Label;
+using Font = System.Drawing.Font;
+using FlowDirection = System.Windows.Forms.FlowDirection;
 
 namespace C3DProTools.Features.Networks.Civil3D
 {
@@ -25,6 +32,11 @@ namespace C3DProTools.Features.Networks.Civil3D
             Font = new Font("Consolas", 9f), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle
         };
         private readonly Label _count = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(3, 9, 3, 3) };
+        private readonly RadioButton _all = new RadioButton { Text = "All", AutoSize = true, Checked = true, Margin = new Padding(3, 8, 6, 3) };
+        private readonly RadioButton _structures = new RadioButton { Text = "Structures only", AutoSize = true, Margin = new Padding(3, 8, 6, 3) };
+        private readonly RadioButton _pipes = new RadioButton { Text = "Pipes only", AutoSize = true, Margin = new Padding(3, 8, 6, 3) };
+        private readonly Label _pickedText = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(3, 9, 3, 3) };
+        private HashSet<ObjectId> _picked;
         private List<NetworkRebuild.NetworkRow> _rows = new List<NetworkRebuild.NetworkRow>();
 
         public FormNetworkRebuild(Document doc)
@@ -55,6 +67,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
             body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
 
             var tools = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = new Padding(0, 0, 0, 4) };
@@ -64,11 +77,21 @@ namespace C3DProTools.Features.Networks.Civil3D
             tools.Controls.Add(_count);
             body.Controls.Add(tools, 0, 0);
             body.Controls.Add(_list, 0, 1);
-            body.Controls.Add(ToolUi.Note("Check lists what each ticked network holds and which part each size becomes; nothing changes. Rebuild draws each " +
-                                          "one as \"<name>" + NetworkRebuild.Suffix + "\": structures, pipes, levels, connections, names, styles and layers. " +
-                                          "The original is only read. All or nothing, one UNDO."), 0, 2);
-            body.Controls.Add(StyleUi.Caption("Report"), 0, 3);
-            body.Controls.Add(_report, 0, 4);
+            var partsRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = new Padding(0, 6, 0, 0) };
+            partsRow.Controls.Add(StyleUi.Caption("Parts"));
+            partsRow.Controls.Add(_all);
+            partsRow.Controls.Add(_structures);
+            partsRow.Controls.Add(_pipes);
+            partsRow.Controls.Add(StyleUi.Secondary("Pick parts <", (s, e) => Pick()));
+            partsRow.Controls.Add(StyleUi.Secondary("Clear pick", (s, e) => SetPicked(null)));
+            partsRow.Controls.Add(_pickedText);
+            body.Controls.Add(partsRow, 0, 2);
+            body.Controls.Add(ToolUi.Note("Check lists what each ticked network holds and which part each size becomes; nothing changes. Rebuild draws the parts " +
+                                          "into \"<name>" + NetworkRebuild.Suffix + "\" (made the first time, added to after): structures, pipes, levels, connections, " +
+                                          "names, styles and layers; parts already in it are skipped, so structures and pipes can be done one after the other. " +
+                                          "The original is only read. All or nothing, one UNDO."), 0, 3);
+            body.Controls.Add(StyleUi.Caption("Report"), 0, 4);
+            body.Controls.Add(_report, 0, 5);
 
             var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 4, 8, 8), BackColor = StyleUi.Surface };
             footer.Controls.Add(close);
@@ -80,6 +103,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             Controls.Add(ToolUi.Header("Rebuild Network", "A network you cannot edit, drawn again as an ordinary one"));
 
             Fill(null);
+            SetPicked(null);
             Resize += (s, e) => ToolUi.FitNotes(body, body.ClientSize.Width - body.Padding.Horizontal - 6);
             Shown += (s, e) => ToolUi.FitNotes(body, body.ClientSize.Width - body.Padding.Horizontal - 6);
         }
@@ -115,22 +139,47 @@ namespace C3DProTools.Features.Networks.Civil3D
 
         private void UpdateCount() => _count.Text = $"{_list.CheckedItems.Count} of {_list.Items.Count} ticked";
 
+        private void SetPicked(HashSet<ObjectId> picked)
+        {
+            _picked = picked;
+            _pickedText.Text = picked == null ? "every part of the ticked networks" : $"{picked.Count} picked part(s)";
+        }
+
+        /// <summary>Parts picked on screen: only those are rebuilt, and their networks are the ones ticked.</summary>
+        private void Pick()
+        {
+            Editor ed = _doc.Editor;
+            var ids = new HashSet<ObjectId>();
+            var nets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (ed.StartUserInteraction(this))
+            {
+                var opts = new PromptSelectionOptions { MessageForAdding = "\nSelect pipes and structures to rebuild: " };
+                PromptSelectionResult res = ed.GetSelection(opts, new SelectionFilter(new[] { new TypedValue((int)DxfCode.Start, "AECC_PIPE,AECC_STRUCTURE") }));
+                if (res.Status != PromptStatus.OK) return;
+                using (_doc.LockDocument())
+                using (Transaction tr = _doc.Database.TransactionManager.StartOpenCloseTransaction())
+                {
+                    foreach (ObjectId id in res.Value.GetObjectIds())
+                        if (tr.GetObject(id, OpenMode.ForRead) is Part p) { ids.Add(id); try { nets.Add(p.NetworkName); } catch (Exception) { } }
+                    tr.Commit();
+                }
+            }
+            if (ids.Count == 0) return;
+            SetPicked(ids);
+            foreach (ListViewItem i in _list.Items) i.Checked = nets.Contains(((NetworkRebuild.NetworkRow)i.Tag).Name);
+        }
+
         private void Run(bool write)
         {
             List<NetworkRebuild.NetworkRow> ticked = Ticked();
             if (ticked.Count == 0) { MessageBox.Show(this, "Tick at least one network.", Text); return; }
-            List<string> again = ticked.Where(r => r.HasRebuilt).Select(r => r.Name).ToList();
-            if (write && again.Count > 0 && MessageBox.Show(this,
-                    "These already have a rebuilt copy in the drawing; another one will be made beside it:\n\n" + string.Join("\n", again.Take(8)) +
-                    (again.Count > 8 ? $"\n... and {again.Count - 8} more" : "") + "\n\nRebuild them again?",
-                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-                return;
+            var scope = new NetworkRebuild.RebuildScope { Structures = !_pipes.Checked, Pipes = !_structures.Checked, Picked = _picked };
 
             Cursor = Cursors.WaitCursor;
             _report.Text = write ? "Rebuilding..." : "Checking...";
             _report.Refresh();
             // Execute never throws (it reports its own failure); anything after it only shows the result.
-            string log = NetworkRebuild.Execute(_doc, ticked.Select(r => r.Name).ToList(), write);
+            string log = NetworkRebuild.Execute(_doc, ticked.Select(r => r.Name).ToList(), write, scope);
             try
             {
                 string summary = RunReport.Write(log, "C3DPROREBUILD", write ? "Rebuild" : "Report");
