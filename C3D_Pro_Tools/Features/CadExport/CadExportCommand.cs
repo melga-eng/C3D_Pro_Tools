@@ -64,6 +64,49 @@ namespace C3DProTools.Features.CadExport
         }
 
         /// <summary>
+        /// C3DPROEXPLODELABELS: a copy of the saved drawing with every Civil 3D label exploded as the sheets show it (step 1 of CAD
+        /// Sheets, for all layouts), saved beside the drawing as "&lt;name&gt; - labels exploded.dwg". Runs in the background; the open
+        /// drawing is not changed (your request, 2026-11-18: to try the export yourself).
+        /// </summary>
+        [CommandMethod("C3DPRO", "C3DPROEXPLODELABELS", CommandFlags.Modal)]
+        public void ExplodeLabels()
+        {
+            Document doc = AcApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            const string title = "Explode Labels";
+            if (_running != null)
+            {
+                WinForms.MessageBox.Show($"A background run for {Path.GetFileName(_running.Source)} is still going (started {_running.Started:HH:mm}).", title,
+                    WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                return;
+            }
+            string source = doc.Database.Filename;
+            if (string.IsNullOrEmpty(source) || !File.Exists(source) || !doc.IsNamedDrawing)
+            {
+                WinForms.MessageBox.Show("Save the drawing first: the copy is made from the saved file.", title, WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                return;
+            }
+            if (Convert.ToInt32(AcApp.GetSystemVariable("DBMOD")) != 0 &&
+                WinForms.MessageBox.Show("The drawing has changes that are not saved. The copy is made from the saved file, without them.\n\nContinue?", title,
+                    WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Question) != WinForms.DialogResult.Yes)
+                return;
+            string output = Path.Combine(Path.GetDirectoryName(source)!, Path.GetFileNameWithoutExtension(source) + " - labels exploded.dwg");
+            if (File.Exists(output) && WinForms.MessageBox.Show($"{Path.GetFileName(output)} is already there and will be replaced. Continue?", title,
+                    WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Warning) != WinForms.DialogResult.Yes)
+                return;
+            try
+            {
+                _running = Job.Start(source, new List<string> { "*" }, Path.GetDirectoryName(source)!, output);
+                doc.Editor.WriteMessage($"\nC3DPROEXPLODELABELS: exploding every label in the background into {output}. Keep working; you will be told when it is ready.\n");
+            }
+            catch (System.Exception ex)
+            {
+                C3DProLogger.Error("C3DPROEXPLODELABELS: the background Civil 3D could not be started", ex);
+                WinForms.MessageBox.Show($"The background Civil 3D could not be started: {ex.Message}", title, WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
         /// One background run on a copy of the saved drawing, in two background Civil 3D sessions one after the other: the
         /// explode (saved), then the export and split. A timer on the Civil 3D thread starts the second and reports the end.
         /// </summary>
@@ -72,6 +115,8 @@ namespace C3DProTools.Features.CadExport
             public string Source { get; private init; } = "";
             public DateTime Started { get; private init; }
             private string _dir = "", _folder = "", _console = "", _acadDir = "", _copy = "";
+            /// <summary>Set for Explode Labels: the copy is saved here after step 1, and there is no export.</summary>
+            private string _explodedTo;
             private string[] _exportScript = Array.Empty<string>();
             private int _step;
             private Process _process = null!;
@@ -80,7 +125,7 @@ namespace C3DProTools.Features.CadExport
             private string ReportFile => Path.Combine(_dir, "report.txt");
             private string Log(int step) => Path.Combine(_dir, $"log{step}.txt");
 
-            public static Job Start(string source, List<string> layouts, string folder)
+            public static Job Start(string source, List<string> layouts, string folder, string explodedTo = null)
             {
                 string acadDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule!.FileName)!;
                 string console = Path.Combine(acadDir, "accoreconsole.exe");
@@ -93,7 +138,7 @@ namespace C3DProTools.Features.CadExport
                 File.Copy(source, copy);
                 var job = new Job
                 {
-                    Source = source, Started = DateTime.Now, _dir = dir, _folder = folder, _console = console, _acadDir = acadDir, _copy = copy,
+                    Source = source, Started = DateTime.Now, _dir = dir, _folder = folder, _console = console, _acadDir = acadDir, _copy = copy, _explodedTo = explodedTo,
                 };
                 // Sheet names and the folder go in UTF-8 files: the script is ASCII, where É would become ? (a wildcard).
                 string layoutsFile = Path.Combine(dir, "layouts.txt"), folderFile = Path.Combine(dir, "folder.txt");
@@ -135,6 +180,11 @@ namespace C3DProTools.Features.CadExport
             {
                 if (!_process.HasExited) return;
                 string report = File.Exists(ReportFile) ? File.ReadAllText(ReportFile) : null;
+                if (_explodedTo != null)
+                {
+                    FinishExplodeOnly(report);
+                    return;
+                }
                 if (_step == 1 && report != null && report.Contains("labels done"))
                 {
                     try { Run(2, _exportScript); return; }
@@ -161,6 +211,37 @@ namespace C3DProTools.Features.CadExport
                         done && !summary.Contains("Not saved") ? WinForms.MessageBoxIcon.Information : WinForms.MessageBoxIcon.Warning) == WinForms.DialogResult.Yes)
                     try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_folder}\"") { UseShellExecute = true }); }
                     catch (System.Exception ex) { C3DProLogger.Warn("C3DPROCAD: the folder could not be opened", ex); }
+            }
+
+            /// <summary>Explode Labels: the exploded copy saved beside the drawing, and the user told.</summary>
+            private void FinishExplodeOnly(string report)
+            {
+                _timer.Stop();
+                _timer.Dispose();
+                _running = null;
+                bool exploded = report != null && report.Contains("labels done");
+                string message;
+                if (exploded)
+                {
+                    try
+                    {
+                        File.Copy(_copy, _explodedTo, true);
+                        message = RunReport.Summary(report) + $"\n\nSaved: {_explodedTo}";
+                        try { Directory.Delete(_dir, true); } catch (System.Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+                    }
+                    catch (System.Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                    {
+                        exploded = false;
+                        message = $"The labels were exploded, but the copy could not be saved as {_explodedTo}: {ex.Message}\nIt is in {_copy}";
+                    }
+                }
+                else message = (report != null ? RunReport.Summary(report) + "\n" : "") + $"The background Civil 3D stopped before the end. Its log: {Log(1)}";
+                try { AcApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage($"\nC3DPROEXPLODELABELS finished:\n{message}\n"); }
+                catch (System.Exception ex) { C3DProLogger.Warn("C3DPROEXPLODELABELS: the result could not be written to the command line", ex); }
+                if (WinForms.MessageBox.Show(message + "\n\nOpen the folder?", "Explode Labels", WinForms.MessageBoxButtons.YesNo,
+                        exploded ? WinForms.MessageBoxIcon.Information : WinForms.MessageBoxIcon.Warning) == WinForms.DialogResult.Yes)
+                    try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{(exploded ? _explodedTo : _copy)}\"") { UseShellExecute = true }); }
+                    catch (System.Exception ex) { C3DProLogger.Warn("C3DPROEXPLODELABELS: the folder could not be opened", ex); }
             }
         }
 
