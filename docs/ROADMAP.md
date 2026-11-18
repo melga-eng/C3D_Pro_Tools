@@ -61,7 +61,7 @@ Tests always run on copies.
 - Rebuild Network (window `RebuildNetwork`, command line `C3DPROREBUILD`): dead data-shortcut networks rebuilt as ordinary ones (your request). Window, parts scope and pick added; works on your 000004 drawing (2026-11-17).
 - New size: Method A no longer crashes; the reason is named (a drawing on the US Imperial catalog cannot make metric sizes).
 
-- Network Layers (Uniclass / KSIA layers, your request 2026-11-18): stages 1 and 2 merged (ICT, then every network with KSIA template suggestions); needs your try. Next stage: the other CAD rules (text, dimensions, title block, xrefs, purge).
+- Network Layers (Uniclass / KSIA layers, your request 2026-11-18): stages 1 and 2 merged (ICT, then every network with KSIA template suggestions); needs your try. Stage 3, Drawing Standards (the other KSIA CAD rules), merged 2026-11-18; needs your try.
 
 ## Later (not before release 4)
 
