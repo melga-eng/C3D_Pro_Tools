@@ -29,6 +29,8 @@ namespace C3DProTools
         public string TitleBlockName = "";
         /// <summary>The title block's attributes in their order (tag → value).</summary>
         public readonly List<KeyValuePair<string, string>> Attributes = new List<KeyValuePair<string, string>>();
+        /// <summary>Tags whose attribute holds a field (as %&lt;\AcVar ctab&gt;%): read as the field shows it, never written over.</summary>
+        public readonly HashSet<string> FieldTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public ObjectId SheetIdTextId, PartTextId, ScaleTextId, KeyTileTextId, KeyHatchId;
         public string ScaleText = "";
@@ -151,7 +153,20 @@ namespace C3DProTools
                 s.TitleBlockId = title.ObjectId;
                 s.TitleBlockName = BlockName(tr, title);
                 foreach (ObjectId a in title.AttributeCollection)
-                    if (tr.GetObject(a, OpenMode.ForRead) is AttributeReference ar) s.Attributes.Add(new KeyValuePair<string, string>(ar.Tag, AttributeText(ar)));
+                    if (tr.GetObject(a, OpenMode.ForRead) is AttributeReference ar)
+                    {
+                        string value = AttributeText(ar);
+                        string codes = FieldCodes(ar);
+                        if (codes != null)
+                        {
+                            s.FieldTags.Add(ar.Tag);
+                            // A CTAB field shows its own layout's name on its sheet; the stored text is the last one evaluated, the
+                            // same on every sheet (your drawing number field, 2026-11-18).
+                            // Only when CTAB is the attribute's only field: another field's code cannot be shown, so then the stored text stays (review finding).
+                            if (CtabField.IsMatch(codes) && CtabField.Replace(codes, s.Layout) is string shown && !shown.Contains("%<")) value = shown;
+                        }
+                        s.Attributes.Add(new KeyValuePair<string, string>(ar.Tag, value));
+                    }
             }
 
             // The key plan: the quadrant labels' area; its tile number and the hatch marking this sheet's quadrant.
@@ -201,6 +216,19 @@ namespace C3DProTools
         {
             try { return ((BlockTableRecord)tr.GetObject(br.IsDynamicBlock ? br.DynamicBlockTableRecord : br.BlockTableRecord, OpenMode.ForRead)).Name; }
             catch (Exception) { return br.Name; }
+        }
+
+        private static readonly Regex CtabField = new Regex(@"%<\\AcVar\s+ctab(\s+\\f\s+""[^""]*"")?>%", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        /// <summary>The attribute's text with its field codes, or null when it holds no field.</summary>
+        internal static string FieldCodes(AttributeReference ar)
+        {
+            try
+            {
+                if (!ar.HasFields) return null;
+                return ar.IsMTextAttribute ? ar.MTextAttribute.getMTextWithFieldCodes() : ar.getTextWithFieldCodes();
+            }
+            catch (Exception) { return null; }
         }
 
         private static string AttributeText(AttributeReference ar)
@@ -569,6 +597,8 @@ namespace C3DProTools
                 string tag = values.Keys.FirstOrDefault(k => k.Equals(ar.Tag, StringComparison.OrdinalIgnoreCase));
                 if (tag == null) continue;
                 string value = values[tag] ?? "";
+                // A field (the drawing number's CTAB) keeps itself up to date: writing text over it would end that.
+                if (FieldCodes(ar) != null) continue;
                 if (AttributeText(ar) == value) continue;
                 ar.UpgradeOpen();
                 if (ar.IsMTextAttribute) { MText m = ar.MTextAttribute; m.Contents = value; ar.MTextAttribute = m; ar.UpdateMTextAttribute(); }

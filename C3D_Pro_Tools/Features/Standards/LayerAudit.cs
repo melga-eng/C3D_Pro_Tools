@@ -362,6 +362,17 @@ namespace C3DProTools.Features.Standards
             }
         }
 
+        /// <summary>A KSIA template layer in the drawing (copied from the template when missing), for other tools.</summary>
+        internal static ObjectId EnsureTemplateLayer(Transaction tr, Database db, string name, StringBuilder log)
+        {
+            var scan = new Scan { TemplatePath = TemplatePath() };
+            scan.TemplateLayers = TemplateLayers(scan.TemplatePath);
+            // Not made up when the template cannot be read: a default layer would plot differently (review finding).
+            if (!((LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead)).Has(name) && !scan.TemplateLayers.Contains(name, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"layer {name} is not in the drawing and the KSIA template ({scan.TemplatePath}) could not give it");
+            return EnsureLayer(tr, db, name, null, scan, log);
+        }
+
         /// <summary>
         /// The layer, made when missing: copied from the KSIA template when it has it (colour, linetype, line weight, plot),
         /// else with the properties of <paramref name="like"/>.
