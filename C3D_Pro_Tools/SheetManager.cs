@@ -162,7 +162,8 @@ namespace C3DProTools
                             s.FieldTags.Add(ar.Tag);
                             // A CTAB field shows its own layout's name on its sheet; the stored text is the last one evaluated, the
                             // same on every sheet (your drawing number field, 2026-11-18).
-                            if (CtabField.IsMatch(codes)) value = CtabField.Replace(codes, s.Layout);
+                            // Only when CTAB is the attribute's only field: another field's code cannot be shown, so then the stored text stays (review finding).
+                            if (CtabField.IsMatch(codes) && CtabField.Replace(codes, s.Layout) is string shown && !shown.Contains("%<")) value = shown;
                         }
                         s.Attributes.Add(new KeyValuePair<string, string>(ar.Tag, value));
                     }

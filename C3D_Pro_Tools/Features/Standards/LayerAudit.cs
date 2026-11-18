@@ -367,6 +367,9 @@ namespace C3DProTools.Features.Standards
         {
             var scan = new Scan { TemplatePath = TemplatePath() };
             scan.TemplateLayers = TemplateLayers(scan.TemplatePath);
+            // Not made up when the template cannot be read: a default layer would plot differently (review finding).
+            if (!((LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead)).Has(name) && !scan.TemplateLayers.Contains(name, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"layer {name} is not in the drawing and the KSIA template ({scan.TemplatePath}) could not give it");
             return EnsureLayer(tr, db, name, null, scan, log);
         }
 
