@@ -31,6 +31,9 @@ namespace C3DProTools.Features.Standards
 
     public sealed class DrawingStandards
     {
+        /// <summary>The KSIA template's dimension layer.</summary>
+        internal const string DimLayer = "Z-Zz_20_20-D-Dim";
+
         [CommandMethod("C3DPRO", "DrawingStandards", CommandFlags.Modal)]
         public void Window()
         {
@@ -145,6 +148,7 @@ namespace C3DProTools.Features.Standards
             var onZero = new Dictionary<string, int>();
             var dimStyle = new Dictionary<string, int>();
             var dimLayer = new Dictionary<string, int>();
+            var dimIds = new List<ObjectId>();
             var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
             foreach (ObjectId bid in bt)
             {
@@ -166,7 +170,7 @@ namespace C3DProTools.Features.Standards
                         string style = Safe(() => d.DimensionStyleName);
                         if (!style.StartsWith("KSI", StringComparison.OrdinalIgnoreCase)) dimStyle[style] = dimStyle.TryGetValue(style, out int n) ? n + 1 : 1;
                         string[] f = d.Layer.Split('-');
-                        if (!(f.Length >= 4 && f[2] == "D")) dimLayer[d.Layer] = dimLayer.TryGetValue(d.Layer, out int m) ? m + 1 : 1;
+                        if (!(f.Length >= 4 && f[2] == "D")) { dimLayer[d.Layer] = dimLayer.TryGetValue(d.Layer, out int m) ? m + 1 : 1; dimIds.Add(id); }
                     }
                 }
             }
@@ -175,7 +179,27 @@ namespace C3DProTools.Features.Standards
             if (dimStyle.Count > 0)
                 found.Add(new StandardFinding { Area = "Dimensions", Rule = "STD 7", Text = $"{dimStyle.Values.Sum()} dimensions use a style that is not a KSIA one (KSI_Standard / KSIA_DIM).", Items = dimStyle.OrderByDescending(x => x.Value).Select(x => $"{x.Value} on style {x.Key}").ToList() });
             if (dimLayer.Count > 0)
-                found.Add(new StandardFinding { Area = "Dimensions", Rule = "STD 7", Text = $"{dimLayer.Values.Sum()} dimensions are not on a dimensioning layer (presentation D).", Items = dimLayer.OrderByDescending(x => x.Value).Select(x => $"{x.Value} on {x.Key}").ToList() });
+                found.Add(new StandardFinding
+                {
+                    Area = "Dimensions", Rule = "STD 7", Text = $"{dimLayer.Values.Sum()} dimensions are not on a dimensioning layer (presentation D).",
+                    Items = dimLayer.OrderByDescending(x => x.Value).Select(x => $"{x.Value} on {x.Key}").ToList(),
+                    // The KSIA template's dimension layer (your choice, 2026-11-18). Profile DIMs finds its own DIMs by their tag, not
+                    // their layer, so moving them does not make it draw them again.
+                    FixText = $"move them to {DimLayer}",
+                    Fix = (t, d, log) =>
+                    {
+                        string layer = t.GetObject(LayerAudit.EnsureTemplateLayer(t, d, DimLayer, log), OpenMode.ForRead) is LayerTableRecord l ? l.Name : DimLayer;
+                        int moved = 0;
+                        var locked = new List<string>();
+                        foreach (ObjectId id in dimIds)
+                        {
+                            try { ((Entity)t.GetObject(id, OpenMode.ForWrite)).Layer = layer; moved++; }
+                            catch (Exception ex) { locked.Add(ex.Message.Contains("eOnLockedLayer") ? "on a locked layer" : ex.Message); }
+                        }
+                        log.AppendLine($"  {moved} dimensions moved to {layer}");
+                        if (locked.Count > 0) throw new InvalidOperationException($"{locked.Count} dimensions not moved ({string.Join(", ", locked.Distinct())})");
+                    }
+                });
         }
 
         /// <summary>Layer names in the KSIA form (STD 5.6) and line weights in the allowed set (STD 8); xref layers are the other drawing's.</summary>
