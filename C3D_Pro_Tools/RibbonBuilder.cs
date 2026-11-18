@@ -90,6 +90,7 @@ namespace C3DProTools
             customTab.Panels.Add(new RibbonPanel { Source = standards });
             standards.Items.Add(Large("Style\nManager", "StyleManager ", "Find unused, duplicate and non-standard styles; merge, replace, purge."));
             standards.Items.Add(Large("Label Style\nValues", "STYLEMGR ", "Batch-set label style values (text heights, arrowheads, ...) for styles by category or from labels you pick."));
+            standards.Items.Add(Large("Network\nLayers", "NetworkLayers ", "Pipes and structures on the layer of their type (from their description: what Navisworks shows), labels on their labelling layer; tile label layers left alone. Check, untick, Fix: one UNDO."));
             standards.Items.Add(Large("Drawing\nCleaner", "C3DDrawingCleaner ", "Save a cleaned copy of the drawing for submittal."));
 
             RibbonPanelSource runs = new RibbonPanelSource { Title = "Command Runs" };
