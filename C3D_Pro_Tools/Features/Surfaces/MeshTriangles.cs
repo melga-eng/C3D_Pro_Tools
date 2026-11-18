@@ -55,6 +55,20 @@ namespace C3DProTools.Features.Surfaces
             return flat.Where(t => side == SurfaceSide.Top ? t.NormalZ > 0 : t.NormalZ < 0).ToList();
         }
 
+        /// <summary>The volume a closed set of faces encloses, positive when they face outward (review finding: a closed mesh may be wound inward).</summary>
+        public static double SignedVolume(IEnumerable<Tri> faces) =>
+            faces.Sum(t => (t.A.X * (t.B.Y * t.C.Z - t.B.Z * t.C.Y) - t.A.Y * (t.B.X * t.C.Z - t.B.Z * t.C.X) + t.A.Z * (t.B.X * t.C.Y - t.B.Y * t.C.X)) / 6);
+
+        /// <summary>The faces turned to face outward when they enclose a negative volume.</summary>
+        public static List<Tri> Outward(List<Tri> closed) => SignedVolume(closed) < 0 ? closed.Select(t => new Tri(t.A, t.C, t.B)).ToList() : closed;
+
+        public static double Area3d(Tri t)
+        {
+            double ux = t.B.X - t.A.X, uy = t.B.Y - t.A.Y, uz = t.B.Z - t.A.Z, vx = t.C.X - t.A.X, vy = t.C.Y - t.A.Y, vz = t.C.Z - t.A.Z;
+            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            return Math.Sqrt(nx * nx + ny * ny + nz * nz) / 2;
+        }
+
         /// <summary>True when every edge is shared by exactly two faces (a watertight mesh).</summary>
         public static bool IsClosed(IEnumerable<Tri> faces, double tol = 1e-4)
         {

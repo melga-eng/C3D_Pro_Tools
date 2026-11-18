@@ -63,6 +63,8 @@ Tests always run on copies.
 
 - Network Layers (Uniclass / KSIA layers, your request 2026-11-18): stages 1 and 2 merged (ICT, then every network with KSIA template suggestions); needs your try. Stage 3, Drawing Standards (the other KSIA CAD rules), merged 2026-11-18; needs your try.
 
+- Surface from Solids (your request 2026-11-18): TIN from the top or bottom of 3D solids and meshes. Merged; needs your try.
+
 ## Later (not before release 4)
 
 - Crossings engine and model health checks

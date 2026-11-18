@@ -35,6 +35,15 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void A_closed_mesh_wound_inward_is_turned_outward_so_top_stays_top()
+        {
+            List<Tri> inward = Box().Select(t => new Tri(t.A, t.C, t.B)).ToList();
+            Assert.True(MeshTriangles.SignedVolume(inward) < 0);
+            Assert.Equal(40, MeshTriangles.SignedVolume(MeshTriangles.Outward(inward)), 6);
+            Assert.All(MeshTriangles.Side(MeshTriangles.Outward(inward), true, SurfaceSide.Top), t => Assert.Equal(1, t.A.Z));
+        }
+
+        [Fact]
         public void An_open_sheet_is_its_own_top_and_bottom_whichever_way_it_faces()
         {
             var sheet = new List<Tri> { new Tri(P(0, 0, 0), P(0, 5, 1), P(5, 0, 2)) };  // faces down

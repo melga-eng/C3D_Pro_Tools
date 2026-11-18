@@ -107,7 +107,11 @@ namespace C3DProTools.Features.Surfaces
         {
             switch (e)
             {
-                case Solid3d solid: return (SolidTriangles(solid), true, "3D solid");
+                case Solid3d solid:
+                {
+                    List<Tri> st = SolidTriangles(solid, out int odd);
+                    return (st, true, odd > 0 ? $"3D solid (warning: {odd} faces curved or with an opening: the surface follows their corners only)" : "3D solid");
+                }
                 case SubDMesh mesh:
                 {
                     var v = mesh.Vertices.Cast<Point3d>().Select(P).ToList();
@@ -120,7 +124,8 @@ namespace C3DProTools.Features.Surfaces
                         tris.AddRange(poly.Count == 3 ? new List<Tri> { new Tri(poly[0], poly[1], poly[2]) } : TriangulateAnyWay(poly));
                         i += n + 1;
                     }
-                    return (tris, MeshTriangles.IsClosed(tris), "mesh");
+                    bool closedMesh = MeshTriangles.IsClosed(tris);
+                    return (closedMesh ? MeshTriangles.Outward(tris) : tris, closedMesh, "mesh");
                 }
                 case PolyFaceMesh pf:
                 {
@@ -138,7 +143,8 @@ namespace C3DProTools.Features.Surfaces
                             else if (poly.Count == 4) { tris.Add(new Tri(poly[0], poly[1], poly[2])); tris.Add(new Tri(poly[0], poly[2], poly[3])); }
                         }
                     }
-                    return (tris, MeshTriangles.IsClosed(tris), "polyface mesh");
+                    bool closedPf = MeshTriangles.IsClosed(tris);
+                    return (closedPf ? MeshTriangles.Outward(tris) : tris, closedPf, "polyface mesh");
                 }
                 default: return null;
             }
@@ -156,9 +162,10 @@ namespace C3DProTools.Features.Surfaces
         /// A solid's faces as triangles, each turned to face outward: tested by a point just off the face, which must be
         /// outside the solid (the loop order of a face is not relied on).
         /// </summary>
-        private static List<Tri> SolidTriangles(Solid3d solid)
+        private static List<Tri> SolidTriangles(Solid3d solid, out int odd)
         {
             var result = new List<Tri>();
+            odd = 0;
             using (var brep = new Brep(solid))
             {
                 foreach (BrepFace face in brep.Faces)
@@ -173,6 +180,14 @@ namespace C3DProTools.Features.Surfaces
                     if (poly == null || poly.Count < 3) continue;
                     List<Tri> tris = MeshTriangles.Triangulate(poly);
                     if (tris.Count == 0) continue;  // a vertical face: a side
+                    // A face whose own area is not that of its corners' triangles is curved or has an opening (review finding):
+                    // the surface would cut across it, so it is reported.
+                    try
+                    {
+                        double real = face.GetArea(), flat = tris.Sum(MeshTriangles.Area3d);
+                        if (Math.Abs(real - flat) > Math.Max(1e-4, real * 0.01)) odd++;
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                     // Outward: 5 mm off the first triangle's centre along its normal must be outside.
                     Tri t0 = tris[0];
                     double cx = (t0.A.X + t0.B.X + t0.C.X) / 3, cy = (t0.A.Y + t0.B.Y + t0.C.Y) / 3, cz = (t0.A.Z + t0.B.Z + t0.C.Z) / 3;
@@ -249,20 +264,36 @@ namespace C3DProTools.Features.Surfaces
             }
             surf.DrawingObjectsDefinition.AddFrom3DFaces(faces, true, $"C3D Pro: {side} of solids and meshes");
 
-            // The outline: outer loops bound the surface, loops inside them are holes; no triangle bridges a gap.
-            var (outer, holes) = MeshTriangles.Nest(MeshTriangles.Outline(tris));
-            Point3dCollection Pts(List<P3> l) => new Point3dCollection(l.Concat(new[] { l[0] }).Select(p => new Point3d(p.X, p.Y, p.Z)).ToArray());
-            foreach (List<P3> l in outer) surf.BoundariesDefinition.AddBoundaries(Pts(l), 0.001, SurfaceBoundaryType.Outer, true);
-            foreach (List<P3> l in holes) surf.BoundariesDefinition.AddBoundaries(Pts(l), 0.001, SurfaceBoundaryType.Hide, true);
-
             foreach (ObjectId id in faces) tr.GetObject(id, OpenMode.ForWrite).Erase();
             surf.Rebuild();
+
+            // Triangles the TIN adds between the objects (across gaps, openings and around the outside) are not theirs: an edge
+            // that is none of the objects' edges is deleted, which removes them. Separate pieces and holes are kept as they are
+            // (an outer boundary per piece does not work: Civil 3D uses one; review finding).
+            (long, long, long, long) EdgeKey(Point3d p, Point3d q)
+            {
+                long ax = (long)Math.Round(p.X * 1000), ay = (long)Math.Round(p.Y * 1000), bx = (long)Math.Round(q.X * 1000), by = (long)Math.Round(q.Y * 1000);
+                return (ax, ay) .CompareTo((bx, by)) <= 0 ? (ax, ay, bx, by) : (bx, by, ax, ay);
+            }
+            Point3d Q(P3 p) => new Point3d(p.X, p.Y, p.Z);
+            var own = new HashSet<(long, long, long, long)>();
+            foreach (Tri t in tris) { own.Add(EdgeKey(Q(t.A), Q(t.B))); own.Add(EdgeKey(Q(t.B), Q(t.C))); own.Add(EdgeKey(Q(t.C), Q(t.A))); }
+            var extra = new Dictionary<(long, long, long, long), TinSurfaceEdge>();
+            foreach (TinSurfaceTriangle st in surf.GetTriangles(false))
+                foreach (TinSurfaceEdge e in new[] { st.Edge1, st.Edge2, st.Edge3 })
+                {
+                    var k = EdgeKey(e.Vertex1.Location, e.Vertex2.Location);
+                    if (!own.Contains(k) && !extra.ContainsKey(k)) extra[k] = e;
+                }
+            if (extra.Count > 0) { surf.DeleteLines(extra.Values); surf.Rebuild(); }
+
             int n = 0;
             try { n = surf.GetTriangles(false).Count; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
             var props = surf.GetGeneralProperties();
-            log.AppendLine($"Surface \"{name}\" ({side}): {tris.Count} faces given, {n} triangles; {outer.Count} outer and {holes.Count} hole boundaries; " +
+            log.AppendLine($"Surface \"{name}\" ({side}): {tris.Count} faces given, {n} triangles ({extra.Count} edges between the objects removed); " +
                            $"elevations {props.MinimumElevation:0.000} to {props.MaximumElevation:0.000}.");
-            if (outer.Count > 1) log.AppendLine($"  note: the faces form {outer.Count} separate areas; each is an outer boundary.");
+            // Fewer triangles than faces: objects overlap in plan, and a TIN keeps one height per point (review finding).
+            if (n < tris.Count) log.AppendLine($"  warning: {tris.Count - n} faces are not in the surface: objects overlap in plan, so it is not a clean {side}. Select objects that do not overlap.");
             return true;
         }
 
