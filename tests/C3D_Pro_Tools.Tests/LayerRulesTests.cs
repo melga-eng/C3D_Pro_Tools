@@ -25,6 +25,9 @@ namespace C3DProTools.Tests
             Assert.Equal(key, LayerRules.TypeKey(desc, size));
 
         [Fact]
+        public void Tokens_split_names_and_read_type_numbers_alike() => Assert.Equal(new[] { "lv", "duct", "prop", "t", "5" }, LayerRules.Tokens("LvDuctProp-Type5"));
+
+        [Fact]
         public void Suffix_layers_are_the_base_plus_underscore()
         {
             Assert.True(LayerRules.IsSuffixLayer("C-Ss_55-M-Pipe_ICT-TILE-124 (2)", PartBases));
@@ -37,28 +40,32 @@ namespace C3DProTools.Tests
         public void Learn_takes_the_layer_most_parts_of_a_type_are_on_ignoring_0_and_per_network_layers()
         {
             var parts = new List<LayerItem>();
-            for (int i = 0; i < 5; i++) parts.Add(Part("Type:IC-3A Reinforcement", "IC-M-Type-3A"));
-            parts.Add(Part("Type:IC-3A Reinforcement", "IC-M-Type-3B"));
+            for (int i = 0; i < 5; i++) parts.Add(Part("Type:IC-3A Reinforcement", "IC-Ss_75_10_21_88-M-Type-3A"));
+            parts.Add(Part("Type:IC-3A Reinforcement", "IC-Ss_75_10_21_88-M-Type-3B"));
             for (int i = 0; i < 9; i++) parts.Add(Part("Type:IC-3A Reinforcement", "C-Ss_55-M-Pipe_ICT-TILE-124"));
             parts.Add(Part("Type:IC-3A Reinforcement", "0"));
             Dictionary<string, string> rules = LayerRules.Learn(parts, PartBases);
-            Assert.Equal("IC-M-Type-3A", rules["TYPE IC-3A"]);
+            Assert.Equal("IC-Ss_75_10_21_88-M-Type-3A", rules["TYPE IC-3A"]);
         }
 
         [Fact]
         public void Check_moves_a_part_to_its_type_layer_and_the_description_wins()
         {
-            var rules = new Dictionary<string, string> { ["TYPE IC-3A"] = "IC-M-Type-3A" };
+            var rules = new Dictionary<string, string> { ["TYPE IC-3A"] = "IC-Ss_75_10_21_88-M-Type-3A" };
             List<LayerFinding> f = LayerRules.Check(new[]
             {
-                Part("Type:IC-3A Reinforcement", "IC-M-Type-3B"),
-                Part("Type:IC-3A Reinforcement", "IC-M-Type-3A"),
+                Part("Type:IC-3A Reinforcement", "IC-Ss_75_10_21_88-M-Type-3B"),
+                Part("Type:IC-3A Reinforcement", "IC-Ss_75_10_21_88-M-Type-3A"),
                 Part("Type:IC-3A Reinforcement", "0"),
             }, rules, PartBases, LabelBases);
             Assert.Equal(2, f.Count);
-            Assert.All(f, x => Assert.Equal("IC-M-Type-3A", x.To));
+            Assert.All(f, x => Assert.Equal("IC-Ss_75_10_21_88-M-Type-3A", x.To));
             Assert.Equal("on layer 0", f[1].Why);
         }
+
+        [Fact]
+        public void Old_non_KSIA_layers_do_not_teach() =>
+            Assert.Empty(LayerRules.Learn(new[] { Part("JAC-PIP-AGL-DuctBank 560 x 330", "C-STRM-PIPE") }, PartBases));
 
         [Fact]
         public void Check_lists_a_part_with_no_rule_only_when_on_0_or_a_per_network_layer()
@@ -66,7 +73,7 @@ namespace C3DProTools.Tests
             List<LayerFinding> f = LayerRules.Check(new[]
             {
                 Part("Unknown thing", "C-Ss_55-M-Pipe_Tile-9"),
-                Part("Another thing", "IC-Some-Layer"),
+                Part("Another thing", "IC-Ss_75_10_21_88-M-SomeLayer"),
             }, new Dictionary<string, string>(), PartBases, LabelBases);
             Assert.Single(f);
             Assert.Null(f[0].To);
@@ -90,6 +97,29 @@ namespace C3DProTools.Tests
             Assert.Single(LayerRules.Check(new[] { label }, new Dictionary<string, string>(), PartBases, LabelBases));
             Assert.Empty(LayerRules.Check(new[] { label }, new Dictionary<string, string>(), PartBases, LabelBases, new[] { "C-Ss_55-T-Pipe_TILE-124-D" }));
         }
+
+        private static readonly string[] Template =
+        {
+            "C-Ss_55_70_95_50-M-WaterPipeExist", "C-Ss_55_70_95_50-M-WaterPipeProp", "C-Ss_55_70_95_50-M-WaterManhExist",
+            "C-Ss_50_35_08_85-M-SwdrPipeExist", "C-Ss_50_35_08_85-M-SwdrPipeProp", "C-Ss_50_35_08_85-M-SwdrManhProp",
+            "C-Ss_55_30_96-M-FireMainPipeProp", "C-Ss_55_50_47_32-M-FuelPipeExist", "C-Ss_55_50_47_32-M-FuelPipeProp", "C-Ss_55_50_47_32-M-FuelPowerDataDuctProp",
+            "E-Ss_70_30_45-M-LvDuctProp", "C-Ss_70_30_45-M-LvDuctExist", "E-Ss_70_30_45-M-LvPitProp",
+            "E-Ss_70_30_50-M-MvDuctProp", "E-Ss_70_30_50-M-MvDuctProp-T3", "C-Ss_70_80_01-M-AglDuctProp", "E-Ss_70_80_01-M-AglPitTR",
+            "C-Ss_75_10_21_88-M-CommDuctProp", "C-Ss_75_10_21_88-M-CommPitProp", "C-Ss_70_30_45-T-LvText"
+        };
+
+        [Theory]
+        [InlineData("124-Ex-Water-Clash-01", "500 mm Ductile Iron Pipe", "", false, "C-Ss_55_70_95_50-M-WaterPipeExist")]
+        [InlineData("UW-PIN-PIP-SWD_NCR", "400.00 MM -1 BARREL PIPE", "", false, "C-Ss_50_35_08_85-M-SwdrPipeProp")]
+        [InlineData("IF-PIN-FW-PROPO-NCRD", "400mm HDPE Pipe", "", false, "C-Ss_55_30_96-M-FireMainPipeProp")]
+        [InlineData("IF-PRN-CABLES-NCRD-LV (2)", "75 MM Ø HDPE CABLE", "", false, "E-Ss_70_30_45-M-LvDuctProp")]
+        [InlineData("124-Fuel-Clash-01", "600 mm Ductile Iron Pipe", "", false, "C-Ss_55_50_47_32-M-FuelPipeProp")]
+        [InlineData("124-MV-Clash-02", "MV 5x1 way Duct Bank (Type-3 & 4)", "", false, "E-Ss_70_30_50-M-MvDuctProp-T3")]
+        [InlineData("Secondary-Pit-Clash_Tile-142", "900 x 900", "JAC-STR-AGL_CHAMBER", true, "E-Ss_70_80_01-M-AglPitTR")]
+        [InlineData("KSIA-Utility Diversion-FOC-NETWORK-A", "1,110 x 790 mm Duct", "", false, "C-Ss_75_10_21_88-M-CommDuctProp")]
+        [InlineData("NETWORK - 1108", "Null Structure", "", true, null)]
+        public void Suggest_finds_the_template_layer_of_the_service_kind_and_state(string net, string desc, string size, bool structure, string expected) =>
+            Assert.Equal(expected, LayerRules.Suggest(net, desc, size, structure, Template));
 
         [Fact]
         public void Rules_round_trip_through_the_saved_text()
