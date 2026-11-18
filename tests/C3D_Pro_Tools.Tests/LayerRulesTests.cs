@@ -64,6 +64,21 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void Water_and_fuel_pipes_with_one_description_get_their_own_rules()
+        {
+            LayerItem P(string net, string layer) => new LayerItem { Handle = "4", Kind = "pipe", Network = net, Description = "500 mm Ductile Iron Pipe", Layer = layer };
+            var rules = LayerRules.Learn(new[] { P("124-Ex-Water-Clash-01", "C-Ss_55_70_95_50-M-WaterPipeExist") }, PartBases);
+            Assert.Equal("[water ex] 500 MM DUCTILE IRON PIPE", rules.Keys.Single());
+            List<LayerFinding> f = LayerRules.Check(new[] { P("124-Fuel-Clash-01", "C-Ss_55-M-Pipe_124-Fuel-Clash-01") }, rules, PartBases, LabelBases);
+            Assert.Null(f.Single().To);  // the water rule does not move the fuel pipe
+        }
+
+        [Fact]
+        public void A_rule_saved_before_scoping_still_applies() =>
+            Assert.Equal("IC-Ss_75_10_21_88-M-X", LayerRules.Check(new[] { new LayerItem { Handle = "5", Kind = "pipe", Network = "ICT-TILE-124", Description = "Type:IC-3B", Layer = "0" } },
+                new Dictionary<string, string> { ["TYPE IC-3B"] = "IC-Ss_75_10_21_88-M-X" }, PartBases, LabelBases).Single().To);
+
+        [Fact]
         public void Old_non_KSIA_layers_do_not_teach() =>
             Assert.Empty(LayerRules.Learn(new[] { Part("JAC-PIP-AGL-DuctBank 560 x 330", "C-STRM-PIPE") }, PartBases));
 

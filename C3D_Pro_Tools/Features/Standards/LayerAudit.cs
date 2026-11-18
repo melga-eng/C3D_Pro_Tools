@@ -200,7 +200,19 @@ namespace C3DProTools.Features.Standards
                     if (!(tr.GetObject(id, OpenMode.ForRead) is LabelBase lb)) continue;
                     ObjectId f = ObjectId.Null;
                     try { f = lb.FeatureId; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-                    if (f.IsNull || !parts.TryGetValue(f, out LayerItem part)) continue;
+                    if (f.IsNull) continue;
+                    // A profile label points at the part as drawn in the profile view: its model part is the one (review finding).
+                    if (!parts.ContainsKey(f))
+                    {
+                        try
+                        {
+                            Autodesk.AutoCAD.DatabaseServices.DBObject pv = tr.GetObject(f, OpenMode.ForRead);
+                            if (pv is ProfileViewPart pvp) f = pvp.ModelPartId;
+                            else if (pv is ProfileViewPressurePart pvpp) f = pvpp.ModelPartId;
+                        }
+                        catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    }
+                    if (!parts.TryGetValue(f, out LayerItem part)) continue;
                     scan.Items.Add(new LayerItem
                     {
                         Handle = id.Handle.ToString(), IsLabel = true, Kind = part.Kind + " label", Network = part.Network,
@@ -218,9 +230,9 @@ namespace C3DProTools.Features.Standards
             scan.TemplatePath = TemplatePath();
             scan.TemplateLayers = TemplateLayers(scan.TemplatePath);
             if (scan.TemplateLayers.Count > 0)
-                foreach (var g in scan.Items.Where(i => !i.IsLabel).GroupBy(i => LayerRules.TypeKey(i.Description, i.Size), StringComparer.OrdinalIgnoreCase))
+                foreach (var g in scan.Items.Where(i => !i.IsLabel).GroupBy(LayerRules.ItemKey, StringComparer.OrdinalIgnoreCase))
                 {
-                    if (g.Key.Length == 0 || scan.Rules.ContainsKey(g.Key)) continue;
+                    if (g.Key.Length == 0 || scan.Rules.ContainsKey(g.Key) || scan.Rules.ContainsKey(LayerRules.BareKey(g.Key))) continue;
                     LayerItem first = g.GroupBy(i => i.Network).OrderByDescending(x => x.Count()).First().First();
                     string s = LayerRules.Suggest(first.Network, first.Description, first.Size, first.Kind == "structure", scan.TemplateLayers);
                     if (s != null) scan.Suggestions[g.Key] = s;
@@ -378,6 +390,8 @@ namespace C3DProTools.Features.Standards
                     if (lt.Has(name)) { log.AppendLine($"  layer {name} copied from the KSIA template"); return lt[name]; }
                 }
                 catch (Exception ex) { C3DProLogger.Warn($"Network Layers: {name} could not be copied from the template", ex); }
+                // A template layer that could not be copied is not made up from another layer (review finding): the move fails.
+                throw new InvalidOperationException($"layer {name} could not be copied from the KSIA template");
             }
             var l = new LayerTableRecord { Name = name };
             if (!string.IsNullOrEmpty(like) && lt.Has(like) && tr.GetObject(lt[like], OpenMode.ForRead) is LayerTableRecord from)

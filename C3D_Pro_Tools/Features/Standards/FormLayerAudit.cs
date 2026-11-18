@@ -156,9 +156,9 @@ namespace C3DProTools.Features.Standards
                 foreach (string l in _scan.Layers) layerCol.Items.Add(l);
                 foreach (string l in _scan.Rules.Values.Where(v => !layerCol.Items.Contains(v))) layerCol.Items.Add(l);
                 _rules.Rows.Clear();
-                foreach (var g in _scan.Items.Where(i => !i.IsLabel).GroupBy(i => LayerRules.TypeKey(i.Description, i.Size), StringComparer.OrdinalIgnoreCase)
+                foreach (var g in _scan.Items.Where(i => !i.IsLabel).GroupBy(LayerRules.ItemKey, StringComparer.OrdinalIgnoreCase)
                                              .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
-                    _rules.Rows.Add(g.Key.Length == 0 ? "(no description or size)" : g.Key, g.Count(), _scan.Rules.TryGetValue(g.Key, out string to) ? to : "",
+                    _rules.Rows.Add(g.Key.Length == 0 ? "(no description or size)" : g.Key, g.Count(), _scan.Rules.TryGetValue(g.Key, out string to) || _scan.Rules.TryGetValue(LayerRules.BareKey(g.Key), out to) ? to : "",
                                     _scan.Suggestions.TryGetValue(g.Key, out string sg) ? sg : "");
                 if (_scan.TemplateLayers.Count == 0) _status.Text = "KSIA template not found: no layer suggestions";
                 _filling = false;

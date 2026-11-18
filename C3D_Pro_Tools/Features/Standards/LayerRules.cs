@@ -52,6 +52,25 @@ namespace C3DProTools.Features.Standards
             return s.Length > 0 && s != "?" ? "SIZE " + Spaces.Replace(s, " ").ToUpperInvariant() : "";
         }
 
+        /// <summary>
+        /// The key a part's rule is kept under: its type, scoped by service and state when they can be read from the network
+        /// name, description and size ("[water ex] 500 MM DUCTILE IRON PIPE"), so water and fuel pipes sharing a catalogue
+        /// description never share a layer (review finding).
+        /// </summary>
+        public static string ItemKey(LayerItem it)
+        {
+            string type = TypeKey(it.Description, it.Size);
+            if (type.Length == 0) return "";
+            List<string> words = Tokens(it.Network + " " + it.Description + " " + it.Size);
+            string service = ServiceOf(words);
+            if (service == null) return type;
+            bool existing = words.Contains("ex") || words.Contains("exist") || words.Contains("existing");
+            return $"[{service}{(existing ? " ex" : "")}] {type}";
+        }
+
+        /// <summary>The part's type without the scope: how rules saved before scoping (2026-11-18) are still found.</summary>
+        public static string BareKey(string key) => key.StartsWith("[") && key.IndexOf("] ", StringComparison.Ordinal) > 0 ? key.Substring(key.IndexOf("] ", StringComparison.Ordinal) + 2) : key;
+
         /// <summary>True for a layer Civil 3D made per network: one of the base layers followed by "_" and the network name.</summary>
         public static bool IsSuffixLayer(string layer, IEnumerable<string> bases) =>
             !string.IsNullOrEmpty(layer) && bases.Any(b => !string.IsNullOrEmpty(b) && layer.Length > b.Length + 1 &&
@@ -73,7 +92,7 @@ namespace C3DProTools.Features.Standards
         {
             List<string> bases = partBases.ToList();
             return parts.Where(p => !p.IsLabel && Teaches(p.Layer, bases))
-                        .Select(p => (key: TypeKey(p.Description, p.Size), p.Layer))
+                        .Select(p => (key: ItemKey(p), p.Layer))
                         .Where(x => x.key.Length > 0)
                         .GroupBy(x => x.key, StringComparer.OrdinalIgnoreCase)
                         .ToDictionary(g => g.Key, g => g.GroupBy(x => x.Layer, StringComparer.OrdinalIgnoreCase)
@@ -101,8 +120,8 @@ namespace C3DProTools.Features.Standards
                     else if (it.Layer == "0") found.Add(new LayerFinding { Item = it, To = it.LabelBase, Why = "label on layer 0" });
                     continue;
                 }
-                string key = TypeKey(it.Description, it.Size);
-                if (key.Length > 0 && rules.TryGetValue(key, out string to) && !string.IsNullOrEmpty(to))
+                string key = ItemKey(it);
+                if (key.Length > 0 && (rules.TryGetValue(key, out string to) || rules.TryGetValue(BareKey(key), out to)) && !string.IsNullOrEmpty(to))
                 {
                     if (!it.Layer.Equals(to, StringComparison.OrdinalIgnoreCase))
                         found.Add(new LayerFinding { Item = it, Key = key, To = to, Why = it.Layer == "0" ? "on layer 0" : IsSuffixLayer(it.Layer, pb) ? "on a per-network layer" : "not on its type's layer" });
