@@ -1,0 +1,6 @@
+C3DPROSURFSOLID
+(ssget "X" '((8 . "NAVIS-SOLIDS")))
+
+Both
+
+
