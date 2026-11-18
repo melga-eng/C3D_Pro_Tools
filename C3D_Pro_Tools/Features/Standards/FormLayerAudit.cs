@@ -21,11 +21,19 @@ namespace C3DProTools.Features.Standards
         private readonly CheckedListBox _nets = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
         private readonly DataGridView _rules = Grid();
         private readonly DataGridView _found = Grid();
-        private readonly CheckBox _stop = new CheckBox { Text = "Stop per-network layers for new pipes, structures and labels", AutoSize = true, Checked = true };
+        private readonly CheckBox _stop = new CheckBox { Text = "Stop per-network layers for new parts and labels", AutoSize = true, Checked = true };
         private readonly CheckBox _purge = new CheckBox { Text = "Delete per-network layers left empty", AutoSize = true, Checked = true };
         private readonly Label _status = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(3, 9, 3, 3) };
         private bool _filling;
-        private readonly HashSet<string> _unticked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, bool> _choice = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);  // what the user ticked or unticked, kept when a rule changes
+        private readonly TextBox _template = StyleUi.Box("KSIA template drawing");
+
+        /// <summary>A network in the list, with its group (ICT, other, clash copy).</summary>
+        private sealed class NetItem
+        {
+            public string Name, Group;
+            public override string ToString() => Group == "ICT" ? Name : $"{Name}   ({(Group == "clash" ? "clash copy" : "other")})";
+        }
 
         private static DataGridView Grid() => new DataGridView
         {
@@ -47,7 +55,15 @@ namespace C3DProTools.Features.Standards
 
             _rules.Columns.Add(new DataGridViewTextBoxColumn { Name = "type", HeaderText = "Part type (from description)", ReadOnly = true, FillWeight = 40 });
             _rules.Columns.Add(new DataGridViewTextBoxColumn { Name = "count", HeaderText = "Parts", ReadOnly = true, FillWeight = 8 });
-            _rules.Columns.Add(new DataGridViewComboBoxColumn { Name = "layer", HeaderText = "Layer", FillWeight = 52, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton });
+            _rules.Columns.Add(new DataGridViewComboBoxColumn { Name = "layer", HeaderText = "Layer", FillWeight = 36, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton });
+            _rules.Columns.Add(new DataGridViewTextBoxColumn { Name = "suggest", HeaderText = "KSIA template suggests (double-click to use)", ReadOnly = true, FillWeight = 30 });
+            _rules.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex != _rules.Columns["suggest"].Index || !(_rules.Rows[e.RowIndex].Cells["suggest"].Value is string sg) || sg.Length == 0) return;
+                var col = (DataGridViewComboBoxColumn)_rules.Columns["layer"];
+                if (!col.Items.Contains(sg)) col.Items.Add(sg);
+                _rules.Rows[e.RowIndex].Cells["layer"].Value = sg;
+            };
             _rules.CellValueChanged += (s, e) => RuleChanged(e.RowIndex);
             _rules.CurrentCellDirtyStateChanged += (s, e) => { if (_rules.IsCurrentCellDirty) _rules.CommitEdit(DataGridViewDataErrorContexts.Commit); };
             _rules.DataError += (s, e) => e.ThrowException = false;
@@ -59,7 +75,7 @@ namespace C3DProTools.Features.Standards
             _found.CellValueChanged += (s, e) =>
             {
                 if (_filling || e.RowIndex < 0 || !(_found.Rows[e.RowIndex].Tag is LayerFinding f)) return;
-                if (_found.Rows[e.RowIndex].Cells["fix"].Value is bool on && on) _unticked.Remove(f.Item.Handle); else _unticked.Add(f.Item.Handle);
+                _choice[f.Item.Handle] = _found.Rows[e.RowIndex].Cells["fix"].Value is bool on && on;
                 UpdateStatus();
             };
 
@@ -72,9 +88,19 @@ namespace C3DProTools.Features.Standards
             left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            left.Controls.Add(StyleUi.Caption("Networks"), 0, 0);
+            left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            left.Controls.Add(StyleUi.Caption("Networks (ICT first)"), 0, 0);
             left.Controls.Add(_nets, 0, 1);
             left.Controls.Add(check, 0, 2);
+            left.Controls.Add(StyleUi.Caption("KSIA template (layer suggestions)"), 0, 3);
+            var tplRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
+            tplRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            tplRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tplRow.Controls.Add(_template, 0, 0);
+            tplRow.Controls.Add(StyleUi.Secondary("...", (s, e) => BrowseTemplate()), 1, 0);
+            left.Controls.Add(tplRow, 0, 4);
+            _template.Text = LayerAudit.TemplatePath();
 
             var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
             right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -122,16 +148,19 @@ namespace C3DProTools.Features.Standards
                 _scan = LayerAudit.Read(_doc, "", ticked);
                 _filling = true;
                 _nets.Items.Clear();
-                foreach (string n in _scan.AllNetworks.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) _nets.Items.Add(n, _scan.Networks.Contains(n));
+                foreach (var n in _scan.AllNetworks.OrderBy(x => x.group == "ICT" ? 0 : x.group == "other" ? 1 : 2).ThenBy(x => x.name, StringComparer.OrdinalIgnoreCase))
+                    _nets.Items.Add(new NetItem { Name = n.name, Group = n.group }, _scan.Networks.Contains(n.name));
                 var layerCol = (DataGridViewComboBoxColumn)_rules.Columns["layer"];
                 layerCol.Items.Clear();
                 layerCol.Items.Add("");
                 foreach (string l in _scan.Layers) layerCol.Items.Add(l);
                 foreach (string l in _scan.Rules.Values.Where(v => !layerCol.Items.Contains(v))) layerCol.Items.Add(l);
                 _rules.Rows.Clear();
-                foreach (var g in _scan.Items.Where(i => !i.IsLabel).GroupBy(i => LayerRules.TypeKey(i.Description, i.Size), StringComparer.OrdinalIgnoreCase)
+                foreach (var g in _scan.Items.Where(i => !i.IsLabel).GroupBy(LayerRules.ItemKey, StringComparer.OrdinalIgnoreCase)
                                              .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
-                    _rules.Rows.Add(g.Key.Length == 0 ? "(no description or size)" : g.Key, g.Count(), _scan.Rules.TryGetValue(g.Key, out string to) ? to : "");
+                    _rules.Rows.Add(g.Key.Length == 0 ? "(no description or size)" : g.Key, g.Count(), _scan.Rules.TryGetValue(g.Key, out string to) || _scan.Rules.TryGetValue(LayerRules.BareKey(g.Key), out to) ? to : "",
+                                    _scan.Suggestions.TryGetValue(g.Key, out string sg) ? sg : "");
+                if (_scan.TemplateLayers.Count == 0) _status.Text = "KSIA template not found: no layer suggestions";
                 _filling = false;
                 Recheck();
             }
@@ -143,7 +172,18 @@ namespace C3DProTools.Features.Standards
             finally { _filling = false; Cursor = Cursors.Default; }
         }
 
-        private void Check() => ReadDrawing(_nets.CheckedItems.Cast<string>().ToList());
+        private List<string> TickedNetworks() => _nets.CheckedItems.Cast<NetItem>().Select(n => n.Name).ToList();
+
+        private void Check() => ReadDrawing(TickedNetworks());
+
+        private void BrowseTemplate()
+        {
+            using var dlg = new OpenFileDialog { Title = "KSIA template drawing", Filter = "Drawings (*.dwg;*.dwt)|*.dwg;*.dwt", FileName = _template.Text };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            _template.Text = dlg.FileName;
+            LayerAudit.SaveTemplatePath(dlg.FileName);
+            Check();
+        }
 
         private void RuleChanged(int row)
         {
@@ -162,8 +202,9 @@ namespace C3DProTools.Features.Standards
             _found.Rows.Clear();
             foreach (LayerFinding f in _findings)
             {
-                // What the user unticked stays unticked when a rule changes (review finding).
-                int i = _found.Rows.Add(f.To != null && !_unticked.Contains(f.Item.Handle),f.Item.Kind, f.Item.Name, f.Item.Network, f.Item.Layer, f.To ?? "(set the layer of its type above)", f.Why);
+                // What the user ticked or unticked stays so when a rule changes (review finding); a template suggestion starts unticked.
+                bool on = f.To != null && (_choice.TryGetValue(f.Item.Handle, out bool c) ? c : !f.Suggested);
+                int i = _found.Rows.Add(on, f.Item.Kind, f.Item.Name, f.Item.Network, f.Item.Layer, f.To == null ? "(set the layer of its type above)" : f.Suggested ? f.To + "  (suggested)" : f.To, f.Why);
                 _found.Rows[i].Tag = f;
                 if (f.To == null) { _found.Rows[i].Cells["fix"].ReadOnly = true; _found.Rows[i].DefaultCellStyle.ForeColor = StyleUi.Muted; }
             }
@@ -173,7 +214,7 @@ namespace C3DProTools.Features.Standards
 
         private void TickAll(bool on)
         {
-            foreach (DataGridViewRow r in _found.Rows) if (((LayerFinding)r.Tag).To != null) r.Cells["fix"].Value = on;  // each change updates _unticked
+            foreach (DataGridViewRow r in _found.Rows) if (((LayerFinding)r.Tag).To != null) r.Cells["fix"].Value = on;  // each change is kept in _choice
             UpdateStatus();
         }
 
@@ -191,7 +232,7 @@ namespace C3DProTools.Features.Standards
         {
             if (_scan == null) return;
             // The list shows the networks of the last check; a network ticked or unticked since must be checked first (review finding).
-            var nowTicked = new HashSet<string>(_nets.CheckedItems.Cast<string>(), StringComparer.OrdinalIgnoreCase);
+            var nowTicked = new HashSet<string>(TickedNetworks(), StringComparer.OrdinalIgnoreCase);
             if (!nowTicked.SetEquals(_scan.Networks))
             {
                 ReadDrawing(nowTicked.ToList());
@@ -214,7 +255,7 @@ namespace C3DProTools.Features.Standards
             }
             finally { Cursor = Cursors.Default; }
             string summary = RunReport.Write(log.ToString(), "C3DPROLAYERS", "Fix");
-            ReadDrawing(_nets.CheckedItems.Cast<string>().ToList());
+            ReadDrawing(TickedNetworks());
             MessageBox.Show(this, summary, Text);
         }
     }
