@@ -69,6 +69,7 @@ namespace C3DProTools
             model.Items.Add(Large("Networks from\nFeature Lines", "NetworkFromFeatureLines ", "Build pipe networks from feature lines."));
             model.Items.Add(Large("Profile &\nCover Designer", "ProfileCoverDesigner ", "Set pipe levels along a route for cover, slope and clearances."));
             model.Items.Add(Large("Rebuild\nNetwork", "RebuildNetwork ", "Rebuild a network that cannot be edited (a data-shortcut reference whose source is gone) as an ordinary network: same structures, pipes, levels and connections. Check first, then Rebuild."));
+            model.Items.Add(Large("Surface from\nSolids", "C3DPROSURFSOLID ", "A TIN surface from 3D solids and meshes (a road as solids, its daylight as a mesh): the top faces, the bottom faces, or both, keeping their own triangles. Select, choose the side, accept or change the name and style."));
             model.Items.Add(Large("Navisworks\nImporter", "ImportNavisPipe ", "Import pipes and structures from Navisworks."));
 
             RibbonPanelSource profiles = new RibbonPanelSource { Title = "Profiles" };
