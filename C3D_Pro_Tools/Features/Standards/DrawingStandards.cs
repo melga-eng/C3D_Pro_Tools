@@ -79,17 +79,19 @@ namespace C3DProTools.Features.Standards
 
         internal static void Fix(Document doc, List<StandardFinding> chosen, StringBuilder log)
         {
+            int fixedCount = 0, failedCount = 0;
             using (doc.LockDocument())
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
                 foreach (StandardFinding f in chosen.Where(x => x.Fix != null))
                 {
-                    try { f.Fix(tr, doc.Database, log); }
-                    catch (Exception ex) { log.AppendLine($"  not fixed: {f.Text}: {ex.Message}"); }
+                    try { f.Fix(tr, doc.Database, log); fixedCount++; }
+                    catch (Exception ex) { failedCount++; log.AppendLine($"  not fixed: {f.Text}: {ex.Message}"); }
                 }
                 tr.Commit();
             }
-            log.AppendLine($"Fixed: {chosen.Count(x => x.Fix != null)} item(s) (one UNDO).");
+            // Counted as done only when the whole fix went through; a fix that stopped part way is listed (review finding).
+            log.AppendLine($"Fixed: {fixedCount} item(s){(failedCount > 0 ? $", {failedCount} not fixed or only in part (listed above)" : "")} (one UNDO).");
         }
 
         private static string Safe(Func<string> get) { try { return get() ?? ""; } catch (Exception) { return ""; } }
@@ -266,7 +268,13 @@ namespace C3DProTools.Features.Standards
                     FixText = "make the paths relative",
                     Fix = (t, d, log) =>
                     {
-                        foreach (var a in fixable) { ((BlockTableRecord)t.GetObject(a.id, OpenMode.ForWrite)).PathName = a.rel; log.AppendLine($"  xref {a.name}: {a.rel}"); }
+                        var failed = new List<string>();
+                        foreach (var a in fixable)
+                        {
+                            try { ((BlockTableRecord)t.GetObject(a.id, OpenMode.ForWrite)).PathName = a.rel; log.AppendLine($"  xref {a.name}: {a.rel}"); }
+                            catch (Exception ex) { failed.Add($"{a.name} ({ex.Message})"); }
+                        }
+                        if (failed.Count > 0) throw new InvalidOperationException($"{failed.Count} of {fixable.Count} xref paths not changed: {string.Join(", ", failed)}");
                     }
                 });
             var other = absolute.Where(a => a.rel == null).ToList();
@@ -280,10 +288,22 @@ namespace C3DProTools.Features.Standards
             List<SheetRecord> sheets;
             SheetProfile p;
             try { p = SheetManagerSettings.Load().Profile; sheets = SheetManager.Read(tr, db, p); }
-            catch (Exception ex) { C3DProLogger.Warn("Drawing Standards: the sheets could not be read", ex); return; }
+            catch (Exception ex)
+            {
+                // Said in the report: no sheet problems listed must not read as sheets checked (review finding).
+                C3DProLogger.Warn("Drawing Standards: the sheets could not be read", ex);
+                found.Add(new StandardFinding { Area = "Sheets", Rule = "Sheet Manager", Text = $"The sheets could not be read ({ex.Message}); they were not checked." });
+                return;
+            }
             if (sheets.Count == 0) return;
             List<SheetIssue> issues;
-            try { issues = SheetManager.Check(tr, sheets, p); } catch (Exception ex) { C3DProLogger.Warn("Drawing Standards: the sheet checks failed", ex); issues = new List<SheetIssue>(); }
+            try { issues = SheetManager.Check(tr, sheets, p); }
+            catch (Exception ex)
+            {
+                C3DProLogger.Warn("Drawing Standards: the sheet checks failed", ex);
+                found.Add(new StandardFinding { Area = "Sheets", Rule = "Sheet Manager", Text = $"The sheet checks failed ({ex.Message}); title block formats below were still checked." });
+                issues = new List<SheetIssue>();
+            }
             List<SheetIssue> problems = issues.Where(i => !i.IsNote).ToList();
             if (problems.Count > 0)
                 found.Add(new StandardFinding { Area = "Sheets", Rule = "STD 5.4, Sheet Manager", Text = $"{problems.Count} sheet problems (Sheet Manager fixes most of them).", Items = problems.Select(i => $"{(i.Layout.Length > 0 ? i.Layout + ": " : "")}{i.Text}").ToList() });
