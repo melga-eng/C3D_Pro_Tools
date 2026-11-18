@@ -25,6 +25,7 @@ namespace C3DProTools.Features.Standards
         private readonly CheckBox _purge = new CheckBox { Text = "Delete per-network layers left empty", AutoSize = true, Checked = true };
         private readonly Label _status = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(3, 9, 3, 3) };
         private bool _filling;
+        private readonly HashSet<string> _unticked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private static DataGridView Grid() => new DataGridView
         {
@@ -55,7 +56,12 @@ namespace C3DProTools.Features.Standards
             foreach ((string n, string h, int w) in new[] { ("kind", "Object", 10), ("name", "Name", 16), ("net", "Network", 14), ("from", "Layer now", 22), ("to", "Goes to", 22), ("why", "Why", 16) })
                 _found.Columns.Add(new DataGridViewTextBoxColumn { Name = n, HeaderText = h, ReadOnly = true, FillWeight = w });
             _found.CurrentCellDirtyStateChanged += (s, e) => { if (_found.IsCurrentCellDirty) _found.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-            _found.CellValueChanged += (s, e) => UpdateStatus();
+            _found.CellValueChanged += (s, e) =>
+            {
+                if (_filling || e.RowIndex < 0 || !(_found.Rows[e.RowIndex].Tag is LayerFinding f)) return;
+                if (_found.Rows[e.RowIndex].Cells["fix"].Value is bool on && on) _unticked.Remove(f.Item.Handle); else _unticked.Add(f.Item.Handle);
+                UpdateStatus();
+            };
 
             Button check = StyleUi.Secondary("Check", (s, e) => Check());
             Button fix = StyleUi.Primary("Fix ticked", (s, e) => Fix());
@@ -151,12 +157,13 @@ namespace C3DProTools.Features.Standards
 
         private void Recheck()
         {
-            _findings = LayerRules.Check(_scan.Items, _scan.Rules, _scan.PartBases, _scan.LabelBases);
+            _findings = _scan.Check();
             _filling = true;
             _found.Rows.Clear();
             foreach (LayerFinding f in _findings)
             {
-                int i = _found.Rows.Add(f.To != null, f.Item.Kind, f.Item.Name, f.Item.Network, f.Item.Layer, f.To ?? "(set the layer of its type above)", f.Why);
+                // What the user unticked stays unticked when a rule changes (review finding).
+                int i = _found.Rows.Add(f.To != null && !_unticked.Contains(f.Item.Handle),f.Item.Kind, f.Item.Name, f.Item.Network, f.Item.Layer, f.To ?? "(set the layer of its type above)", f.Why);
                 _found.Rows[i].Tag = f;
                 if (f.To == null) { _found.Rows[i].Cells["fix"].ReadOnly = true; _found.Rows[i].DefaultCellStyle.ForeColor = StyleUi.Muted; }
             }
@@ -166,7 +173,7 @@ namespace C3DProTools.Features.Standards
 
         private void TickAll(bool on)
         {
-            foreach (DataGridViewRow r in _found.Rows) if (((LayerFinding)r.Tag).To != null) r.Cells["fix"].Value = on;
+            foreach (DataGridViewRow r in _found.Rows) if (((LayerFinding)r.Tag).To != null) r.Cells["fix"].Value = on;  // each change updates _unticked
             UpdateStatus();
         }
 
@@ -183,6 +190,14 @@ namespace C3DProTools.Features.Standards
         private void Fix()
         {
             if (_scan == null) return;
+            // The list shows the networks of the last check; a network ticked or unticked since must be checked first (review finding).
+            var nowTicked = new HashSet<string>(_nets.CheckedItems.Cast<string>(), StringComparer.OrdinalIgnoreCase);
+            if (!nowTicked.SetEquals(_scan.Networks))
+            {
+                ReadDrawing(nowTicked.ToList());
+                MessageBox.Show(this, "The networks ticked changed, so the list was checked again. Look it over, then press Fix ticked.", Text);
+                return;
+            }
             List<LayerFinding> chosen = Ticked();
             if (chosen.Count == 0 && !_stop.Checked) { MessageBox.Show(this, "Nothing is ticked.", Text); return; }
             var log = new StringBuilder();

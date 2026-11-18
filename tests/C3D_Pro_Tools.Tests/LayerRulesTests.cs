@@ -84,6 +84,14 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void Labels_on_a_layer_frozen_in_a_viewport_stay_even_when_it_looks_per_network()
+        {
+            var label = new LayerItem { Handle = "3", IsLabel = true, Kind = "pipe label", Layer = "C-Ss_55-T-Pipe_TILE-124-D", LabelBase = "C-Ss_55-T-Pipe" };
+            Assert.Single(LayerRules.Check(new[] { label }, new Dictionary<string, string>(), PartBases, LabelBases));
+            Assert.Empty(LayerRules.Check(new[] { label }, new Dictionary<string, string>(), PartBases, LabelBases, new[] { "C-Ss_55-T-Pipe_TILE-124-D" }));
+        }
+
+        [Fact]
         public void Rules_round_trip_through_the_saved_text()
         {
             var rules = new Dictionary<string, string> { ["TYPE IC-3B"] = "IC-Ss_75_10_21_88-M-IctNewDuct6x4_Type-3B", ["TYPE C TYPE 1 MH"] = "IC-Ss_75_10_21_88-M-IctManhole_Type C" };

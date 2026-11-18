@@ -76,15 +76,18 @@ namespace C3DProTools.Features.Standards
         /// What is wrong: parts not on their type's layer (the saved rule first, else the learned one), parts with no rule that sit
         /// on 0 or a per-network layer, labels on a per-network labelling layer or on 0.
         /// </summary>
-        public static List<LayerFinding> Check(IEnumerable<LayerItem> items, IReadOnlyDictionary<string, string> rules, IEnumerable<string> partBases, IEnumerable<string> labelBases)
+        public static List<LayerFinding> Check(IEnumerable<LayerItem> items, IReadOnlyDictionary<string, string> rules, IEnumerable<string> partBases, IEnumerable<string> labelBases,
+            IEnumerable<string> keepLabelLayers = null)
         {
             List<string> pb = partBases.ToList(), lb = labelBases.ToList();
+            // Layers frozen in a viewport hold labels for one sheet part (the tile layers): never emptied (review finding).
+            var keep = new HashSet<string>(keepLabelLayers ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             var found = new List<LayerFinding>();
             foreach (LayerItem it in items)
             {
                 if (it.IsLabel)
                 {
-                    if (string.IsNullOrEmpty(it.LabelBase) || it.Layer.Equals(it.LabelBase, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.IsNullOrEmpty(it.LabelBase) || it.Layer.Equals(it.LabelBase, StringComparison.OrdinalIgnoreCase) || keep.Contains(it.Layer)) continue;
                     if (IsSuffixLayer(it.Layer, lb)) found.Add(new LayerFinding { Item = it, To = it.LabelBase, Why = "label on a per-network layer" });
                     else if (it.Layer == "0") found.Add(new LayerFinding { Item = it, To = it.LabelBase, Why = "label on layer 0" });
                     continue;

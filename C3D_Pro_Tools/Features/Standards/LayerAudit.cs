@@ -64,7 +64,7 @@ namespace C3DProTools.Features.Standards
             try
             {
                 Scan scan = Read(doc, nr.StringResult.Trim());
-                List<LayerFinding> findings = LayerRules.Check(scan.Items, scan.Rules, scan.PartBases, scan.LabelBases);
+                List<LayerFinding> findings = scan.Check();
                 Describe(scan, findings, log);
                 if (mode == "Fix") Fix(doc, scan, findings.Where(f => f.To != null).ToList(), new FixOptions(), log);
             }
@@ -95,6 +95,10 @@ namespace C3DProTools.Features.Standards
             /// <summary>Saved over learned: what the check and the fix use.</summary>
             public Dictionary<string, string> Rules = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             public List<string> Layers = new List<string>();
+            /// <summary>Layers frozen in some viewport (the tile label layers): labels on them stay.</summary>
+            public List<string> FrozenInViewports = new List<string>();
+
+            public List<LayerFinding> Check() => LayerRules.Check(Items, Rules, PartBases, LabelBases, FrozenInViewports);
         }
 
         private static string Base(SettingsObjectLayers s, SettingsObjectLayerType t)
@@ -136,6 +140,20 @@ namespace C3DProTools.Features.Standards
                 foreach (ObjectId id in lt)
                     if (tr.GetObject(id, OpenMode.ForRead) is LayerTableRecord l && !l.IsDependent) scan.Layers.Add(l.Name);
                 scan.Layers.Sort(StringComparer.OrdinalIgnoreCase);
+                var frozen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var layouts = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry le in layouts)
+                {
+                    if (!(tr.GetObject(le.Value, OpenMode.ForRead) is Layout lay) || lay.ModelType) continue;
+                    var space = (BlockTableRecord)tr.GetObject(lay.BlockTableRecordId, OpenMode.ForRead);
+                    foreach (ObjectId vid in space)
+                    {
+                        if (!vid.ObjectClass.IsDerivedFrom(RXObject.GetClass(typeof(Viewport))) || !(tr.GetObject(vid, OpenMode.ForRead) is Viewport vp)) continue;
+                        try { foreach (ObjectId fl in vp.GetFrozenLayers()) if (tr.GetObject(fl, OpenMode.ForRead) is LayerTableRecord l) frozen.Add(l.Name); }
+                        catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                    }
+                }
+                scan.FrozenInViewports = frozen.ToList();
 
                 var exactSet = exact == null ? null : new HashSet<string>(exact, StringComparer.OrdinalIgnoreCase);
                 var parts = new Dictionary<ObjectId, LayerItem>();
