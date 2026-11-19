@@ -365,9 +365,9 @@ namespace C3DProTools
         /// the sheet shows and its X / Y directions, as a rectangle round the viewport moved there with CHSPACE. A sheet drawn
         /// again replaces its earlier frame.
         /// </summary>
-        public static int FramesToModel(Transaction tr, Database db, IEnumerable<SheetInfo> sheets)
+        public static int FramesToModel(Transaction tr, Database db, IEnumerable<SheetInfo> sheets, IReadOnlyDictionary<string, string> tilePartOf = null)
         {
-            ObjectId layer = Layer(tr, db, FramesLayer, 30);
+            ObjectId layer = Layer(tr, db, SheetFramesLayer, 30);
             RegAppTable apps = (RegAppTable)tr.GetObject(db.RegAppTableId, OpenMode.ForRead);
             if (!apps.Has(AnnotLabels.RegApp))
             {
@@ -378,14 +378,7 @@ namespace C3DProTools
             }
             ObjectId msId = SymbolUtilityServices.GetBlockModelSpaceId(db);
             List<SheetInfo> list = sheets.ToList();
-            HashSet<string> tags = new HashSet<string>(list.Select(s => "frame:" + s.Layout));
-            bool Mine(Entity e)
-            {
-                ResultBuffer rb = e.GetXDataForApplication(AnnotLabels.RegApp);
-                if (rb == null) return false;
-                using (rb) return rb.AsArray().Any(t => t.Value is string s && tags.Contains(s));
-            }
-            ClearIn(tr, msId, layer, Mine);
+            RemoveFrames(tr, db, list);
             BlockTableRecord ms = (BlockTableRecord)tr.GetObject(msId, OpenMode.ForWrite);
             int n = 0;
             foreach (SheetInfo sheet in list)
@@ -403,18 +396,52 @@ namespace C3DProTools
                     ms.AppendEntity(pl);
                     tr.AddNewlyCreatedDBObject(pl, true);
                     pl.XData = Tag();
-                    // The sheet's name in its top left corner, reading along the sheet's X axis, 3.5 mm high as plotted.
-                    Point3d corner = new Point3d(v.PaperBox.MinPoint.X + 3, v.PaperBox.MaxPoint.Y - 7, 0).TransformBy(v.PaperToModel);
-                    DBText name = new DBText
+                    // In its top left corner, reading along the sheet's X axis: the tile and part, 5 mm high as plotted (when the
+                    // sheet has them), and the sheet's name under it, 3.5 mm.
+                    string tilePart = tilePartOf != null && tilePartOf.TryGetValue(sheet.Layout, out string tp) ? tp : "";
+                    string layoutText = sheet.Viewports.Count > 1 ? $"{sheet.Layout} ({i + 1})" : sheet.Layout;
+                    double y = v.PaperBox.MaxPoint.Y - 3;
+                    void Text(string s, double heightMm)
                     {
-                        LayerId = layer, Position = corner, Height = 3.5 / v.Scale, Rotation = v.XAxisInModel,
-                        TextString = sheet.Viewports.Count > 1 ? $"{sheet.Layout} ({i + 1})" : sheet.Layout
-                    };
-                    ms.AppendEntity(name);
-                    tr.AddNewlyCreatedDBObject(name, true);
-                    name.XData = Tag();
+                        y -= heightMm;
+                        DBText t = new DBText
+                        {
+                            LayerId = layer, Position = new Point3d(v.PaperBox.MinPoint.X + 3, y, 0).TransformBy(v.PaperToModel),
+                            Height = heightMm / v.Scale, Rotation = v.XAxisInModel, TextString = s
+                        };
+                        ms.AppendEntity(t);
+                        tr.AddNewlyCreatedDBObject(t, true);
+                        t.XData = Tag();
+                        y -= heightMm * 0.6;
+                    }
+                    if (tilePart.Length > 0) Text(tilePart, 5);
+                    Text(layoutText, 3.5);
                     n++;
                 }
+            return n;
+        }
+
+        /// <summary>The KSIA layer of the sheet frames: Zz_10_20_95 is "Viewports" (Uniclass); model content, not plotted.</summary>
+        public const string SheetFramesLayer = "Z-Zz_10_20_95-M-SheetFrames";
+
+        /// <summary>
+        /// Erases the frames drawn in model space for these sheets (every sheet when null): only what the frames tool drew (its
+        /// tag), on the frames layer or the one it used before (C3DPRO-VIEWPORT-FRAMES).
+        /// </summary>
+        public static int RemoveFrames(Transaction tr, Database db, IEnumerable<SheetInfo> sheets = null)
+        {
+            HashSet<string> tags = sheets == null ? null : new HashSet<string>(sheets.Select(s => "frame:" + s.Layout));
+            bool Mine(Entity e)
+            {
+                ResultBuffer rb = e.GetXDataForApplication(AnnotLabels.RegApp);
+                if (rb == null) return false;
+                using (rb) return rb.AsArray().Any(t => t.Value is string s && s.StartsWith("frame:", StringComparison.Ordinal) && (tags == null || tags.Contains(s)));
+            }
+            ObjectId msId = SymbolUtilityServices.GetBlockModelSpaceId(db);
+            LayerTable lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+            int n = 0;
+            foreach (string name in new[] { SheetFramesLayer, FramesLayer })
+                if (lt.Has(name)) n += ClearIn(tr, msId, lt[name], Mine);
             return n;
         }
     }

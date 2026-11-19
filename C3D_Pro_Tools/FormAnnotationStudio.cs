@@ -522,6 +522,7 @@ namespace C3DProTools
                 StyleUi.Secondary("Show what the tool sees", (s, e) => ShowFrameCheck()),
                 StyleUi.Secondary("Clear it", (s, e) => ClearFrameCheck()),
                 StyleUi.Secondary("Viewport frames to model space", (s, e) => FramesToModel()),
+                StyleUi.Secondary("Remove the frames", (s, e) => RemoveFramesFromModel()),
                 StyleUi.Secondary("Reset labels on these sheets…", (s, e) => ResetLabelsOnSheets())));
             ToolUi.Add(stack, frame);
 
@@ -1356,11 +1357,26 @@ namespace C3DProTools
             using (_doc.LockDocument())
             using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
             {
-                n = AnnotFrame.FramesToModel(tr, _doc.Database, sheets);
+                n = AnnotFrame.FramesToModel(tr, _doc.Database, sheets, Features.Sheets.SheetFramesRun.TilePartOf(tr, _doc.Database));
                 tr.Commit();
             }
             ViewHelper.Regen(_doc);
-            SetStatus($"Drew {n} viewport frame(s) in model space on layer {AnnotFrame.FramesLayer} (not plotted), each named with its sheet; drawing a sheet again replaces its frame.");
+            SetStatus($"Drew {n} viewport frame(s) in model space on layer {AnnotFrame.SheetFramesLayer} (not plotted), each named with its tile, part and sheet; drawing a sheet again replaces its frame.");
+        }
+
+        private void RemoveFramesFromModel()
+        {
+            List<SheetInfo> sheets = CheckedSheetsOrSay();
+            if (sheets.Count == 0 || _doc == null) return;
+            int n;
+            using (_doc.LockDocument())
+            using (Transaction tr = _doc.Database.TransactionManager.StartTransaction())
+            {
+                n = AnnotFrame.RemoveFrames(tr, _doc.Database, sheets);
+                tr.Commit();
+            }
+            ViewHelper.Regen(_doc);
+            SetStatus($"Removed the viewport frames of {sheets.Count} sheet(s) from model space ({n} object(s)).");
         }
 
         /// <summary>

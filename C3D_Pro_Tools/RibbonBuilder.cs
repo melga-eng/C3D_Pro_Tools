@@ -85,6 +85,7 @@ namespace C3DProTools
             produce.Items.Add(Large("Annotation\nStudio", "AnnotationStudio ", "Add labels from label sets, arrange them inside the viewports, reset, rename parts."));
             produce.Items.Add(Large("Sheet\nManager", "SheetManager ", "List, rename, copy and create layouts by tile and part."));
             produce.Items.Add(Large("CAD\nSheets", "C3DPROCAD ", "One AutoCAD 2018 drawing per chosen sheet, named after it: labels exploded as each sheet shows them, that sheet only, unused items purged. Runs in the background on a copy; your drawing is not changed."));
+            produce.Items.Add(Large("Sheet\nFrames", "C3DPROVPFRAMES ", "Each sheet's viewports drawn in model space as the area they show, named with the tile, part and sheet (not plotted). Draw or Remove, for all sheets or those you name."));
             produce.Items.Add(Large("Explode\nLabels", "C3DPROEXPLODELABELS ", "A copy of the saved drawing with every Civil 3D label exploded as the sheets show it, saved beside it as \"<name> - labels exploded.dwg\". Runs in the background; your drawing is not changed."));
             produce.Items.Add(Large("Workspace\nPalette", "C3DProWorkspace ", "Docked panel for building sheets."));
 
