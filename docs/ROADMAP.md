@@ -72,7 +72,7 @@ Civil 3D 2026.2.2 and later (.NET 10), metric only. Download link on a free host
 
 | # | Task | State |
 |---|---|---|
-| 1 | Navisworks Import: destination (Auto into matching drawing networks, one chosen network, or new), parts already drawn left out, connect to existing structures, sizes into that network's parts list | **Built** on `feature/navis-destination`; drawing test passes; waiting for review and your try |
+| 1 | Navisworks Import: destination (Auto into matching drawing networks, one chosen network, or new), parts already drawn left out, connect to existing structures, sizes into that network's parts list | **Merged** 2026-11-19; drawing test passes; Codex review (5 findings) fixed; waiting for your try in the window |
 | 2 | Navisworks Import: styles (keep default / one for all pipes and one for all structures / per part) | To do |
 | 3 | Navisworks Import: solids made interactive (import as surface, layer per Navisworks layer) | To do |
 | 4 | Surface from Solids: a small window (side, name, style from a list, remembered) | To do |
