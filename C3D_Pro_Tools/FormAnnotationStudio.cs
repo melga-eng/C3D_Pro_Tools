@@ -56,6 +56,8 @@ namespace C3DProTools
             public readonly RadioButton Parts = new RadioButton { AutoSize = true }, Networks = new RadioButton { Text = "These networks:", AutoSize = true },
                 Sheets = new RadioButton { Text = "Every part shown on these sheets:", AutoSize = true };
             public readonly CheckedListBox NetworkList = NewList(), SheetList = NewList();
+            /// <summary>With "parts shown on these sheets": only the parts of the networks ticked above (your request, 2026-11-19).</summary>
+            public readonly CheckBox OnlyNetworks = new CheckBox { Text = "Only the networks ticked above (their parts shown on these sheets; other networks and the rest of the network are left)", AutoSize = true, Margin = new Padding(20, 2, 3, 3) };
             public readonly Label Info = new Label { AutoSize = true, ForeColor = StyleUi.Muted, Margin = new Padding(8, 9, 0, 0), Text = "Nothing selected yet" };
             /// <summary>The parts picked (labels picked count as the part they label), and labels picked themselves.</summary>
             public readonly List<ObjectId> PartIds = new List<ObjectId>(), LabelIds = new List<ObjectId>();
@@ -433,11 +435,15 @@ namespace C3DProTools
             ToolUi.Wide(card, ToolUi.Inline(t.Parts, StyleUi.Secondary("Select in drawing…", (s, e) => PickTarget(t, prompt)), t.Info));
             ToolUi.Wide(card, t.Networks);
             ToolUi.Wide(card, ListWithButtons(t.NetworkList));
+            // Ticking a network leaves "selected parts" for "These networks"; with sheets chosen it stays on the sheets (they may be
+            // filtered by the networks ticked).
             t.NetworkList.ItemCheck += (s, e) => { if (t.Mode == TParts && !_busy) BeginInvoke((Action)(() => t.Mode = TNetworks)); };
             if (sheets)
             {
                 ToolUi.Wide(card, t.Sheets);
+                ToolUi.Wide(card, t.OnlyNetworks);
                 ToolUi.Wide(card, ListWithButtons(t.SheetList));
+                t.OnlyNetworks.CheckedChanged += (s, e) => { if (t.OnlyNetworks.Checked && !_busy) BeginInvoke((Action)(() => t.Mode = TSheets)); };
                 t.SheetList.ItemCheck += (s, e) => BeginInvoke((Action)(() => t.Mode = TSheets));
                 ToolUi.Exclusive(t.Parts, t.Networks, t.Sheets);
             }
@@ -1080,8 +1086,10 @@ namespace C3DProTools
             Target t = _labelTarget;
             if (t.Mode == TParts && t.PartIds.Count == 0) { MessageBox.Show(this, "Select the parts to label first (Select in drawing…).", Text); return; }
             List<SheetInfo> sheets = t.Mode == TSheets ? Checked(t.SheetList) : null;
-            List<ObjectId> nets = t.Mode == TNetworks ? CheckedNetworks(t.NetworkList) : null;
+            bool onlyTicked = t.Mode == TSheets && t.OnlyNetworks.Checked;
+            List<ObjectId> nets = t.Mode == TNetworks || onlyTicked ? CheckedNetworks(t.NetworkList) : null;
             if (t.Mode == TSheets && sheets.Count == 0) { MessageBox.Show(this, "Tick the sheets whose parts to label.", Text); return; }
+            if (onlyTicked && nets.Count == 0) { MessageBox.Show(this, "Tick the networks to label (above the sheets), or clear \"Only the networks ticked above\".", Text); return; }
             if (t.Mode == TNetworks && nets.Count == 0) { MessageBox.Show(this, "Tick the networks to label.", Text); return; }
 
             AnnotLabels.ApplyResult r;
