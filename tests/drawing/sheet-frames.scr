@@ -1,0 +1,15 @@
+C3DPROVPFRAMES
+Draw
+
+(princ (strcat "
+FRAMES-COUNT " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_20_95-M-SheetFrames")))))))
+C3DPROVPFRAMES
+Draw
+
+(princ (strcat "
+FRAMES-AGAIN " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_20_95-M-SheetFrames")))))))
+C3DPROVPFRAMES
+Remove
+
+(princ (strcat "
+FRAMES-AFTER-REMOVE " (if (ssget "X" '((8 . "Z-Zz_10_20_95-M-SheetFrames"))) "some" "0")))
