@@ -79,6 +79,8 @@ namespace C3DProTools
         private ImportCandidate _detail;
 
         private readonly TextBox _txtPartsList = StyleUi.Box();
+        private readonly ComboBox _cbDestination = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 4) };
+        private readonly ComboBox _cbTarget = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 4) };
         private readonly ComboBox _cbGrouping = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 4) };
         private readonly TextBox _txtPrefix = StyleUi.Box();
         private readonly ComboBox _cbSurface = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(3, 4, 3, 4) };
@@ -140,12 +142,13 @@ namespace C3DProTools
             Shown += async (s, e) =>
             {
                 FillSurfaces();
+                FillNetworks();
                 // Asked at the start: how sizes the catalog lacks are made (Method A, Method B or nearest size).
                 if (_session.Settings.AskSizeMode) ChooseSizeMode();
                 else if (_session.Settings.SizeMode == (int)CatalogMode.AnySize) SetUpAnySize(false);
                 await FindInstances();
             };
-            Activated += (s, e) => FillSurfaces();
+            Activated += (s, e) => { FillSurfaces(); FillNetworks(); };
         }
 
         // =====================================================================================
@@ -201,7 +204,7 @@ namespace C3DProTools
             foreach ((string text, string kind) in new[]
             {
                 ("All", "All"), ("Pipes", "Pipe"), ("Box culverts", "Box"), ("Structures", "Structure"), ("Solids", "Solid"),
-                ("Needs review", "Review"), ("Already imported", "Already imported"), ("Ticked", "Checked")
+                ("Needs review", "Review"), ("In drawing", "InDrawing"), ("Already imported", "Already imported"), ("Ticked", "Checked")
             })
             {
                 StyleChip chip = new StyleChip(text, kind);
@@ -283,6 +286,7 @@ namespace C3DProTools
             ContextMenuStrip menu = new ContextMenuStrip();
             menu.Items.Add("Choose Civil 3D part…", null, (s, e) => ChoosePart());
             menu.Items.Add("Back to automatic part", null, (s, e) => ClearOverrides(SelectedRows()));
+            menu.Items.Add("Send to network…", null, (s, e) => SendToNetwork());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Tick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _session.Ticked.Add(r); RefreshTicks(); });
             menu.Items.Add("Untick selected rows", null, (s, e) => { foreach (ImportCandidate r in SelectedRows()) _session.Ticked.Remove(r); RefreshTicks(); });
@@ -409,6 +413,7 @@ namespace C3DProTools
 
         private Control BuildOptions()
         {
+            _cbDestination.Items.AddRange(new object[] { "Auto: join the drawing's networks", "One network of the drawing", "New networks only" });
             _cbGrouping.Items.AddRange(new object[] { "Source network (from the model)", "Navisworks layer", "One network" });
             _cbExisting.Items.AddRange(new object[] { "Replace the earlier import", "Skip it", "Import again (duplicate)" });
 
@@ -420,7 +425,10 @@ namespace C3DProTools
             StyleCard cParts = new StyleCard("Parts", "", parts);
 
             FlowLayoutPanel shift = ToolUi.Inline(Small("X"), _txtDx, Small("Y"), _txtDy, Small("Z"), _txtDz, Small("turn"), _txtRot, Small("°"));
-            TableLayoutPanel nets = Grid2(("Group by", _cbGrouping), ("Name prefix", _txtPrefix), ("Surface", _cbSurface), ("Shift (m)", shift));
+            TableLayoutPanel nets = Grid2(("Put parts in", _cbDestination), ("Network", _cbTarget), ("New networks by", _cbGrouping), ("Name prefix", _txtPrefix), ("Surface", _cbSurface), ("Shift (m)", shift));
+            _tips.SetToolTip(_cbDestination, "Auto: parts go into a drawing network that has the model's network name, or whose structures their pipe ends meet; " +
+                                             "parts already drawn there are left out, and new sizes go into that network's own parts list. Anything else becomes a new network.");
+            _tips.SetToolTip(_cbTarget, "The drawing network every part goes into (\"One network of the drawing\"). Right-click rows to send them to another network.");
             _tips.SetToolTip(shift, "For a model on a local or shared grid: Navisworks coordinates are turned about the origin (counter-clockwise), then shifted. " +
                                     "Used when the selection is read: get the selection again after changing it.");
             StyleCard cNets = new StyleCard("Networks", "", nets);
@@ -462,8 +470,12 @@ namespace C3DProTools
             _cbNoSize.SelectedIndex = Math.Max(0, Math.Min(1, _session.Settings.NoSizeMode));
             _numMaxError.ValueChanged += (s, e) => { if (_session.Plan.Count > 0) RunPlan(false); };
             _cbNoSize.SelectedIndexChanged += (s, e) => { if (_session.Plan.Count > 0) RunPlan(false); };
+            _cbDestination.SelectedIndex = Math.Max(0, Math.Min(2, _session.Settings.Destination));
+            _cbTarget.Enabled = _cbDestination.SelectedIndex == 1;
+            _cbDestination.SelectedIndexChanged += (s, e) => { _cbTarget.Enabled = _cbDestination.SelectedIndex == 1; RefreshNetworks(); };
+            _cbTarget.SelectedIndexChanged += (s, e) => { if (!_fillingNetworks) RefreshNetworks(); };
             _cbGrouping.SelectedIndexChanged += (s, e) => RefreshNetworks();
-            _txtPrefix.TextChanged += (s, e) => RefreshNetworks();
+            _txtPrefix.Leave += (s, e) => RefreshNetworks();
             _txtPartsList.Leave += (s, e) => InvalidatePlan();
             _txtDx.Text = ToolUi.Format(_session.Settings.TransformDx);
             _txtDy.Text = ToolUi.Format(_session.Settings.TransformDy);
@@ -569,6 +581,8 @@ namespace C3DProTools
         {
             _session.Settings.PartsListName = string.IsNullOrWhiteSpace(_txtPartsList.Text) ? "Navis Import" : _txtPartsList.Text.Trim();
             _session.Settings.Grouping = _cbGrouping.SelectedIndex;
+            _session.Settings.Destination = Math.Max(0, _cbDestination.SelectedIndex);
+            if (_cbTarget.SelectedItem is string target) _session.Settings.ChosenNetwork = target;
             _session.Settings.Prefix = _txtPrefix.Text;
             _session.Settings.ConnectToStructures = _chkConnect.Checked;
             _session.Settings.Existing = _cbExisting.SelectedIndex;
@@ -715,6 +729,7 @@ namespace C3DProTools
             if (!response.Ok) { SetStatus(response.Error, true); return; }
             if (response.Elements.Count == 0) { SetStatus("Nothing is selected in Navisworks (or the selection has no geometry).", true); return; }
 
+            NavisImportSession.SaveSelection(response);
             _session.Transform = ReadTransform();
             _session.Load(response);
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
@@ -769,13 +784,16 @@ namespace C3DProTools
                 case "Solid": return c.Action == ImportKind.Solid;
                 case "Review": return NeedsReview(c);
                 case "Already imported": return _session.Existing.Contains(c.Guid ?? "");
+                case "InDrawing": return InDrawing(c);
                 case "Checked": return _session.Ticked.Contains(c);
                 default: return true;
             }
         }
 
-        private bool NeedsReview(ImportCandidate c) =>
-            c.Confidence != ImportConfidence.High || (_session.Plan.TryGetValue(c, out RowOutcome p) && (p.Failed || p.PartDeviation > NavisInterpreter.HighTolerance));
+        private bool InDrawing(ImportCandidate c) => _session.Destinations.TryGetValue(c, out RowDestination d) && d.InDrawing;
+
+        private bool NeedsReview(ImportCandidate c) => !InDrawing(c) && (
+            c.Confidence != ImportConfidence.High || (_session.Plan.TryGetValue(c, out RowOutcome p) && (p.Failed || p.PartDeviation > NavisInterpreter.HighTolerance)));
 
         private List<ImportCandidate> VisibleRows()
         {
@@ -828,8 +846,21 @@ namespace C3DProTools
                 row.Cells[CPart].Value = c.Action == ImportKind.Solid ? "Exact 3D solid" : c.Action == ImportKind.Skip ? "" : "Check parts to match";
                 row.Cells[CDev].Value = "";
             }
-            row.Cells[CNetwork].Value = smart ? NavisImporter.NetworkFor(c, o) : c.Action == ImportKind.Solid ? o.SolidLayer : "";
-            row.Cells[CResult].Value = _session.Done.TryGetValue(c, out RowOutcome d) ? d.Status : _session.Existing.Contains(c.Guid ?? "") ? "Already imported" : "";
+            if (smart && _session.Destinations.TryGetValue(c, out RowDestination dest))
+            {
+                row.Cells[CNetwork].Value = (dest.Existing ? "→ " : "＋ ") + dest.Network;
+                row.Cells[CNetwork].ToolTipText = dest.InDrawing ? $"Already in {dest.Network} as \"{dest.InDrawingPart}\": not imported."
+                    : dest.Existing ? $"Into {dest.Network}, already in the drawing ({dest.Reason}); new sizes go into its parts list."
+                    : $"New network {dest.Network}.";
+                row.Cells[CNetwork].Style.ForeColor = dest.Existing ? StyleUi.Accent : StyleUi.Muted;
+            }
+            else
+            {
+                row.Cells[CNetwork].Value = smart ? "＋ " + NavisImporter.NetworkFor(c, o) : c.Action == ImportKind.Solid ? o.SolidLayer : "";
+                row.Cells[CNetwork].ToolTipText = "";
+            }
+            row.Cells[CResult].Value = _session.Done.TryGetValue(c, out RowOutcome d) ? d.Status : _session.Existing.Contains(c.Guid ?? "") ? "Already imported"
+                : InDrawing(c) ? "In drawing" : "";
             row.DefaultCellStyle.ForeColor = c.Action == ImportKind.Skip ? StyleUi.Muted : StyleUi.Text;
         }
 
@@ -846,10 +877,10 @@ namespace C3DProTools
 
         private void RefreshNetworks()
         {
-            if (_loading) return;
-            NavisImportOptions o = Options();
-            foreach (DataGridViewRow r in _grid.Rows)
-                if (r.Tag is ImportCandidate c && c.Action != ImportKind.Solid && c.Action != ImportKind.Skip) r.Cells[CNetwork].Value = NavisImporter.NetworkFor(c, o);
+            if (_loading || _session.Rows.Count == 0) return;
+            // The destination decides the parts list, so the parts are matched again.
+            _session.Plan.Clear();
+            RunPlan(false);
         }
 
         private void RefreshTicks()
@@ -1099,12 +1130,16 @@ namespace C3DProTools
             finally { Cursor = Cursors.Default; }
             if (report.Error.Length > 0) { SetStatus("Part matching failed: " + report.Error, true); return null; }
             foreach (KeyValuePair<ImportCandidate, RowOutcome> kv in report.Rows) _session.Plan[kv.Key] = kv.Value;
+            _session.Destinations = report.Destinations;
+            foreach (ImportCandidate c in rows.Where(InDrawing)) _session.Ticked.Remove(c);
             RefreshRows();
             int review = rows.Count(NeedsReview);
+            int inDrawing = rows.Count(InDrawing), joining = report.Destinations.Values.Count(d => d.Existing && !d.InDrawing);
+            string where = (joining > 0 ? $" {joining} part(s) join networks already in the drawing." : "") + (inDrawing > 0 ? $" {inDrawing} already drawn there, left out." : "");
             string catalog = report.CatalogAdditions.Count > 0 ? $" {report.CatalogAdditions.Count} size(s) will be added to the catalog on import." : "";
             string notes = report.CatalogNotes.Count > 0 ? " " + string.Join(" ", report.CatalogNotes) : "";
             SetStatus($"Matched against {report.CatalogPipeFamilies} pipe and {report.CatalogStructureFamilies} structure families in the catalog. " +
-                      (review > 0 ? $"{review} row(s) need review." : "All rows match.") + catalog + notes + (announce ? "" : " Nothing has been changed yet."), review > 0 || notes.Length > 0);
+                      (review > 0 ? $"{review} row(s) need review." : "All rows match.") + where + catalog + notes + (announce ? "" : " Nothing has been changed yet."), review > 0 || notes.Length > 0);
             return report;
         }
 
@@ -1236,18 +1271,18 @@ namespace C3DProTools
             // One confirmation listing exactly what will be created and added.
             List<PreviewRow> preview = new List<PreviewRow>();
             if (plan.CreatesPartsList) preview.Add(new PreviewRow { Cells = new[] { "Parts list", o.PartsListName, "New parts list", "" }, Enabled = false });
-            foreach (string f in plan.AddedFamilies) preview.Add(new PreviewRow { Cells = new[] { "Family", f, "Added to " + o.PartsListName, "" }, Enabled = false });
-            foreach (string sz in plan.AddedSizes) preview.Add(new PreviewRow { Cells = new[] { "Size", sz, "Added to " + o.PartsListName, "" }, Enabled = false });
-            foreach (string n in plan.Networks) preview.Add(new PreviewRow { Cells = new[] { "Network", n, "Created or reused", "" }, Enabled = false });
+            foreach (string f in plan.AddedFamilies) preview.Add(new PreviewRow { Cells = new[] { "Family", f, "Added to the parts list", "" }, Enabled = false });
+            foreach (string sz in plan.AddedSizes) preview.Add(new PreviewRow { Cells = new[] { "Size", sz, "Added to the parts list", "" }, Enabled = false });
+            foreach (string n in plan.Networks) preview.Add(new PreviewRow { Cells = new[] { "Network", n, n.EndsWith("(new)") ? "Created" : "Parts added to it", "" }, Enabled = false });
             foreach (string a in plan.CatalogAdditions) preview.Add(new PreviewRow { Cells = new[] { "Catalog", a, "Added to the catalog family (backup kept)", "Method B" }, Enabled = false });
             foreach (ImportCandidate c in rows)
             {
                 RowOutcome p = plan.Rows[c];
                 bool exists = _session.Existing.Contains(c.Guid ?? "");
                 string what = c.Action == ImportKind.Solid ? "3D solid" : p.AsSolid ? $"3D solid (no size within {o.MaxPartError * 1000:0} mm)" : (p.Overridden ? "✎ " : "") + $"{p.Family} · {p.Size}";
-                string note = p.Failed ? "No part: " + p.Detail : (exists ? (o.Existing == ExistingMode.Skip ? "Already imported: skipped" : o.Existing == ExistingMode.Replace ? "Replaces the earlier import" : "Imported again") : "")
+                string note = p.InDrawing ? p.Detail : p.Failed ? "No part: " + p.Detail : (exists ? (o.Existing == ExistingMode.Skip ? "Already imported: skipped" : o.Existing == ExistingMode.Replace ? "Replaces the earlier import" : "Imported again") : "")
                               + (c.Barrels.Count > 1 ? $" {c.Barrels.Count} barrels" : "") + (p.PartDeviation > NavisInterpreter.HighTolerance && !p.Failed ? $" {p.PartDeviation * 1000:0} mm off" : "");
-                preview.Add(new PreviewRow { Cells = new[] { ActionName(c.Action), c.Name, what, note.Trim() }, Enabled = !p.Failed, Checked = !p.Failed, Tag = c });
+                preview.Add(new PreviewRow { Cells = new[] { ActionName(c.Action), c.Name, what, note.Trim() }, Enabled = !p.Failed && !p.InDrawing, Checked = !p.Failed && !p.InDrawing, Tag = c });
             }
             List<ImportCandidate> chosen;
             using (FormStylePreview f = new FormStylePreview("Import from Navisworks",
@@ -1324,6 +1359,91 @@ namespace C3DProTools
             _cbSurface.SelectedIndex = index;
         }
 
+        private bool _fillingNetworks;
+
+        /// <summary>The drawing's networks that can take parts (data-shortcut references cannot), for "One network of the drawing".</summary>
+        private void FillNetworks()
+        {
+            Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            string wanted = _cbTarget.SelectedItem as string ?? _session.Settings.ChosenNetwork;
+            List<string> names = DrawingNetworkNames(doc);
+            if (names.SequenceEqual(_cbTarget.Items.Cast<string>())) return;
+            _fillingNetworks = true;
+            try
+            {
+                _cbTarget.Items.Clear();
+                foreach (string n in names) _cbTarget.Items.Add(n);
+                int index = names.FindIndex(n => n.Equals(wanted ?? "", StringComparison.OrdinalIgnoreCase));
+                if (names.Count > 0) _cbTarget.SelectedIndex = Math.Max(0, index);
+            }
+            finally { _fillingNetworks = false; }
+        }
+
+        private static List<string> DrawingNetworkNames(Document doc)
+        {
+            List<string> names = new List<string>();
+            try
+            {
+                using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+                {
+                    foreach (ObjectId id in CivilDocument.GetCivilDocument(doc.Database).GetPipeNetworkIds())
+                    {
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is Network n)) continue;
+                        bool reference;
+                        try { reference = n.IsReferenceObject; } catch (Exception) { reference = false; }
+                        if (!reference) names.Add(n.Name);
+                    }
+                    tr.Commit();
+                }
+            }
+            catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            return names;
+        }
+
+        /// <summary>Sends the selected rows to a network of the drawing, a new network, or back to the automatic choice.</summary>
+        private void SendToNetwork()
+        {
+            List<ImportCandidate> rows = SelectedRows().Where(r => r.Action == ImportKind.Pipe || r.Action == ImportKind.Box || r.Action == ImportKind.Structure).ToList();
+            Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
+            if (doc == null || rows.Count == 0) { SetStatus("Select pipe, box culvert or structure rows first.", true); return; }
+            const string automatic = "(as set in Options)", newOne = "New network…";
+            List<string> choices = new List<string> { automatic };
+            choices.AddRange(DrawingNetworkNames(doc));
+            choices.Add(newOne);
+            using (Form f = new Form { Text = "Send to network", Font = StyleUi.Base, BackColor = StyleUi.Surface, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(380, 420), MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false })
+            {
+                ListBox list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
+                list.Items.AddRange(choices.Cast<object>().ToArray());
+                string current = _session.NetworkOverrides.TryGetValue(rows[0], out string o) ? o : automatic;
+                list.SelectedIndex = Math.Max(0, choices.FindIndex(c => c.Equals(current, StringComparison.OrdinalIgnoreCase)));
+                TextBox name = new TextBox { Dock = DockStyle.Bottom, PlaceholderText = "Name of the new network", Visible = false };
+                list.SelectedIndexChanged += (s, e) => name.Visible = (list.SelectedItem as string) == newOne;
+                Button ok = StyleUi.Primary("Send", (s, e) => f.DialogResult = DialogResult.OK);
+                FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft, Padding = new Padding(8) };
+                buttons.Controls.Add(ok);
+                buttons.Controls.Add(StyleUi.Secondary("Cancel", (s, e) => f.DialogResult = DialogResult.Cancel));
+                Label head = new Label { Dock = DockStyle.Top, AutoSize = false, Height = 34, Padding = new Padding(8, 8, 8, 0), Text = $"{rows.Count} row(s) go to:" };
+                list.DoubleClick += (s, e) => { if ((list.SelectedItem as string) != newOne) f.DialogResult = DialogResult.OK; };
+                f.Controls.Add(list);
+                f.Controls.Add(name);
+                f.Controls.Add(head);
+                f.Controls.Add(buttons);
+                f.AcceptButton = ok;
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                string pick = list.SelectedItem as string ?? automatic;
+                if (pick == newOne) pick = name.Text.Trim();
+                foreach (ImportCandidate r in rows)
+                {
+                    if (pick.Length == 0 || pick == automatic) _session.NetworkOverrides.Remove(r);
+                    else _session.NetworkOverrides[r] = pick;
+                    _session.Ticked.Add(r);
+                }
+            }
+            RefreshNetworks();
+        }
+
         private void SetStatus(string text, bool warn = false)
         {
             _status.Text = text;
@@ -1348,6 +1468,9 @@ namespace C3DProTools
                 "The Error column shows how far the chosen size is from the Navisworks one.\n" +
                 "4. Change \"Import as\" for any row (pipe, box culvert, structure, exact 3D solid, or skip), preview it in the drawing, " +
                 "then Import ticked. A confirmation lists everything that will be added; UNDO reverses the import.\n\n" +
+                "Networks: by default parts join a network already in the drawing when the model names it, or when their pipe ends meet its " +
+                "structures; they connect to its structures, new sizes go into its own parts list, and parts already drawn there are left out. " +
+                "Right-click rows to send them to another network.\n\n" +
                 "Twin and multi-barrel culverts become one pipe per barrel. Headwalls come in as exact solids. " +
                 "Imported objects remember their Navisworks item: importing again replaces them, and \"Show in Navisworks\" finds the source.",
                 "Navisworks Import", MessageBoxButtons.OK, MessageBoxIcon.Information);

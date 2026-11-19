@@ -35,6 +35,16 @@ namespace C3DProTools
         public CatalogMode Mode = CatalogMode.None;
         /// <summary>Family and size picked by the user for a row, from any parts list; never replaced by the automatic match.</summary>
         public Dictionary<ImportCandidate, (ObjectId family, ObjectId size)> Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>();
+        /// <summary>Where network parts go: matching drawing networks (Auto), <see cref="ChosenNetwork"/>, or new networks.</summary>
+        public DestinationMode Destination = DestinationMode.Auto;
+        public string ChosenNetwork = "";
+        /// <summary>Network picked by the user for a row (an existing name, or a new one); wins over <see cref="Destination"/>.</summary>
+        public Dictionary<ImportCandidate, string> NetworkOverrides = new Dictionary<ImportCandidate, string>();
+        /// <summary>
+        /// Every row of the selection (not only those imported now): destinations are decided on all of them, so unticking a
+        /// row that links others to a drawing network does not send them elsewhere than the confirmation showed.
+        /// </summary>
+        public List<ImportCandidate> ContextRows;
     }
 
     /// <summary>What happened (or, in a plan, would happen) to one row.</summary>
@@ -49,6 +59,8 @@ namespace C3DProTools
         /// <summary>No catalog size was close enough, so the row is brought in as its exact solid.</summary>
         public bool AsSolid;
         public bool Overridden;
+        /// <summary>The same part is already drawn in the destination network: it is not imported.</summary>
+        public bool InDrawing;
         public readonly List<ObjectId> Created = new List<ObjectId>();
     }
 
@@ -64,6 +76,10 @@ namespace C3DProTools
         /// <summary>Method B: sizes that will be (plan) or were (import) added to stock catalog families.</summary>
         public readonly List<string> CatalogAdditions = new List<string>();
         public readonly List<string> CatalogNotes = new List<string>();
+        /// <summary>The network each pipe, box and structure row goes to, and why.</summary>
+        public Dictionary<ImportCandidate, RowDestination> Destinations = new Dictionary<ImportCandidate, RowDestination>();
+        /// <summary>The editable networks of the drawing (names), for choosing a destination.</summary>
+        public readonly List<string> DrawingNetworks = new List<string>();
     }
 
     /// <summary>Creates Civil 3D pipes, structures and solids from import rows. <see cref="Plan"/> runs the same matching in a
@@ -107,21 +123,52 @@ namespace C3DProTools
                 try
                 {
                     NavisCatalogContext catalogs = o.Mode == CatalogMode.None ? new NavisCatalogContext() : NavisCatalogContext.Resolve();
-                    NavisPartMatcher matcher = new NavisPartMatcher(tr, cdoc, o.PartsListName, o.Mode, catalogs);
-                    if (o.Mode == CatalogMode.AnySize && !(matcher.AnySizeAvailable("box") && matcher.AnySizeAvailable("rect")))
-                        report.CatalogNotes.Add("The C3D Pro any-size families are not loaded in this Civil 3D session yet (restart Civil 3D once after setting them up); the nearest catalog sizes are used meanwhile.");
-                    report.CreatesPartsList = matcher.CreatedPartsList;
-                    report.CatalogPipeFamilies = matcher.CatalogPipeFamilies;
-                    report.CatalogStructureFamilies = matcher.CatalogStructureFamilies;
+                    // Where each network row goes: a drawing network it belongs to (its parts list takes the sizes), or a new one.
+                    List<DrawingNetwork> drawingNetworks = ReadNetworks(tr, cdoc, s, out _);
+                    report.DrawingNetworks.AddRange(drawingNetworks.Where(n => n.Editable).Select(n => n.Name));
+                    report.Destinations = NavisDestination.Decide(o.ContextRows ?? rows, drawingNetworks, o.Destination, o.ChosenNetwork, r => NetworkFor(r, o), o.NetworkOverrides);
+                    string ListFor(ImportCandidate c)
+                    {
+                        if (!report.Destinations.TryGetValue(c, out RowDestination d) || !d.Existing) return o.PartsListName;
+                        string own = drawingNetworks.First(n => n.Name.Equals(d.Network, StringComparison.OrdinalIgnoreCase)).PartsList;
+                        return string.IsNullOrEmpty(own) ? o.PartsListName : own;
+                    }
+                    // One matcher per parts list, made when a row first needs it (so no list is made that nothing uses).
+                    Dictionary<string, NavisPartMatcher> matchers = new Dictionary<string, NavisPartMatcher>(StringComparer.OrdinalIgnoreCase);
+                    NavisPartMatcher MatcherFor(ImportCandidate c)
+                    {
+                        string list = ListFor(c);
+                        if (matchers.TryGetValue(list, out NavisPartMatcher m)) return m;
+                        m = matchers[list] = new NavisPartMatcher(tr, cdoc, list, o.Mode, catalogs);
+                        if (matchers.Count == 1)
+                        {
+                            if (o.Mode == CatalogMode.AnySize && !(m.AnySizeAvailable("box") && m.AnySizeAvailable("rect")))
+                                report.CatalogNotes.Add("The C3D Pro any-size families are not loaded in this Civil 3D session yet (restart Civil 3D once after setting them up); the nearest catalog sizes are used meanwhile.");
+                            report.CatalogPipeFamilies = m.CatalogPipeFamilies;
+                            report.CatalogStructureFamilies = m.CatalogStructureFamilies;
+                        }
+                        if (m.CreatedPartsList) report.CreatesPartsList = true;
+                        return m;
+                    }
 
                     Dictionary<ImportCandidate, PartChoice> parts = new Dictionary<ImportCandidate, PartChoice>();
-                    List<(Autodesk.Civil.DatabaseServices.Styles.PartFamily fam, Autodesk.Civil.DatabaseServices.Styles.PartSize size, string list)> drawingSizes =
-                        o.SearchDrawingLists ? DrawingSizes(tr, cdoc, matcher.PartsListId) : new List<(Autodesk.Civil.DatabaseServices.Styles.PartFamily, Autodesk.Civil.DatabaseServices.Styles.PartSize, string)>();
+                    Dictionary<ImportCandidate, NavisPartMatcher> rowMatcher = new Dictionary<ImportCandidate, NavisPartMatcher>();
+                    var drawingSizes = o.SearchDrawingLists ? DrawingSizes(tr, cdoc, ObjectId.Null) : new List<(Autodesk.Civil.DatabaseServices.Styles.PartFamily, Autodesk.Civil.DatabaseServices.Styles.PartSize, string)>();
                     foreach (ImportCandidate c in rows)
                     {
                         RowOutcome outcome = report.Rows[c] = new RowOutcome { Row = c };
                         if (c.Action == ImportKind.Skip) { outcome.Status = "Skipped"; continue; }
                         if (c.Action == ImportKind.Solid) { outcome.Family = "3D solid"; outcome.Size = $"{c.Source.Triangles.Length / 9} triangles"; outcome.Status = "Solid"; continue; }
+                        if (report.Destinations.TryGetValue(c, out RowDestination dest) && dest.InDrawing)
+                        {
+                            outcome.InDrawing = true;
+                            outcome.Status = "Already in drawing";
+                            outcome.Detail = $"\"{dest.InDrawingPart}\" of {dest.Network} is already here; not imported. Send the row to another network to import it anyway.";
+                            continue;
+                        }
+                        NavisPartMatcher matcher = rowMatcher[c] = MatcherFor(c);
+                        string listName = ListFor(c);
+                        bool intoExisting = dest != null && dest.Existing;
                         PartChoice p;
                         if (o.Overrides.TryGetValue(c, out (ObjectId family, ObjectId size) chosen)
                             && !chosen.family.IsNull && !chosen.size.IsNull
@@ -131,7 +178,19 @@ namespace C3DProTools
                             p = NavisPartMatcher.Evaluate(fam, size, c);
                             outcome.Overridden = true;
                         }
-                        else p = ExactInDrawing(drawingSizes, c) ?? (c.IsLinear ? matcher.MatchLinear(c) : matcher.MatchStructure(c));
+                        else if (!intoExisting) p = ExactInDrawing(drawingSizes, c) ?? (c.IsLinear ? matcher.MatchLinear(c) : matcher.MatchStructure(c));
+                        else
+                        {
+                            // Into a drawing network: a size its own parts list has, else the catalog (added to that list), else
+                            // an exact size from another list of the drawing.
+                            p = ExactInDrawing(drawingSizes.Where(x => x.Item3.Equals(listName, StringComparison.OrdinalIgnoreCase)).ToList(), c);
+                            if (p == null)
+                            {
+                                p = c.IsLinear ? matcher.MatchLinear(c) : matcher.MatchStructure(c);
+                                if (p.Pending == null && (p.SizeId.IsNull || p.Deviation > NavisInterpreter.HighTolerance))
+                                    p = ExactInDrawing(drawingSizes, c) ?? p;
+                            }
+                        }
 
                         // Method B on import: write the missing size into the catalog family, then match the row again.
                         if (p.Pending != null && commit) p = AddToCatalog(matcher, c, p, report, catalogChanges);
@@ -169,10 +228,15 @@ namespace C3DProTools
 
                     // Only list what imported parts will really use; the rest is removed again on import.
                     HashSet<ObjectId> used = new HashSet<ObjectId>(parts.Where(kv => !report.Rows[kv.Key].AsSolid && !kv.Value.SizeId.IsNull).Select(kv => kv.Value.SizeId));
-                    report.AddedSizes.AddRange(matcher.CreatedSizes.Where(s => used.Contains(s.Key)).Select(s => s.Value.label).Distinct());
                     HashSet<ObjectId> usedFamilies = new HashSet<ObjectId>(parts.Where(kv => used.Contains(kv.Value.SizeId)).Select(kv => kv.Value.FamilyId));
-                    report.AddedFamilies.AddRange(matcher.CreatedFamilies.Where(f => usedFamilies.Contains(f.Key)).Select(f => f.Value).Distinct());
-                    report.Networks.AddRange(rows.Where(r => r.Action != ImportKind.Skip && r.Action != ImportKind.Solid && !report.Rows[r].AsSolid).Select(r => NetworkFor(r, o)).Distinct());
+                    foreach (KeyValuePair<string, NavisPartMatcher> m in matchers)
+                    {
+                        report.AddedSizes.AddRange(m.Value.CreatedSizes.Where(x => used.Contains(x.Key)).Select(x => $"{x.Value.label}  →  {m.Key}").Distinct());
+                        report.AddedFamilies.AddRange(m.Value.CreatedFamilies.Where(f => usedFamilies.Contains(f.Key)).Select(f => $"{f.Value}  →  {m.Key}").Distinct());
+                    }
+                    report.Networks.AddRange(rows.Where(r => r.Action != ImportKind.Skip && r.Action != ImportKind.Solid && !report.Rows[r].AsSolid && !report.Rows[r].InDrawing)
+                        .Select(r => report.Destinations[r]).GroupBy(d => d.Network, StringComparer.OrdinalIgnoreCase)
+                        .Select(g => g.First().Existing ? $"{g.Key}  (in the drawing: {g.First().Reason})" : $"{g.Key}  (new)"));
 
                     if (!commit)
                     {
@@ -180,8 +244,9 @@ namespace C3DProTools
                         return report;
                     }
 
-                    Create(tr, db, cdoc, rows, parts, report, o, matcher.PartsListId, s);
-                    matcher.Prune(new HashSet<ObjectId>(parts.Where(kv => !report.Rows[kv.Key].AsSolid).Select(kv => kv.Value.SizeId)));
+                    Create(tr, db, cdoc, rows, parts, report, o, r => rowMatcher.TryGetValue(r, out NavisPartMatcher m) ? m.PartsListId : ObjectId.Null, s);
+                    HashSet<ObjectId> kept = new HashSet<ObjectId>(parts.Where(kv => !report.Rows[kv.Key].AsSolid).Select(kv => kv.Value.SizeId));
+                    foreach (NavisPartMatcher m in matchers.Values) m.Prune(kept);
                     tr.Commit();
                     catalogChanges.Clear();
                 }
@@ -298,19 +363,29 @@ namespace C3DProTools
         }
 
         private static void Create(Transaction tr, Database db, CivilDocument cdoc, List<ImportCandidate> rows, Dictionary<ImportCandidate, PartChoice> parts,
-            ImportReport report, NavisImportOptions o, ObjectId partsListId, double s)
+            ImportReport report, NavisImportOptions o, Func<ImportCandidate, ObjectId> partsListOf, double s)
         {
             RegisterApp(tr, db);
             Dictionary<string, List<ObjectId>> existing = FindExisting(tr, db);
             ObjectId msId = SymbolUtilityServices.GetBlockModelSpaceId(db);
             Dictionary<string, ObjectId> networks = new Dictionary<string, ObjectId>(StringComparer.OrdinalIgnoreCase);
-            // Structures by network and Navisworks name, so pipes can find the structures they were connected to.
-            Dictionary<string, Dictionary<string, (ObjectId id, ImportCandidate row)>> structures = new Dictionary<string, Dictionary<string, (ObjectId, ImportCandidate)>>();
+            // Structures by network and name, so pipes can find the structures they were connected to: the drawing network's
+            // own structures first (a pipe joins the manhole already there), then the imported ones.
+            Dictionary<string, Dictionary<string, StructTarget>> structures = new Dictionary<string, Dictionary<string, StructTarget>>(StringComparer.OrdinalIgnoreCase);
+            List<DrawingNetwork> drawingNetworks = ReadNetworks(tr, cdoc, s, out Dictionary<DrawingStructure, ObjectId> structureIds);
+            foreach (string name in report.Destinations.Values.Where(d => d.Existing).Select(d => d.Network).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                DrawingNetwork n = drawingNetworks.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (n == null) continue;
+                var byName = structures[n.Name] = new Dictionary<string, StructTarget>(StringComparer.OrdinalIgnoreCase);
+                foreach (DrawingStructure d in n.Structures) byName[d.Name] = new StructTarget { Id = structureIds[d], Drawn = d };
+            }
 
             // Structures first, so pipes can connect to them.
             foreach (ImportCandidate c in rows.Where(r => r.Action == ImportKind.Structure).Concat(rows.Where(r => r.IsLinear)).Concat(rows.Where(r => r.Action == ImportKind.Solid)))
             {
                 RowOutcome outcome = report.Rows[c];
+                if (outcome.InDrawing) continue;
                 if (!PrepareExisting(c, existing, o, outcome, out List<ObjectId> replaced)) continue;
                 bool asSolid = c.Action == ImportKind.Solid || outcome.AsSolid;
                 PartChoice p = asSolid ? null : parts[c];
@@ -325,7 +400,7 @@ namespace C3DProTools
                 // all of it is kept only when the row succeeds. A row that fails leaves the drawing as it was, including any
                 // object Civil 3D made before the error.
                 int before = outcome.Created.Count;
-                string netName = asSolid ? null : NetworkFor(c, o);
+                string netName = asSolid ? null : report.Destinations[c].Network;
                 bool newNetwork = false;
                 using (Transaction t = tr.TransactionManager.StartTransaction())
                 {
@@ -340,7 +415,7 @@ namespace C3DProTools
                         }
                         else
                         {
-                            if (!networks.TryGetValue(netName, out ObjectId netId)) { networks[netName] = netId = EnsureNetwork(t, cdoc, netName, partsListId, o.SurfaceId); newNetwork = true; }
+                            if (!networks.TryGetValue(netName, out ObjectId netId)) { networks[netName] = netId = EnsureNetwork(t, cdoc, netName, partsListOf(c), o.SurfaceId); newNetwork = true; }
                             Network network = (Network)t.GetObject(netId, OpenMode.ForWrite);
                             if (c.Action == ImportKind.Structure)
                             {
@@ -379,8 +454,8 @@ namespace C3DProTools
                 // Pipes connect only to structures whose rows were kept.
                 if (!asSolid && c.Action == ImportKind.Structure && outcome.Created.Count > before)
                 {
-                    if (!structures.TryGetValue(netName, out var byName)) structures[netName] = byName = new Dictionary<string, (ObjectId, ImportCandidate)>(StringComparer.OrdinalIgnoreCase);
-                    byName[c.Name] = (outcome.Created[before], c);
+                    if (!structures.TryGetValue(netName, out var byName)) structures[netName] = byName = new Dictionary<string, StructTarget>(StringComparer.OrdinalIgnoreCase);
+                    byName[c.Name] = new StructTarget { Id = outcome.Created[before], Row = c };
                 }
             }
         }
@@ -485,7 +560,7 @@ namespace C3DProTools
 
         /// <summary>Connects each pipe end to the structure it was connected to in the source (by name), or to the one it sits inside.
         /// The pipe's 3D ends are put back afterwards, because connecting can snap them.</summary>
-        private static void Connect(Transaction tr, ObjectId pipeId, ImportCandidate c, Dictionary<string, (ObjectId id, ImportCandidate row)> structures, double s, RowOutcome outcome)
+        private static void Connect(Transaction tr, ObjectId pipeId, ImportCandidate c, Dictionary<string, StructTarget> structures, double s, RowOutcome outcome)
         {
             Pipe pipe = (Pipe)tr.GetObject(pipeId, OpenMode.ForWrite);
             Point3d start = pipe.StartPoint, end = pipe.EndPoint;
@@ -498,8 +573,8 @@ namespace C3DProTools
             })
             {
                 ObjectId target = ObjectId.Null;
-                if (!string.IsNullOrEmpty(sourceName) && structures.TryGetValue(sourceName, out var named) && Contains(named.row, pt, s, 1.0)) target = named.id;
-                if (target.IsNull && !byName) target = structures.Values.Where(x => Contains(x.row, pt, s, 0.05)).Select(x => x.id).FirstOrDefault();
+                if (!string.IsNullOrEmpty(sourceName) && structures.TryGetValue(sourceName, out var named) && !named.Id.IsErased && named.Holds(pt, s, 1.0)) target = named.Id;
+                if (target.IsNull && !byName) target = structures.Values.Where(x => !x.Id.IsErased && x.Holds(pt, s, x.Drawn != null ? NavisDestination.EndMargin : 0.05)).Select(x => x.Id).FirstOrDefault();
                 // Both ends of one pipe never go to the same structure (Civil 3D refuses it).
                 if (target.IsNull || target == used) continue;
                 used = target;
@@ -513,6 +588,74 @@ namespace C3DProTools
             }
             if (!pipe.StartPoint.IsEqualTo(start)) pipe.StartPoint = start;
             if (!pipe.EndPoint.IsEqualTo(end)) pipe.EndPoint = end;
+        }
+
+        /// <summary>A structure a pipe may connect to: imported in this run (its row) or already in the drawing network.</summary>
+        private sealed class StructTarget
+        {
+            public ObjectId Id;
+            public ImportCandidate Row;
+            public DrawingStructure Drawn;
+            public bool Holds(Point3d pt, double s, double margin) =>
+                Row != null ? Contains(Row, pt, s, margin) : NavisDestination.Holds(Drawn, new V3(pt.X / s, pt.Y / s, pt.Z / s), margin);
+        }
+
+        /// <summary>
+        /// The drawing's pipe networks as plain data in metres: editable or not, parts list, structures and pipes. Parts of an
+        /// earlier Navisworks import are marked Imported: a pipe may connect to them, but they never decide a destination or
+        /// count as "already drawn" (re-importing handles them).
+        /// </summary>
+        internal static List<DrawingNetwork> ReadNetworks(Transaction tr, CivilDocument cdoc, double s, out Dictionary<DrawingStructure, ObjectId> structureIds)
+        {
+            structureIds = new Dictionary<DrawingStructure, ObjectId>();
+            var list = new List<DrawingNetwork>();
+            foreach (ObjectId nid in cdoc.GetPipeNetworkIds())
+            {
+                if (!(tr.GetObject(nid, OpenMode.ForRead) is Network net)) continue;
+                var n = new DrawingNetwork { Name = net.Name };
+                try { n.Editable = !net.IsReferenceObject; } catch (Exception) { n.Editable = true; }
+                try { if (!net.PartsListId.IsNull && tr.GetObject(net.PartsListId, OpenMode.ForRead) is Autodesk.Civil.DatabaseServices.Styles.PartsList pl) n.PartsList = pl.Name; }
+                catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                foreach (ObjectId id in net.GetStructureIds())
+                {
+                    try
+                    {
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is CivilStructure st)) continue;
+                        bool circular = st.BoundingShape == BoundingShapeType.Cylinder;
+                        double outer = Math.Max(st.DiameterOrWidth, st.InnerDiameterOrWidth) / s, length = Math.Max(st.Length, st.InnerLength) / s;
+                        if (outer <= 0) outer = 1.0;
+                        if (length <= 0) length = outer;
+                        // The width runs along the structure's own X axis (its rotation), the length across it.
+                        var d = new DrawingStructure
+                        {
+                            Name = st.Name, X = st.Location.X / s, Y = st.Location.Y / s, Rotation = st.Rotation, Rim = st.RimElevation / s, Sump = st.SumpElevation / s,
+                            Circular = circular, Diameter = outer, Length = outer, Width = length, Imported = st.GetXDataForApplication(RegApp) != null
+                        };
+                        n.Structures.Add(d);
+                        structureIds[d] = id;
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
+                foreach (ObjectId id in net.GetPipeIds())
+                {
+                    try
+                    {
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
+                        var d = new DrawingPipe
+                        {
+                            Name = p.Name, Start = new V3(p.StartPoint.X / s, p.StartPoint.Y / s, p.StartPoint.Z / s), End = new V3(p.EndPoint.X / s, p.EndPoint.Y / s, p.EndPoint.Z / s),
+                            Outer = p.OuterDiameterOrWidth / s, Curved = p.SubEntityType == PipeSubEntityType.Curved, Imported = p.GetXDataForApplication(RegApp) != null
+                        };
+                        if (d.Curved && PipeArcGeometry.TryGetGravityArc(p, out ArcInfo arc)
+                            && NetworkEditOps.TryOffsetArc(p.StartPoint, p.EndPoint, arc, 0, out _, out _, out Point2d center, out bool clockwise))
+                        { d.HasCenter = true; d.CenterX = center.X / s; d.CenterY = center.Y / s; d.Clockwise = clockwise; }
+                        n.Pipes.Add(d);
+                    }
+                    catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                }
+                list.Add(n);
+            }
+            return list;
         }
 
         /// <summary>True when a point (drawing units) lies within a structure's measured footprint, plus a margin in metres.</summary>

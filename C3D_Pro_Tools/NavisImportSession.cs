@@ -2,6 +2,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using C3DProTools.NavisLink;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Document = Autodesk.AutoCAD.ApplicationServices.Document;
 
 namespace C3DProTools
@@ -21,6 +22,10 @@ namespace C3DProTools
         public HashSet<ImportCandidate> Ticked { get; } = new HashSet<ImportCandidate>();
         /// <summary>Family and size the user picked for a row; the automatic match never replaces these.</summary>
         public Dictionary<ImportCandidate, (ObjectId family, ObjectId size)> Overrides { get; } = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>();
+        /// <summary>Network the user sent a row to; wins over the destination setting.</summary>
+        public Dictionary<ImportCandidate, string> NetworkOverrides { get; } = new Dictionary<ImportCandidate, string>();
+        /// <summary>The network each row goes to, from the last matching.</summary>
+        public Dictionary<ImportCandidate, RowDestination> Destinations { get; set; } = new Dictionary<ImportCandidate, RowDestination>();
         /// <summary>Navisworks GUIDs already imported into <see cref="Document"/>.</summary>
         public HashSet<string> Existing { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>The Navisworks model the rows came from.</summary>
@@ -39,8 +44,10 @@ namespace C3DProTools
         {
             droppedChoices = false;
             if (doc == Document) return false;
-            droppedChoices = Overrides.Count > 0;
+            droppedChoices = Overrides.Count > 0 || NetworkOverrides.Count > 0;
             Overrides.Clear();
+            NetworkOverrides.Clear();
+            Destinations.Clear();
             Plan.Clear();
             Done.Clear();
             Document = doc;
@@ -54,6 +61,8 @@ namespace C3DProTools
             if (doc == null || Document != doc) return false;
             Document = null;
             Overrides.Clear();
+            NetworkOverrides.Clear();
+            Destinations.Clear();
             Plan.Clear();
             Done.Clear();
             return true;
@@ -67,7 +76,7 @@ namespace C3DProTools
         public void Load(NavisResponse response)
         {
             SourceDocument = response.Document;
-            Rows.Clear(); Plan.Clear(); Done.Clear(); Ticked.Clear(); Overrides.Clear();
+            Rows.Clear(); Plan.Clear(); Done.Clear(); Ticked.Clear(); Overrides.Clear(); NetworkOverrides.Clear(); Destinations.Clear();
             foreach (NavisElement e in response.Elements)
             {
                 ImportCandidate c;
@@ -85,6 +94,28 @@ namespace C3DProTools
                 Rows.Add(c);
                 if (c.Action != ImportKind.Skip) Ticked.Add(c);
             }
+        }
+
+        /// <summary>Where the last Navisworks selection is kept, so a run can be repeated without Navisworks (tests, problem reports).</summary>
+        public static string LastSelectionPath => System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "NavisLastSelection.json");
+
+        /// <summary>Best effort: keeps the selection just read (never stops the tool).</summary>
+        public static void SaveSelection(NavisResponse response)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(LastSelectionPath));
+                using (System.IO.FileStream f = System.IO.File.Create(LastSelectionPath))
+                    new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(NavisResponse)).WriteObject(f, response);
+            }
+            catch (Exception ex) { C3DProLogger.Warn("Navisworks Import: the selection could not be saved", ex); }
+        }
+
+        public static NavisResponse LoadSelection(string path)
+        {
+            using (System.IO.FileStream f = System.IO.File.OpenRead(path))
+                return (NavisResponse)new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(NavisResponse)).ReadObject(f);
         }
 
         /// <summary>Takes in what an import did: its outcomes, and the drawing's imported items read again.</summary>
@@ -109,7 +140,11 @@ namespace C3DProTools
             SolidWhenNoSize = Settings.NoSizeMode == 0,
             SearchDrawingLists = Settings.SearchDrawingLists,
             Mode = (CatalogMode)Math.Max(0, Math.Min(2, Settings.SizeMode)),
-            Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(Overrides)
+            Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(Overrides),
+            Destination = (DestinationMode)Math.Max(0, Math.Min(2, Settings.Destination)),
+            ChosenNetwork = Settings.ChosenNetwork ?? "",
+            NetworkOverrides = new Dictionary<ImportCandidate, string>(NetworkOverrides),
+            ContextRows = Rows.Where(r => r.Action != ImportKind.Skip).ToList()
         };
     }
 }
