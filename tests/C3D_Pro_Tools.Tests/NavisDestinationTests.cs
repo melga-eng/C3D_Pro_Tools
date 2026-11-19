@@ -73,6 +73,52 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void SameEnds_ButCurvedOrOtherSize_IsNotTheDrawnPipe()
+        {
+            ImportCandidate curved = Pipe("Curved", new V3(0.75, 0, 9), new V3(49.25, 0, 9), "ICT-124");
+            curved.CurveRadius = 120; curved.CurveMid = new V3(25, 3, 9);
+            Assert.False(Decide(DestinationMode.Auto, "", curved)[curved].InDrawing);
+
+            var net = Ict();
+            net.Pipes[0].Outer = 0.16;
+            ImportCandidate wide = Pipe("Wide", new V3(0.75, 0, 9), new V3(49.25, 0, 9), "ICT-124");
+            wide.OuterWidth = 0.6;
+            Assert.False(NavisDestination.Decide(new[] { wide }, new List<DrawingNetwork> { net }, DestinationMode.Auto, "", r => "N")[wide].InDrawing);
+        }
+
+        [Fact]
+        public void StructureAtTheSamePlaceButAnotherLevel_IsNotTheDrawnOne()
+        {
+            ImportCandidate s = new ImportCandidate { Name = "MH", X = 50, Y = 0, Rim = 4, Sump = 2, Detected = ImportKind.Structure, Action = ImportKind.Structure };
+            Assert.False(Decide(DestinationMode.Auto, "", s)[s].InDrawing);
+        }
+
+        [Fact]
+        public void EarlierImports_NeverDecideTheDestination()
+        {
+            var net = Ict();
+            foreach (DrawingStructure st in net.Structures) st.Imported = true;
+            foreach (DrawingPipe dp in net.Pipes) dp.Imported = true;
+            ImportCandidate p = Pipe("Duct", new V3(50.6, 0.2, 9), new V3(80, 0, 9));
+            var d = NavisDestination.Decide(new[] { p }, new List<DrawingNetwork> { net }, DestinationMode.Auto, "", r => "NAVIS - Import")[p];
+            Assert.False(d.Existing);
+            // Nor does carrying on from an earlier import's pipe end (either end).
+            ImportCandidate q = Pipe("Carry", new V3(49.3, 0.05, 9), new V3(49.3, -30, 9));
+            Assert.False(NavisDestination.Decide(new[] { q }, new List<DrawingNetwork> { net }, DestinationMode.Auto, "", r => "NAVIS - Import")[q].Existing);
+        }
+
+        [Fact]
+        public void TwoSourceNetworksOnOneLayer_EachGoesToItsOwn()
+        {
+            var mv = new DrawingNetwork { Name = "MV" };
+            ImportCandidate a = Pipe("A", new V3(500, 0, 9), new V3(520, 0, 9), "ICT-124");
+            ImportCandidate b = Pipe("B", new V3(600, 0, 9), new V3(620, 0, 9), "MV");
+            var all = NavisDestination.Decide(new[] { a, b }, new List<DrawingNetwork> { Ict(), mv }, DestinationMode.Auto, "", r => "NAVIS - LAYER");
+            Assert.Equal("ICT-124", all[a].Network);
+            Assert.Equal("MV", all[b].Network);
+        }
+
+        [Fact]
         public void Auto_NothingInCommon_MakesANewNetwork()
         {
             ImportCandidate p = Pipe("Far", new V3(500, 0, 9), new V3(520, 0, 9));

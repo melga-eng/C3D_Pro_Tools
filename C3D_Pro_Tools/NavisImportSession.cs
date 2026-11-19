@@ -2,6 +2,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using C3DProTools.NavisLink;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Document = Autodesk.AutoCAD.ApplicationServices.Document;
 
 namespace C3DProTools
@@ -142,7 +143,8 @@ namespace C3DProTools
             Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(Overrides),
             Destination = (DestinationMode)Math.Max(0, Math.Min(2, Settings.Destination)),
             ChosenNetwork = Settings.ChosenNetwork ?? "",
-            NetworkOverrides = new Dictionary<ImportCandidate, string>(NetworkOverrides)
+            NetworkOverrides = new Dictionary<ImportCandidate, string>(NetworkOverrides),
+            ContextRows = Rows.Where(r => r.Action != ImportKind.Skip).ToList()
         };
     }
 }

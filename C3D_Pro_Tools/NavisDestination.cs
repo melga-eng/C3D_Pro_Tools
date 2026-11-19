@@ -15,6 +15,8 @@ namespace C3DProTools
         public bool Circular;
         /// <summary>Plan size: diameter (circular), or length along <see cref="Rotation"/> and width across it.</summary>
         public double Diameter, Length, Width;
+        /// <summary>Made by an earlier Navisworks import: a pipe may connect to it, but it never decides the destination.</summary>
+        public bool Imported;
     }
 
     /// <summary>A pipe already in the drawing: its centreline ends, in metres.</summary>
@@ -22,6 +24,13 @@ namespace C3DProTools
     {
         public string Name = "";
         public V3 Start, End;
+        /// <summary>Outer diameter or width in metres (0 = unknown).</summary>
+        public double Outer;
+        public bool Curved;
+        /// <summary>A curved pipe's arc centre in plan and its turn; HasCenter false when it could not be read.</summary>
+        public bool HasCenter, Clockwise;
+        public double CenterX, CenterY;
+        public bool Imported;
     }
 
     /// <summary>A pipe network already in the drawing. Only an editable one (not a data-shortcut reference) takes new parts.</summary>
@@ -87,14 +96,20 @@ namespace C3DProTools
 
             foreach (IGrouping<string, ImportCandidate> group in auto.GroupBy(newNetworkName, StringComparer.OrdinalIgnoreCase))
             {
-                // 1. The source network has the name of a drawing network (a model exported from this project).
-                DrawingNetwork byName = group.Select(r => Find(r.Network)).FirstOrDefault(n => n != null);
-                if (byName != null) { foreach (ImportCandidate r in group) result[r] = To(byName.Name, "same network name"); continue; }
+                // 1. A row whose own source network has the name of a drawing network (a model exported from this project)
+                //    goes there; each row by its own name, so two source networks sharing a layer are never merged.
+                var unnamed = new List<ImportCandidate>();
+                foreach (ImportCandidate r in group)
+                {
+                    DrawingNetwork byName = Find(r.Network);
+                    if (byName != null) result[r] = To(byName.Name, "same network name");
+                    else unnamed.Add(r);
+                }
 
                 // 2. Each linked run of parts (pipes meeting each other or the group's structures) whose pipe ends meet the
                 //    structures of a drawing network, or whose structures stand where that network's do, joins it. Parts far
                 //    from it in the same group are not dragged along.
-                foreach (List<ImportCandidate> run in Runs(group.ToList()))
+                foreach (List<ImportCandidate> run in Runs(unnamed))
                 {
                     DrawingNetwork best = null;
                     int bestHits = 0;
@@ -153,7 +168,7 @@ namespace C3DProTools
                 if (r.Action == ImportKind.Structure) continue;
                 // A pipe end in one of its structures, or meeting one of its pipes' ends (a duct carried on).
                 foreach (V3 end in Ends(r))
-                    if (StructureAt(n, end) != null || n.Pipes.Any(p => Dist(p.Start, end) <= 2 * EndMargin || Dist(p.End, end) <= 2 * EndMargin)) hits++;
+                    if (StructureAt(n, end) != null || n.Pipes.Any(p => !p.Imported && (Dist(p.Start, end) <= 2 * EndMargin || Dist(p.End, end) <= 2 * EndMargin))) hits++;
             }
             return hits;
         }
@@ -162,7 +177,7 @@ namespace C3DProTools
         internal static DrawingStructure StructureAt(DrawingNetwork n, V3 p)
         {
             foreach (DrawingStructure s in n.Structures)
-                if (Holds(s, p, EndMargin)) return s;
+                if (!s.Imported && Holds(s, p, EndMargin)) return s;
             return null;
         }
 
@@ -179,18 +194,41 @@ namespace C3DProTools
         internal static string SamePart(ImportCandidate r, DrawingNetwork n)
         {
             if (n == null) return null;
+            // Same place and same levels (a structure stacked above another one is not it).
             if (r.Action == ImportKind.Structure)
-                return n.Structures.FirstOrDefault(s => Plan(s.X, s.Y, r.X, r.Y) <= SameTolerance)?.Name;
+                return n.Structures.FirstOrDefault(s => !s.Imported && Plan(s.X, s.Y, r.X, r.Y) <= SameTolerance && Math.Abs(s.Rim - r.Rim) <= SameTolerance)?.Name;
             // Every barrel must already be drawn.
             string first = null;
             foreach ((V3 a, V3 b) in BarrelEnds(r))
             {
-                DrawingPipe p = n.Pipes.FirstOrDefault(d => (Dist(d.Start, a) <= SameTolerance && Dist(d.End, b) <= SameTolerance)
-                                                         || (Dist(d.Start, b) <= SameTolerance && Dist(d.End, a) <= SameTolerance));
+                DrawingPipe p = n.Pipes.FirstOrDefault(d => !d.Imported && SameShape(r, d)
+                    && ((Dist(d.Start, a) <= SameTolerance && Dist(d.End, b) <= SameTolerance) || (Dist(d.Start, b) <= SameTolerance && Dist(d.End, a) <= SameTolerance)));
                 if (p == null) return null;
                 first = first ?? p.Name;
             }
             return first;
+        }
+
+        /// <summary>Same section size (within 25 mm when both are known), and both straight or both the same arc.</summary>
+        private static bool SameShape(ImportCandidate r, DrawingPipe d)
+        {
+            if (d.Outer > 0 && r.OuterWidth > 0 && Math.Abs(d.Outer - r.OuterWidth) > NavisInterpreter.MediumTolerance) return false;
+            if (r.IsCurved != d.Curved) return false;
+            if (!r.IsCurved) return true;
+            if (!d.HasCenter || r.Barrels.Count > 1 || d.Clockwise != r.CurveClockwise) return false;
+            (double cx, double cy)? c = Center(r.Start, r.CurveMid, r.End);
+            if (c == null) return false;
+            double radius = Plan(c.Value.cx, c.Value.cy, r.Start.X, r.Start.Y);
+            return Plan(c.Value.cx, c.Value.cy, d.CenterX, d.CenterY) <= Math.Max(SameTolerance, radius * 0.01);
+        }
+
+        /// <summary>Plan centre of the circle through three points, or null when they are in a line.</summary>
+        internal static (double, double)? Center(V3 a, V3 b, V3 c)
+        {
+            double d = 2 * (a.X * (b.Y - c.Y) + b.X * (c.Y - a.Y) + c.X * (a.Y - b.Y));
+            if (Math.Abs(d) < 1e-9) return null;
+            double a2 = a.X * a.X + a.Y * a.Y, b2 = b.X * b.X + b.Y * b.Y, c2 = c.X * c.X + c.Y * c.Y;
+            return ((a2 * (b.Y - c.Y) + b2 * (c.Y - a.Y) + c2 * (a.Y - b.Y)) / d, (a2 * (c.X - b.X) + b2 * (a.X - c.X) + c2 * (b.X - a.X)) / d);
         }
 
         private static IEnumerable<V3> Ends(ImportCandidate r)

@@ -69,6 +69,12 @@ namespace C3DProTools
             try
             {
                 NavisResponse response = NavisImportSession.LoadSelection(file);
+                // The saved selection is in Navisworks coordinates: the window's shift and turn apply, as when it was read.
+                session.Transform = new NavisTransform
+                {
+                    Dx = session.Settings.TransformDx, Dy = session.Settings.TransformDy, Dz = session.Settings.TransformDz, RotationDeg = session.Settings.TransformRotationDeg
+                };
+                if (!session.Transform.IsIdentity) log.AppendLine($"Shift from the window's settings: X {session.Transform.Dx}, Y {session.Transform.Dy}, Z {session.Transform.Dz}, turn {session.Transform.RotationDeg} deg");
                 session.Load(response);
                 session.Bind(doc, out _);
                 NavisImportOptions o = session.Options(ObjectId.Null);

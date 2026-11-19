@@ -40,6 +40,11 @@ namespace C3DProTools
         public string ChosenNetwork = "";
         /// <summary>Network picked by the user for a row (an existing name, or a new one); wins over <see cref="Destination"/>.</summary>
         public Dictionary<ImportCandidate, string> NetworkOverrides = new Dictionary<ImportCandidate, string>();
+        /// <summary>
+        /// Every row of the selection (not only those imported now): destinations are decided on all of them, so unticking a
+        /// row that links others to a drawing network does not send them elsewhere than the confirmation showed.
+        /// </summary>
+        public List<ImportCandidate> ContextRows;
     }
 
     /// <summary>What happened (or, in a plan, would happen) to one row.</summary>
@@ -121,7 +126,7 @@ namespace C3DProTools
                     // Where each network row goes: a drawing network it belongs to (its parts list takes the sizes), or a new one.
                     List<DrawingNetwork> drawingNetworks = ReadNetworks(tr, cdoc, s, out _);
                     report.DrawingNetworks.AddRange(drawingNetworks.Where(n => n.Editable).Select(n => n.Name));
-                    report.Destinations = NavisDestination.Decide(rows, drawingNetworks, o.Destination, o.ChosenNetwork, r => NetworkFor(r, o), o.NetworkOverrides);
+                    report.Destinations = NavisDestination.Decide(o.ContextRows ?? rows, drawingNetworks, o.Destination, o.ChosenNetwork, r => NetworkFor(r, o), o.NetworkOverrides);
                     string ListFor(ImportCandidate c)
                     {
                         if (!report.Destinations.TryGetValue(c, out RowDestination d) || !d.Existing) return o.PartsListName;
@@ -568,8 +573,8 @@ namespace C3DProTools
             })
             {
                 ObjectId target = ObjectId.Null;
-                if (!string.IsNullOrEmpty(sourceName) && structures.TryGetValue(sourceName, out var named) && named.Holds(pt, s, 1.0)) target = named.Id;
-                if (target.IsNull && !byName) target = structures.Values.Where(x => x.Holds(pt, s, x.Drawn != null ? NavisDestination.EndMargin : 0.05)).Select(x => x.Id).FirstOrDefault();
+                if (!string.IsNullOrEmpty(sourceName) && structures.TryGetValue(sourceName, out var named) && !named.Id.IsErased && named.Holds(pt, s, 1.0)) target = named.Id;
+                if (target.IsNull && !byName) target = structures.Values.Where(x => !x.Id.IsErased && x.Holds(pt, s, x.Drawn != null ? NavisDestination.EndMargin : 0.05)).Select(x => x.Id).FirstOrDefault();
                 // Both ends of one pipe never go to the same structure (Civil 3D refuses it).
                 if (target.IsNull || target == used) continue;
                 used = target;
@@ -597,7 +602,8 @@ namespace C3DProTools
 
         /// <summary>
         /// The drawing's pipe networks as plain data in metres: editable or not, parts list, structures and pipes. Parts of an
-        /// earlier Navisworks import are left out (re-importing handles them), so they are never taken for this import's parts.
+        /// earlier Navisworks import are marked Imported: a pipe may connect to them, but they never decide a destination or
+        /// count as "already drawn" (re-importing handles them).
         /// </summary>
         internal static List<DrawingNetwork> ReadNetworks(Transaction tr, CivilDocument cdoc, double s, out Dictionary<DrawingStructure, ObjectId> structureIds)
         {
@@ -614,7 +620,7 @@ namespace C3DProTools
                 {
                     try
                     {
-                        if (!(tr.GetObject(id, OpenMode.ForRead) is CivilStructure st) || st.GetXDataForApplication(RegApp) != null) continue;
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is CivilStructure st)) continue;
                         bool circular = st.BoundingShape == BoundingShapeType.Cylinder;
                         double outer = Math.Max(st.DiameterOrWidth, st.InnerDiameterOrWidth) / s, length = Math.Max(st.Length, st.InnerLength) / s;
                         if (outer <= 0) outer = 1.0;
@@ -623,7 +629,7 @@ namespace C3DProTools
                         var d = new DrawingStructure
                         {
                             Name = st.Name, X = st.Location.X / s, Y = st.Location.Y / s, Rotation = st.Rotation, Rim = st.RimElevation / s, Sump = st.SumpElevation / s,
-                            Circular = circular, Diameter = outer, Length = outer, Width = length
+                            Circular = circular, Diameter = outer, Length = outer, Width = length, Imported = st.GetXDataForApplication(RegApp) != null
                         };
                         n.Structures.Add(d);
                         structureIds[d] = id;
@@ -634,8 +640,16 @@ namespace C3DProTools
                 {
                     try
                     {
-                        if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe p) || p.GetXDataForApplication(RegApp) != null) continue;
-                        n.Pipes.Add(new DrawingPipe { Name = p.Name, Start = new V3(p.StartPoint.X / s, p.StartPoint.Y / s, p.StartPoint.Z / s), End = new V3(p.EndPoint.X / s, p.EndPoint.Y / s, p.EndPoint.Z / s) });
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is Pipe p)) continue;
+                        var d = new DrawingPipe
+                        {
+                            Name = p.Name, Start = new V3(p.StartPoint.X / s, p.StartPoint.Y / s, p.StartPoint.Z / s), End = new V3(p.EndPoint.X / s, p.EndPoint.Y / s, p.EndPoint.Z / s),
+                            Outer = p.OuterDiameterOrWidth / s, Curved = p.SubEntityType == PipeSubEntityType.Curved, Imported = p.GetXDataForApplication(RegApp) != null
+                        };
+                        if (d.Curved && PipeArcGeometry.TryGetGravityArc(p, out ArcInfo arc)
+                            && NetworkEditOps.TryOffsetArc(p.StartPoint, p.EndPoint, arc, 0, out _, out _, out Point2d center, out bool clockwise))
+                        { d.HasCenter = true; d.CenterX = center.X / s; d.CenterY = center.Y / s; d.Clockwise = clockwise; }
+                        n.Pipes.Add(d);
                     }
                     catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
                 }
