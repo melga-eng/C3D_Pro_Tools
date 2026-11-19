@@ -65,6 +65,22 @@ Tests always run on copies.
 
 - Surface from Solids (your request 2026-11-18): TIN from the top or bottom of 3D solids and meshes. Merged; needs your try.
 
+## Public release 1 (started 2026-11-19)
+
+First package for people outside the project, shared on LinkedIn: **Navisworks Import, Surface from Solids, Rebuild Network**.
+Civil 3D 2026.2.2 and later (.NET 10), metric only. Download link on a free host that counts downloads; feedback by Google Form.
+
+| # | Task | State |
+|---|---|---|
+| 1 | Navisworks Import: destination (Auto into matching drawing networks, one chosen network, or new), parts already drawn left out, connect to existing structures, sizes into that network's parts list | **Built** on `feature/navis-destination`; drawing test passes; waiting for review and your try |
+| 2 | Navisworks Import: styles (keep default / one for all pipes and one for all structures / per part) | To do |
+| 3 | Navisworks Import: solids made interactive (import as surface, layer per Navisworks layer) | To do |
+| 4 | Surface from Solids: a small window (side, name, style from a list, remembered) | To do |
+| 5 | Rebuild Network: report as a table per network, shorter text | To do |
+| 6 | One look for the three windows (Antigravity designs, Claude wires) | To do |
+| 7 | Public build: ribbon with the three tools, About / Feedback button, first-run note, Method B hidden | To do |
+| 8 | Google Form for feedback (Antigravity, your Google account) | To do |
+
 ## Later (not before release 4)
 
 - Crossings engine and model health checks

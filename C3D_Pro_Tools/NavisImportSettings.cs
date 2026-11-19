@@ -17,6 +17,9 @@ namespace C3DProTools
 
         public string PartsListName { get; set; } = "Navis Import";
         public int Grouping { get; set; }
+        /// <summary>0 = join matching drawing networks (Auto), 1 = one chosen network, 2 = new networks.</summary>
+        public int Destination { get; set; }
+        public string ChosenNetwork { get; set; } = "";
         public string Prefix { get; set; } = "NAVIS - ";
         public string SingleNetworkName { get; set; } = "NAVIS - Import";
         public string SurfaceName { get; set; } = "";
