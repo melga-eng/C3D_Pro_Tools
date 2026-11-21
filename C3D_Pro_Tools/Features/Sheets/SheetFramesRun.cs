@@ -8,7 +8,9 @@ using Autodesk.AutoCAD.Runtime;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using Exception = System.Exception;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Sheets.SheetFramesRun))]
+#endif
 
 // C3DPROVPFRAMES (ribbon Sheet Frames): each sheet's viewports drawn in model space as the area they show, named with the sheet's
 // tile and part and its layout name, on Z-Zz_10_20_95-M-SheetFrames (not plotted); or those frames removed. Drawing a sheet

@@ -16,7 +16,9 @@ using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using Exception = System.Exception;
 using Entity = Autodesk.AutoCAD.DatabaseServices.Entity;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Standards.LayerAudit))]
+#endif
 
 // Network layers (KSIA, 2026-11-18): pipes, structures and pressure parts are exported to Navisworks by layer, so each part
 // goes on the layer of its type (read from its description); their labels go on the drawing's labelling layer of their kind,

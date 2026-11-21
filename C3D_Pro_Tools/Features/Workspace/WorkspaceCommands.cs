@@ -1,6 +1,8 @@
 using Autodesk.AutoCAD.Runtime;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Workspace.WorkspaceCommands))]
+#endif
 
 namespace C3DProTools.Features.Workspace
 {

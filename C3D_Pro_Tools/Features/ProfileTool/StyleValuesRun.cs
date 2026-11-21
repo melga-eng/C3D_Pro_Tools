@@ -7,7 +7,9 @@ using Autodesk.Civil.ApplicationServices;
 using Autodesk.Civil.DatabaseServices.Styles;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.ProfileTool.StyleValuesRun))]
+#endif
 
 namespace C3DProTools.ProfileTool
 {

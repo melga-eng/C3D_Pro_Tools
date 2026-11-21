@@ -12,7 +12,9 @@ using C3DProTools.Features.Networks.Civil3D;
 using C3DProTools.Features.Sheets.Contracts;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Sheets.Civil3D.SheetCommands))]
+#endif
 
 namespace C3DProTools.Features.Sheets.Civil3D
 {

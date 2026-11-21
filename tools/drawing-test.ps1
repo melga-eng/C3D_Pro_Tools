@@ -28,7 +28,9 @@ param(
     [string]$Settings = '',
     [switch]$KeepResult,
     # The plugin reads the settings saved in the drawing (as the product does), not a settings file.
-    [switch]$DrawingSettings
+    [switch]$DrawingSettings,
+    # Tests the public edition (built with -p:Edition=Public) instead of the full one.
+    [switch]$Public
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +38,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 $acadDir = 'C:\Program Files\Autodesk\AutoCAD 2026'
 $console = Join-Path $acadDir 'accoreconsole.exe'
 $pluginOut = Join-Path $repo "C3D_Pro_Tools\bin\$Configuration\net10.0-windows"
+if ($Public) { $pluginOut = Join-Path $repo "C3D_Pro_Tools\bin\Public\$Configuration\net10.0-windows" }
 
 foreach ($p in @($console, $Drawing, $Script, (Join-Path $pluginOut 'C3D_Pro_Tools.dll'))) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Error "Not found: $p"; exit 2 }

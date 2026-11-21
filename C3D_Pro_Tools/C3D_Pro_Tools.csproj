@@ -16,6 +16,16 @@
 		<NoWarn>MSB3277</NoWarn>
 	</PropertyGroup>
 
+	<!-- Public edition (dotnet build -p:Edition=Public): the same code, only the released tools registered (Edition.cs).
+	     Its own output and intermediate folders, so both editions can be built one after the other without mixing. -->
+	<PropertyGroup Condition=" '$(Edition)' == 'Public' ">
+		<DefineConstants>$(DefineConstants);PUBLIC</DefineConstants>
+		<Version>1.0.0</Version>
+		<Description>C3D Pro Tools: Navisworks Import, Surface from Solids, Rebuild Network.</Description>
+		<BaseOutputPath>bin\Public\</BaseOutputPath>
+		<IntermediateOutputPath>obj\Public\$(Configuration)\</IntermediateOutputPath>
+	</PropertyGroup>
+
 	<PropertyGroup>
 		<!-- Where Civil 3D 2026 is installed. Override with -p:AutoCAD2026Dir=... or an AutoCAD2026Dir environment variable. -->
 		<AutoCAD2026Dir Condition=" '$(AutoCAD2026Dir)' == '' ">C:\Program Files\Autodesk\AutoCAD 2026\</AutoCAD2026Dir>

@@ -12,7 +12,9 @@ using Autodesk.Civil.ApplicationServices;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using Exception = System.Exception;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Standards.DrawingStandards))]
+#endif
 
 // Drawing Standards (KSIA CAD standard, 2026-11-18): the drawing checked against the project's CAD rules: units, coordinate
 // system, objects on 0 / Defpoints, layer names and line weights, text fonts, dimension styles and layers, viewport scales,

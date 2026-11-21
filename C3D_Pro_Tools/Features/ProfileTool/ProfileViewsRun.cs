@@ -19,7 +19,9 @@ using ProfileView = Autodesk.Civil.DatabaseServices.ProfileView;
 using StationElevationLabel = Autodesk.Civil.DatabaseServices.StationElevationLabel;
 using Surface = Autodesk.Civil.DatabaseServices.Surface;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.ProfileTool.ProfileViewsRun))]
+#endif
 
 // C3DPROPV: the profile view steps run from the command line with no dialog, using the "profileViews" section of
 // C3DPro.project.json beside the drawing. The same command serves as the user's preset run and as the headless drawing test.

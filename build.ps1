@@ -52,4 +52,13 @@ if (-not $SkipTests) {
 
 $msi = Join-Path $PSScriptRoot "C3DProInstaller\bin\$Configuration\C3DProInstaller.msi"
 if (Test-Path $msi) { Write-Host "Installer: $msi" }
+
+# The public installer: the same code built as the public edition (only the released tools; see C3D_Pro_Tools\Edition.cs),
+# then its own MSI. Built every time, so the two editions never drift apart.
+& dotnet build (Join-Path $PSScriptRoot 'C3D_Pro_Tools\C3D_Pro_Tools.csproj') -c $Configuration -p:Edition=Public -nologo -v:m
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& dotnet build (Join-Path $PSScriptRoot 'C3DProInstaller.Public\C3DProInstaller.Public.wixproj') -c $Configuration -nologo -v:m
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$publicMsi = Join-Path $PSScriptRoot "C3DProInstaller.Public\bin\$Configuration\C3DProTools-Public.msi"
+if (Test-Path $publicMsi) { Write-Host "Public installer: $publicMsi" }
 exit 0
