@@ -12,6 +12,12 @@
 		<MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
 
+		<!-- Never together with the public edition (same plugin assembly and command names: only one would load). -->
+		<Upgrade Id="c54742b5-1e7f-479f-b6f1-3e382de332ce">
+			<UpgradeVersion Minimum="0.0.0.0" IncludeMinimum="yes" OnlyDetect="yes" Property="PUBLICEDITIONFOUND" />
+		</Upgrade>
+		<Launch Condition="NOT PUBLICEDITIONFOUND OR Installed" Message="The public C3D Pro Tools is installed on this computer. Uninstall it first (Settings, Apps), then run this installer again." />
+
 		<Feature Id="ProductFeature" Title="C3D Pro Tools" Level="1">
 			<ComponentGroupRef Id="PluginComponents" />
 			<ComponentGroupRef Id="NavisworksComponents" />

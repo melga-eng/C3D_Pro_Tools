@@ -96,6 +96,9 @@ namespace C3DProTools
             }
         }
 
+        /// <summary>The size mode after the saved value is put in range: Method B becomes the nearest size in the public edition.</summary>
+        internal static CatalogMode PublicSafe(CatalogMode mode) => Edition.IsPublic && mode == CatalogMode.Extend ? CatalogMode.None : mode;
+
         /// <summary>Where the last Navisworks selection is kept, so a run can be repeated without Navisworks (tests, problem reports).</summary>
         public static string LastSelectionPath => System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "NavisLastSelection.json");
@@ -140,7 +143,7 @@ namespace C3DProTools
             SolidWhenNoSize = Settings.NoSizeMode == 0,
             SearchDrawingLists = Settings.SearchDrawingLists,
             // The public edition never writes the shared catalog (Method B): that choice falls back to the nearest size.
-            Mode = Edition.IsPublic && Settings.SizeMode == (int)CatalogMode.Extend ? CatalogMode.None : (CatalogMode)Math.Max(0, Math.Min(2, Settings.SizeMode)),
+            Mode = PublicSafe((CatalogMode)Math.Max(0, Math.Min(2, Settings.SizeMode))),
             Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(Overrides),
             Destination = (DestinationMode)Math.Max(0, Math.Min(2, Settings.Destination)),
             ChosenNetwork = Settings.ChosenNetwork ?? "",

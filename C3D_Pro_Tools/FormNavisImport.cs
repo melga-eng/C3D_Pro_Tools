@@ -1144,7 +1144,7 @@ namespace C3DProTools
         }
 
         private string SizeModeText() =>
-            "Missing sizes: " + (_session.Settings.SizeMode == (int)CatalogMode.AnySize ? "Method A" : _session.Settings.SizeMode == (int)CatalogMode.Extend ? "Method B" : "nearest size");
+            "Missing sizes: " + (_session.Settings.SizeMode == (int)CatalogMode.AnySize ? "Method A" : NavisImportSession.PublicSafe((CatalogMode)_session.Settings.SizeMode) == CatalogMode.Extend ? "Method B" : "nearest size");
 
         /// <summary>Asks how sizes the catalog lacks are made, then sets that route up.</summary>
         private void ChooseSizeMode()

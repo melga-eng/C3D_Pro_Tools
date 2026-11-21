@@ -8,6 +8,13 @@
 		<MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
 
+		<!-- The full edition and this one must never be installed together (same plugin assembly and command names: only one
+		     of them would load). This one refuses to install while the full one is there. -->
+		<Upgrade Id="f1e2d3c4-b5a6-4789-8c9d-0e1f2a3b4c5d">
+			<UpgradeVersion Minimum="0.0.0.0" IncludeMinimum="yes" OnlyDetect="yes" Property="FULLEDITIONFOUND" />
+		</Upgrade>
+		<Launch Condition="NOT FULLEDITIONFOUND OR Installed" Message="The full C3D Pro Tools is installed on this computer. Uninstall it first (Settings, Apps), then run this installer again." />
+
 		<Feature Id="ProductFeature" Title="C3D Pro Tools" Level="1">
 			<ComponentGroupRef Id="PluginComponents" />
 			<ComponentGroupRef Id="NavisworksComponents" />

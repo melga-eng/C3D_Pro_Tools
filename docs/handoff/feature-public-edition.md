@@ -1,0 +1,4 @@
+# feature/public-edition
+- Changed: one code base, two installers. `-p:Edition=Public` (Edition.cs, PUBLIC define) registers only Navisworks Import, Surface from Solids, Rebuild Network, About, Feedback; public ribbon; Method B never used. `C3DProInstaller.Public` (own UpgradeCode, C3DProTools.Public.bundle, v1.0.0); each MSI refuses to install while the other is installed. `build.ps1` builds both; `drawing-test.ps1 -Public`.
+- Checked (public DLL, Release): surface-from-solids on Drawing122 PASS; navis-destination on Test.dwg PASS; rebuild-healthy on Test.dwg PASS (35/35, 93/93, 43 of 46 ends); C3DPRONET "Unknown command". MSI tables read: launch conditions and bundle folders as intended. 845 unit tests pass. Codex review: 2 findings fixed (coexistence, out-of-range Method B).
+- Not checked: installing either MSI; the public ribbon, About and Feedback windows (not opened); Feedback URL is empty until the Google Form exists.
