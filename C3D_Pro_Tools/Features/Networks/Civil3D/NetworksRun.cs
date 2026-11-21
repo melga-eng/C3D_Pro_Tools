@@ -15,7 +15,9 @@ using C3DProTools.Features.Sheets.Application;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using Surface = Autodesk.Civil.DatabaseServices.Surface;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Networks.Civil3D.NetworksRun))]
+#endif
 
 // C3DPRONET: the network steps run from the command line with no dialog, using the "networks" section of C3DPro.project.json
 // beside the drawing. Same pattern as C3DPROPV: a preset run for the user and a headless drawing test.

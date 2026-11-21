@@ -139,7 +139,8 @@ namespace C3DProTools
             MaxPartError = Settings.MaxPartErrorMm / 1000.0,
             SolidWhenNoSize = Settings.NoSizeMode == 0,
             SearchDrawingLists = Settings.SearchDrawingLists,
-            Mode = (CatalogMode)Math.Max(0, Math.Min(2, Settings.SizeMode)),
+            // The public edition never writes the shared catalog (Method B): that choice falls back to the nearest size.
+            Mode = Edition.IsPublic && Settings.SizeMode == (int)CatalogMode.Extend ? CatalogMode.None : (CatalogMode)Math.Max(0, Math.Min(2, Settings.SizeMode)),
             Overrides = new Dictionary<ImportCandidate, (ObjectId, ObjectId)>(Overrides),
             Destination = (DestinationMode)Math.Max(0, Math.Min(2, Settings.Destination)),
             ChosenNetwork = Settings.ChosenNetwork ?? "",

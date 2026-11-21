@@ -60,6 +60,22 @@ namespace C3DProTools
                 ribbon.Tabs.Add(customTab);
             }
 
+            if (Edition.IsPublic)
+            {
+                // Public edition: the released tools, and help.
+                RibbonPanelSource tools = new RibbonPanelSource { Title = "Tools" };
+                customTab.Panels.Add(new RibbonPanel { Source = tools });
+                tools.Items.Add(Large("Navisworks\nImport", "ImportNavisPipe ", "Pipes, duct banks and structures selected in Navisworks Manage, brought in as Civil 3D parts: into the drawing's networks they belong to, or new ones. Preview first; one UNDO."));
+                tools.Items.Add(Large("Surface from\nSolids", "C3DPROSURFSOLID ", "A TIN surface from 3D solids and meshes (a road as solids, its daylight as a mesh): the top faces, the bottom faces, or both, keeping their own triangles."));
+                tools.Items.Add(Large("Rebuild\nNetwork", "RebuildNetwork ", "A network you cannot edit (a data-shortcut reference whose source is gone) drawn again as an ordinary network: same structures, pipes, levels and connections. Check first, then Rebuild."));
+                RibbonPanelSource help = new RibbonPanelSource { Title = "Help" };
+                customTab.Panels.Add(new RibbonPanel { Source = help });
+                help.Items.Add(Large("Send\nFeedback", "C3DPROFEEDBACK ", "Tell us what works, what does not, and what you need next."));
+                help.Items.Add(Large("About", "C3DPROABOUT ", "Version, requirements and the log file location."));
+                isBuilt = true;
+                return;
+            }
+
             // Every tool, in panels by the kind of work: model the networks, profiles, labels and sheets, standards, and the
             // preset runs on the command line.
             RibbonPanelSource model = new RibbonPanelSource { Title = "Model" };

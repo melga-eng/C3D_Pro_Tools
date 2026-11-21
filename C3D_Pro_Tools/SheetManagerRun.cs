@@ -8,7 +8,9 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
 using AcadCoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.SheetManagerRun))]
+#endif
 
 namespace C3DProTools
 {

@@ -2,7 +2,9 @@ using Autodesk.AutoCAD.Runtime;
 using Autodesk.Civil.ApplicationServices;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.ProfileTool.ProfileToolCommands))]
+#endif
 
 namespace C3DProTools.ProfileTool
 {

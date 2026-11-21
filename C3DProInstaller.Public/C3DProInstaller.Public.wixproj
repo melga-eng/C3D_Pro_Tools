@@ -1,0 +1,18 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+	<!-- The PUBLIC installer: the same plugin built with -p:Edition=Public (only the released tools), and the Navisworks
+	     add-in. Its own product (UpgradeCode) and plugin folder, so it never touches the full installer's install.
+	     Not in the solution: build.ps1 builds the public plugin first, then this project. -->
+	<PropertyGroup>
+		<OutputName>C3DProTools-Public</OutputName>
+		<InstallerPlatform>x64</InstallerPlatform>
+		<OutputPath>bin\$(Configuration)\</OutputPath>
+		<SuppressIces>ICE61</SuppressIces>
+		<PluginDll>$(MSBuildThisFileDirectory)..\C3D_Pro_Tools\bin\Public\$(Configuration)\net10.0-windows\C3D_Pro_Tools.dll</PluginDll>
+		<NavisDll>$(MSBuildThisFileDirectory)..\C3DProTools.Navis\bin\$(Configuration)\net48\C3DProTools.Navis.dll</NavisDll>
+		<DefineConstants>PluginDll=$(PluginDll);NavisDll=$(NavisDll)</DefineConstants>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="PackageContents.xml" />
+	</ItemGroup>
+</Project>

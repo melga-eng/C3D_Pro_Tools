@@ -5,7 +5,9 @@ using System.Collections.Generic;
 using AcadCoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 using AcadUiApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.NetworkToolsCommands))]
+#endif
 
 namespace C3DProTools
 {

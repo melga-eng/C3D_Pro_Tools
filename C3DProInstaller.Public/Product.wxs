@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+	<!-- Public edition. Keep this UpgradeCode for every public version (it is not the full installer's). Raise Version for
+	     each public release; a rebuild of the same version still replaces the installed files (AllowSameVersionUpgrades). -->
+	<Package Name="C3D Pro Tools" Language="1033" Version="1.0.0.0" Manufacturer="Mohamed Elgarhy" UpgradeCode="c54742b5-1e7f-479f-b6f1-3e382de332ce"
+	         InstallerVersion="500" Scope="perMachine" Compressed="yes">
+		<MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+		<MediaTemplate EmbedCab="yes" />
+
+		<Feature Id="ProductFeature" Title="C3D Pro Tools" Level="1">
+			<ComponentGroupRef Id="PluginComponents" />
+			<ComponentGroupRef Id="NavisworksComponents" />
+		</Feature>
+	</Package>
+
+	<Fragment>
+		<!-- C:\ProgramData\Autodesk\ApplicationPlugins\C3DProTools.Public.bundle and the Navisworks Manage 2026 add-in folder. -->
+		<StandardDirectory Id="CommonAppDataFolder">
+			<Directory Id="AutodeskFolder" Name="Autodesk">
+				<Directory Id="NavisManageFolder" Name="Navisworks Manage 2026">
+					<Directory Id="NavisPluginsFolder" Name="Plugins">
+						<Directory Id="NavisAddinFolder" Name="C3DProTools.Navis" />
+					</Directory>
+				</Directory>
+				<Directory Id="ApplicationPluginsFolder" Name="ApplicationPlugins">
+					<Directory Id="BundleFolder" Name="C3DProTools.Public.bundle">
+						<Directory Id="ContentsFolder" Name="Contents" />
+					</Directory>
+				</Directory>
+			</Directory>
+		</StandardDirectory>
+	</Fragment>
+
+	<Fragment>
+		<ComponentGroup Id="PluginComponents">
+			<Component Id="PackageContentsXml" Directory="BundleFolder">
+				<File Id="PackageContentsFile" Name="PackageContents.xml" Source="$(sys.SOURCEFILEDIR)PackageContents.xml" KeyPath="yes" />
+			</Component>
+			<Component Id="PluginDLL" Directory="ContentsFolder">
+				<File Id="DllFile" Name="C3D_Pro_Tools.dll" Source="$(var.PluginDll)" KeyPath="yes" />
+			</Component>
+		</ComponentGroup>
+
+		<ComponentGroup Id="NavisworksComponents">
+			<Component Id="NavisAddinDLL" Directory="NavisAddinFolder">
+				<File Id="NavisDllFile" Name="C3DProTools.Navis.dll" Source="$(var.NavisDll)" KeyPath="yes" />
+			</Component>
+		</ComponentGroup>
+	</Fragment>
+</Wix>

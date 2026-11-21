@@ -9,7 +9,9 @@ using Autodesk.AutoCAD.Runtime;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using WinForms = System.Windows.Forms;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.CadExport.CadExportCommand))]
+#endif
 
 // C3DPROCAD: the CAD sheets window. Pick the sheets and the folder; a background Civil 3D makes the files from a copy of the
 // saved drawing (C3DPROCADRUN) while you keep working, and you are told when they are ready. The open drawing is never changed.

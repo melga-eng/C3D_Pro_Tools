@@ -14,7 +14,9 @@ using Autodesk.Civil.DatabaseServices;
 using C3DProTools.Features.Sheets.Application;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.Labels.LabelsRun))]
+#endif
 
 // C3DPROLBL: the label steps run from the command line with no dialog, on the layouts you name, using the "labels" section
 // of C3DPro.project.json beside the drawing (and the choices saved in Annotation Studio for what the file does not set).

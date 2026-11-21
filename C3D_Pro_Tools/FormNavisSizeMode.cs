@@ -60,10 +60,12 @@ namespace C3DProTools
                 "Adds four C3D Pro families (box culvert, circular pipe, rectangular and cylindrical structure) whose sizes are free, " +
                 "so every import gets its exact width, height, diameter and wall. Autodesk's own families are not touched, and everything imported is easy to recognise.",
                 anyLoaded ? "Installed and loaded." : anyInstalled ? "Installed — restart Civil 3D once to load them." : "Set up once; Civil 3D then needs one restart to list them.");
-            AddOption(_rbB,
-                "Writes each missing size (for example 800 × 1000 wall 0) as a new row or list value into the stock family it belongs to " +
-                "(Concrete Box Culvert, Rectangular Junction Structure…). Works at once, without a restart.",
-                "Changes the shared catalog for every drawing that uses it; a backup of each file is kept next to it.");
+            // Method B writes into Autodesk's shared catalog files: not offered in the public edition.
+            if (!Edition.IsPublic)
+                AddOption(_rbB,
+                    "Writes each missing size (for example 800 × 1000 wall 0) as a new row or list value into the stock family it belongs to " +
+                    "(Concrete Box Culvert, Rectangular Junction Structure…). Works at once, without a restart.",
+                    "Changes the shared catalog for every drawing that uses it; a backup of each file is kept next to it.");
             AddOption(_rbNone,
                 "Nothing in the catalog changes. Rows use the nearest catalog size, or come in as exact 3D solids when that size is too far off " +
                 "(the limit is in Options). You can still choose any part yourself.", "");
@@ -96,7 +98,7 @@ namespace C3DProTools
             _rbA.Enabled = writable || anyInstalled;
             _rbB.Enabled = writable;
             CatalogMode start = current;
-            if (start == CatalogMode.Extend && !writable) start = CatalogMode.None;
+            if (start == CatalogMode.Extend && (!writable || Edition.IsPublic)) start = CatalogMode.None;
             if (start == CatalogMode.AnySize && !_rbA.Enabled) start = CatalogMode.None;
             (start == CatalogMode.AnySize ? _rbA : start == CatalogMode.Extend ? _rbB : _rbNone).Checked = true;
             _chkAsk.Checked = askAgain;

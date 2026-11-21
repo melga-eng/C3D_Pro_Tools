@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" ProductType="Application" AppVersion="1.0.0" Name="C3D Pro Tools" Description="Navisworks Import, Surface from Solids, Rebuild Network for Civil 3D 2026" Author="Mohamed Elgarhy">
+	<CompanyDetails Name="Mohamed Elgarhy" />
+	<Components>
+		<!-- Built against the Civil 3D 2026 API on .NET 10 (requires Civil 3D 2026.2.2 or a later 2026 update). -->
+		<RuntimeRequirements OS="Win64" Platform="Civil3D" SeriesMin="R25.1" SeriesMax="R25.1" />
+		<ComponentEntry AppName="C3DProToolsPublic" ModuleName="./Contents/C3D_Pro_Tools.dll" AppDescription="C3D Pro Tools" LoadOnCommandInvocation="False" LoadOnAutoCADStartup="True" />
+	</Components>
+</ApplicationPackage>

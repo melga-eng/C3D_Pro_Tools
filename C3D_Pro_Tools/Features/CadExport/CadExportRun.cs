@@ -13,7 +13,9 @@ using C3DProTools.Features.Labels;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using DBObject = Autodesk.AutoCAD.DatabaseServices.DBObject;
 
+#if !PUBLIC   // full edition only (see Edition.cs)
 [assembly: CommandClass(typeof(C3DProTools.Features.CadExport.CadExportRun))]
+#endif
 
 // C3DPROCADRUN: makes the CAD sheets from the drawing open in a background Civil 3D (accoreconsole), which is always a copy:
 //   1. every Civil 3D label exploded as its sheet shows it: plan labels with the model view turned like the plan viewport,
