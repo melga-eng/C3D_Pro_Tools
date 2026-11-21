@@ -15,6 +15,11 @@ Nothing is Released yet, because drawing tests started today.
 
 **Ribbon (2026-11-15, every tool):** Model (Network Editor, Network Organizer, Networks from Feature Lines, Profile & Cover Designer, Rebuild Network, Navisworks Importer), Profiles (Profile View Tools, Profile Manager, Profile Views & TOP Fit, Profile DIMs), Produce (Pro Run, Annotation Studio, Sheet Manager, CAD Sheets, Workspace Palette), Standards (Style Manager, Label Style Values, Drawing Cleaner), Command Runs (Profile Views / Networks / Labels Run). How to use: [GUIDE.md](GUIDE.md).
 
+**Two installers, one code (2026-11-21):** the full installer (`C3DProInstaller`, every tool, yours) and the public installer
+(`C3DProInstaller.Public`, version 1.0.0: Navisworks Import, Surface from Solids, Rebuild Network, Send Feedback, About). The
+public plugin is the same code built with `-p:Edition=Public` (`Edition.cs`); the other tools' commands do not exist in it.
+`build.ps1` makes both MSIs. Only one of the two can be installed on a computer.
+
 ## How the plugin is built
 
 ```

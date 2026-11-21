@@ -78,8 +78,10 @@ Civil 3D 2026.2.2 and later (.NET 10), metric only. Download link on a free host
 | 4 | Surface from Solids: a small window (side, name, style from a list, remembered) | To do |
 | 5 | Rebuild Network: report as a table per network, shorter text | To do |
 | 6 | One look for the three windows (Antigravity designs, Claude wires) | To do |
-| 7 | Public build: ribbon with the three tools, About / Feedback button, first-run note, Method B hidden | To do |
-| 8 | Google Form for feedback (Antigravity, your Google account) | To do |
+| 7 | Public build: same code, own installer (`C3DProInstaller.Public`, v1.0.0), ribbon with the three tools, Send Feedback / About, Method B never used; the two installers refuse each other | **Merged** 2026-11-21; public DLL passes the three drawing tests; MSIs not yet installed by anyone |
+| 8 | Google Form for feedback; its link goes into `Edition.FeedbackUrl` | Waiting for the form link |
+
+Tasks 2 to 6 come after the 1.0 release, as 1.1.
 
 ## Later (not before release 4)
 
