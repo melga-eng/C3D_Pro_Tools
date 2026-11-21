@@ -173,6 +173,7 @@ namespace C3DProTools.ProfileTool
                 if (Features.Networks.Civil3D.ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
                     throw new InvalidOperationException($"the drawing units are {doc.Database.Insunits}; C3DPROPV works in metre drawings only. Nothing was changed.");
                 CivilDocument civil = CivilDocument.GetCivilDocument(doc.Database);
+                ResolveSurfaces(doc, s, log);
                 bool doTop = mode == "Top" || mode == "All", doDims = mode == "Dims" || mode == "All";
                 bool doMatch = mode == "Match" || (mode == "All" && (s.MatchTemplate.Length > 0 || s.MatchSourceView.Length > 0));
                 TopStep(doc, civil, s, doTop, log);
@@ -214,7 +215,7 @@ namespace C3DProTools.ProfileTool
 
             List<AlignmentFit> missing = fits.Where(f => f.Status == AlignmentFit.StatusMissing).ToList();
             if (missing.Count == 0) return;
-            if (!s.CreateMissingTop) { log.AppendLine($"TOP: {missing.Count} alignments have no TOP profile; set createMissingTop to create them."); return; }
+            if (!s.CreateMissingTop) { log.AppendLine($"TOP: {missing.Count} alignments have no TOP profile; tick \"Create missing TOP profiles\" in the Pro Run window (Profiles > Settings) to create them."); return; }
             if (!ResolveCreate(doc, civil, s, out TopProfileCivil.CreateTopOptions o, out string why)) { log.AppendLine($"TOP: not created: {why}"); return; }
             log.AppendLine("TOP " + TopProfileCivil.Create(doc, missing, o).Summary("created"));
         }
@@ -542,6 +543,31 @@ namespace C3DProTools.ProfileTool
             }
         }
 
+        /// <summary>
+        /// The existing and proposed surfaces this run uses: the saved names when the drawing has them; otherwise the drawing's
+        /// own surface whose name says what it is, set for this run (not saved) and said in the report. Settings carried over from
+        /// another drawing would otherwise find no ground and plan no cover DIMs (MV drawing 460201, 2026-11-21).
+        /// </summary>
+        private static void ResolveSurfaces(Document doc, ProfileViewsSettings s, StringBuilder log)
+        {
+            List<string> surfaces = SurfaceNames(doc);
+            ProfileRoleRules rules = s.RoleRules() ?? ProfileViewToolsSettings.Load().Rules ?? new ProfileRoleRules();
+            string ex = Features.ProfileTool.SurfaceGuess.Pick(true, rules.ExistingSurface, surfaces);
+            string pr = Features.ProfileTool.SurfaceGuess.Pick(false, rules.ProposedSurface, surfaces, ex);
+            void Use(string role, string saved, string found, Action<string> set)
+            {
+                if (found != null && found.Equals(saved ?? "", StringComparison.OrdinalIgnoreCase)) return;
+                if (found != null)
+                {
+                    log.AppendLine($"Surfaces: the {role} surface \"{saved}\" is not in this drawing; using \"{found}\" (its name says {role}). Choose another in the Pro Run window if it is wrong.");
+                    set(found);
+                }
+                else log.AppendLine($"Surfaces: the {role} surface \"{saved}\" is not in this drawing and no surface's name says {role}: choose it in the Pro Run window.");
+            }
+            Use("existing", rules.ExistingSurface, ex, v => s.ExistingSurface = v);
+            Use("proposed", rules.ProposedSurface, pr, v => s.ProposedSurface = v);
+        }
+
         private static List<string> SurfaceNames(Document doc)
         {
             var names = new List<string>();
@@ -559,7 +585,7 @@ namespace C3DProTools.ProfileTool
             List<string> surfaces = SurfaceNames(doc);
             log.AppendLine($"Surfaces in the drawing: {string.Join(", ", surfaces)}");
             log.AppendLine($"Surfaces used: existing \"{rules.ExistingSurface}\", proposed \"{rules.ProposedSurface}\"" +
-                           " (set existingSurface / proposedSurface in the profileViews settings to change them)");
+                           " (change them in the Pro Run window, Profiles > Settings)");
             List<ViewDims> views = ProfileDimsCivil3D.Plan(doc, ds, out var issues, rules)
                 .Where(v => s.Includes(v.AlignmentName)).ToList();
             int cover = views.Sum(v => v.Plan.Dims.Count(d => d.Dim.Kind == Features.Sheets.Contracts.DimKind.Cover));
@@ -575,7 +601,7 @@ namespace C3DProTools.ProfileTool
             if (ds.Cover && !surfaces.Any(n => string.Equals(n, rules.ProposedSurface, StringComparison.OrdinalIgnoreCase)))
             {
                 log.AppendLine($"DIMs not drawn: the proposed surface \"{rules.ProposedSurface}\" is not in the drawing, so cover DIMs cannot be planned " +
-                               "and the earlier tool DIMs would be lost. Set proposedSurface in the profileViews settings, or set dims.cover to false.");
+                               "and the earlier tool DIMs would be lost. Choose the proposed surface in the Pro Run window (Profiles > Settings).");
                 return;
             }
             DimWriteResult r = ProfileDimsCivil3D.Write(doc, views, ds);

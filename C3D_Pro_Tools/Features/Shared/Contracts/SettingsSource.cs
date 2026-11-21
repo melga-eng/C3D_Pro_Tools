@@ -62,7 +62,7 @@ namespace C3DProTools.Features.Shared.Contracts
             "alignments": "*",
             "matchTemplate": "ICT_PROFILE_VIEW_SETTINGS",
             "existingSurface": "COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED",
-            "proposedSurface": "CE_PROP-CONT-NCRD"
+            "proposedSurface": "PROPOSED_SURFACE"
           },
           "networks": {
             "networks": "*",

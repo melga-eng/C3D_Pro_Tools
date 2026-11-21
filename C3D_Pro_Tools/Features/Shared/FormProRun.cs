@@ -165,6 +165,7 @@ namespace C3DProTools.Features.Shared
             _pv.ExistingSurface = Pick(_existing);
             _pv.ProposedSurface = Pick(_proposed);
             _pv.ProposedProfile = _proposedProfile.Text.Trim();
+            _pv.CreateMissingTop = _createTop.Checked;
             _pv.MatchTemplate = _matchTemplate.Text.Trim();
             _pv.SplitLength = Num(_splitLength, _pv.SplitLength);
             _pv.SplitGap = Num(_splitGap, _pv.SplitGap);
@@ -314,13 +315,26 @@ namespace C3DProTools.Features.Shared
             return row;
         }
 
-        private void Surfaces(ComboBox box, string chosen, bool none = true)
+        private void Surfaces(ComboBox box, string chosen, bool none = true, bool? existingRole = null)
         {
             if (none) box.Items.Add("(none)");
             foreach (string s in _surfaces) box.Items.Add(s);
-            if (!string.IsNullOrEmpty(chosen) && !box.Items.Contains(chosen)) box.Items.Add(chosen);
+            // A saved name the drawing does not have is never shown as chosen (settings carried over from another drawing: the MV
+            // drawing showed the ICT drawing's surfaces and drew no cover DIMs, 2026-11-21): the drawing's own surface whose name
+            // says what it is is chosen instead, and said.
+            if (!string.IsNullOrEmpty(chosen) && !_surfaces.Contains(chosen, StringComparer.OrdinalIgnoreCase))
+            {
+                string found = existingRole.HasValue ? Features.ProfileTool.SurfaceGuess.Pick(existingRole.Value, chosen, _surfaces) : null;
+                _surfaceNotes.Add($"\"{chosen}\" is not in this drawing" + (found != null ? $"; \"{found}\" chosen instead (check it)." : "; choose one."));
+                chosen = found ?? "";
+            }
+            else if (string.IsNullOrEmpty(chosen) && existingRole.HasValue)
+                chosen = Features.ProfileTool.SurfaceGuess.Pick(existingRole.Value, null, _surfaces) ?? "";
             ToolUi.Select(box, string.IsNullOrEmpty(chosen) ? (none ? "(none)" : null) : chosen);
         }
+
+        private readonly List<string> _surfaceNotes = new List<string>();
+        private readonly CheckBox _createTop = new CheckBox { Text = "Create missing TOP profiles (Fit TOP and All)", AutoSize = true };
 
         private Control ProfilePage()
         {
@@ -339,8 +353,9 @@ namespace C3DProTools.Features.Shared
             ToolUi.Add(stack, steps);
 
             TableLayoutPanel set = ToolUi.Card("Settings");
-            Surfaces(_existing, _pv.ExistingSurface);
-            Surfaces(_proposed, _pv.ProposedSurface);
+            Surfaces(_existing, _pv.ExistingSurface, true, true);
+            Surfaces(_proposed, _pv.ProposedSurface, true, false);
+            _createTop.Checked = _pv.CreateMissingTop;
             _proposedProfile.Text = _pv.ProposedProfile ?? "";
             _proposedProfile.Width = 200;
             _matchTemplate.Text = _pv.MatchTemplate ?? "";
@@ -349,6 +364,8 @@ namespace C3DProTools.Features.Shared
             _splitGap.Text = ToolUi.Format(_pv.SplitGap);
             ToolUi.Field(set, "Existing surface", _existing);
             ToolUi.Field(set, "Proposed surface", _proposed);
+            if (_surfaceNotes.Count > 0) ToolUi.Wide(set, new Label { AutoSize = true, ForeColor = StyleUi.Danger, Text = "Surfaces: " + string.Join(" ", _surfaceNotes), Margin = new Padding(3, 2, 3, 6) });
+            ToolUi.Wide(set, _createTop);
             ToolUi.Field(set, "Proposed profile (name contains)", _proposedProfile);
             ToolUi.Wide(set, ToolUi.Note("Pavement labels sit on the alignment's proposed profile; without one, on the proposed surface."));
             ToolUi.Field(set, "Match: template view", _matchTemplate);
