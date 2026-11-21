@@ -15,7 +15,7 @@ namespace C3DProTools
         public const string Name = "C3D Pro Tools (full)";
 #endif
         /// <summary>The Google Form people send feedback with. Empty until the form exists: the button then says so.</summary>
-        public const string FeedbackUrl = "";
+        public const string FeedbackUrl = "https://docs.google.com/forms/d/e/1FAIpQLSemeViNk4tp2c0i9vplJGFjJ1Lu56JrMcrQr15hNolTKCaVig/viewform";
 
         public static string Version
         {
