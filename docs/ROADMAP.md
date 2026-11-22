@@ -90,3 +90,20 @@ Tasks 2 to 6 come after the 1.0 release, as 1.1.
 - Other networks' rule sets (MV, LV, fence lighting, navaids, MET)
 - Quantities
 
+Ideas from civil3dfactory (github.com/hellojessieluo-svg/civil3dfactory, Apache-2.0; read 2026-11-22, none of its code run):
+
+1. **Drawing tests check numbers, not log text.** Each `C3DPRO*` run writes a small JSON report (per item: ok / changed /
+   failed, with counts), rewritten after each step so a crash still leaves it. `drawing-test.ps1` checks values in it
+   (rims set = 48, re-run finds 0) instead of `-Expect` text.
+2. **Network issues check** (the Issues list above). Read-only, one list of `{level, code, object, message}`: pipe ends
+   not connected, rim off the surface, cover below the project rule, network without a parts list, reference surface
+   missing (guarded read), dead data-shortcut networks, parts on the wrong layer.
+3. **Generated window for no-window commands.** Built from the tool's settings object: dropdowns of the drawing's own
+   names, units, last values remembered. For small tools first (public release task 4, Surface from Solids window);
+   polished tools keep their designed windows.
+4. **Command list with help.** One list of the `C3DPRO*` commands, their steps, settings and whether they write the
+   drawing; `GUIDE.md` and agent help generated from it.
+5. **Smaller extras.** An audit line per drawing test with the DLL version; a resident background Civil 3D that keeps the
+   drawing open between steps (only once tests run many steps on big drawings); their `create_plan_frames_from_alignment`,
+   `restyle_profile_view_bands` and `set_block_attributes` as references when we need them.
+
