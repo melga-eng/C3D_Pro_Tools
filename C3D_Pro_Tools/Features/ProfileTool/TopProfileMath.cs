@@ -15,6 +15,8 @@ namespace C3DProTools.ProfileTool
 
         /// <summary>Outside height (top to bottom); 0 when not known. Used to find an encasement drawn around another pipe.</summary>
         public double Height;
+        /// <summary>Plan offset from the alignment (m, at the middle) and outside width; Width 0 when not known.</summary>
+        public double Offset, Width;
 
         public double Length => S1 - S0;
         public bool Covers(double s, double eps) => s >= S0 - eps && s <= S1 + eps;
@@ -71,7 +73,7 @@ namespace C3DProTools.ProfileTool
             if (before.Count == 0 || after.Count == 0) return false;
             DuctSegment topBefore = before.OrderByDescending(d => d.ZAt(s)).First(), topAfter = after.OrderByDescending(d => d.ZAt(s)).First();
             zBefore = topBefore.ZAt(s); zAfter = topAfter.ZAt(s);
-            if (Math.Abs(zBefore - zAfter) <= StepTolerance) return false;
+            if (Math.Abs(zBefore - zAfter) <= 0.001) return false;
             var (high, low) = zAfter > zBefore ? (topAfter, before) : (topBefore, after);
             return low.Any(c => Holds(high, c, s));
         }
@@ -86,6 +88,8 @@ namespace C3DProTools.ProfileTool
         public static bool Holds(DuctSegment outer, DuctSegment inner, double s)
         {
             if (ReferenceEquals(outer, inner) || outer.Height <= inner.Height + InsideTolerance) return false;
+            // In plan too: a bigger pipe beside a cable at the same depth is not around it.
+            if (outer.Width > 0 && Math.Abs(inner.Offset - outer.Offset) + inner.Width / 2 > outer.Width / 2 + InsideTolerance) return false;
             double ot = outer.ZAt(s), it = inner.ZAt(s);
             return it <= ot + InsideTolerance && it - inner.Height >= ot - outer.Height - InsideTolerance;
         }
@@ -123,6 +127,15 @@ namespace C3DProTools.ProfileTool
                     }
                     else
                         result.Warnings.Add($"Encasement followed: {outer.Name} around {inner.Name} (sta {lo:F2} to {hi:F2}).");
+                }
+                // Where one pipe starts or stops being inside the other (top meets top, bottom meets bottom): a PVI, so the TOP
+                // leaves an inner pipe exactly where it leaves its encasement.
+                if (a.Height > 0 && b.Height > 0)
+                {
+                    double tLo = a.ZAt(lo) - b.ZAt(lo), tHi = a.ZAt(hi) - b.ZAt(hi);
+                    double bLo = tLo - (a.Height - b.Height), bHi = tHi - (a.Height - b.Height);
+                    if (Math.Sign(tLo) != Math.Sign(tHi) && Math.Abs(tLo - tHi) > 1e-12) stations.Add(lo + (hi - lo) * tLo / (tLo - tHi));
+                    if (Math.Sign(bLo) != Math.Sign(bHi) && Math.Abs(bLo - bHi) > 1e-12) stations.Add(lo + (hi - lo) * bLo / (bLo - bHi));
                 }
                 double dLo = a.ZAt(lo) - b.ZAt(lo), dHi = a.ZAt(hi) - b.ZAt(hi);
                 if (Math.Sign(dLo) != Math.Sign(dHi) && Math.Abs(dLo - dHi) > 1e-12)

@@ -1,0 +1,4 @@
+- Branch: `feature/top-inside-encasement`.
+- Changed: TOP profile fit finds pipes inside pipes (height and plan); default follows the encasement with two PVIs (0.1 mm apart) at each end of an encasement run; setting `topInsideEncasement` (Pro Run, Profile View Manager) follows the cable. Fit check compares beside steps.
+- Checked: 876 unit tests; `tests/drawing/pv-top-encasement.scr` on a copy of the MV drawing (460201), both settings (`pv-top-outside.json`, `pv-top-inside.json`): Top then Report says 1 fits. Codex end review: four findings, all fixed.
+- Not done: the windows' new tick boxes are not drawing-tested (forms cannot run headless).

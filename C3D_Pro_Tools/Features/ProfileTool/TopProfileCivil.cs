@@ -120,13 +120,13 @@ namespace C3DProTools.ProfileTool
                 {
                     if (o.ShownOnly && !shownIn[pipe.ObjectId].Overlaps(viewSet)) continue;
                     if (reach.HasValue && !InBox(reach.Value, a) && !InBox(reach.Value, b)) continue;
-                    if (!Along(al, a, b, o.OffsetTolerance, out double s0, out double s1)) continue;
+                    if (!Along(al, a, b, o.OffsetTolerance, out double s0, out double s1, out double offset)) continue;
                     double half = OuterHeightOf(pipe) / 2.0;
                     fit.Ducts.Add(new DuctInfo
                     {
                         Name = pipe.Name,
                         Network = network,
-                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half) { Height = 2 * half },
+                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half) { Height = 2 * half, Offset = offset, Width = C3DProTools.CoverRoute.OuterWidthOf(pipe) },
                     });
                 }
                 fit.Ducts.Sort((x, y) => x.Segment.S0.CompareTo(y.Segment.S0));
@@ -359,13 +359,15 @@ namespace C3DProTools.ProfileTool
             new Point3d(s.X + (e.X - s.X) * t, s.Y + (e.Y - s.Y) * t, s.Z + (e.Z - s.Z) * t);
 
         /// <summary>Both ends and the middle within tolerance of the alignment. Stations are clipped to the alignment later.</summary>
-        private static bool Along(Alignment al, Point3d a, Point3d b, double tol, out double s0, out double s1)
+        private static bool Along(Alignment al, Point3d a, Point3d b, double tol, out double s0, out double s1, out double offset)
         {
-            s0 = s1 = 0;
+            s0 = s1 = offset = 0;
             if (!StaOff(al, a, out s0, out double o0) || Math.Abs(o0) > tol) return false;
             if (!StaOff(al, b, out s1, out double o1) || Math.Abs(o1) > tol) return false;
             var mid = Lerp(a, b, 0.5);
-            return StaOff(al, mid, out _, out double om) && Math.Abs(om) <= tol;
+            if (!StaOff(al, mid, out _, out double om) || Math.Abs(om) > tol) return false;
+            offset = om;
+            return true;
         }
 
         private static bool StaOff(Alignment al, Point3d p, out double station, out double offset)
@@ -408,8 +410,8 @@ namespace C3DProTools.ProfileTool
                 if (fit[i + 1].Station - fit[i].Station < TopProfileMath.StationEps) steps.Add(fit[i].Station);
             if (steps.Count > 0)
             {
-                stations = stations.Where(s => !steps.Any(t => Math.Abs(s - t) < 2 * TopProfileMath.StationEps)).ToList();
-                foreach (double t in steps) { stations.Add(t - 0.01); stations.Add(t + 0.01); }
+                stations = stations.Where(s => !steps.Any(t => Math.Abs(s - t) < 5 * TopProfileMath.StepRun)).ToList();
+                foreach (double t in steps) { stations.Add(t - 0.002); stations.Add(t + 0.002); }
             }
             double max = 0, maxAt = 0;
             foreach (double s in stations)

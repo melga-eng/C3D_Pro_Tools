@@ -79,6 +79,44 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
+        public void BiggerPipeBesideTheCableInPlan_IsNotAnEncasement()
+        {
+            // Same depth band, but 0.5 m apart in plan: the bigger pipe is not around the cable.
+            var cable = new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1, Width = 0.1, Offset = 0.25 };
+            var duct = new DuctSegment("Duct", 40, 10.03, 60, 10.03) { Height = 0.16, Width = 0.16, Offset = -0.25 };
+            Assert.False(TopProfileMath.Holds(duct, cable, 50));
+            var r = TopProfileMath.Compute(new[] { cable, duct }, 0, 100, insideEncasement: true);
+            Assert.Equal(0, r.EncasementsLeftOut);
+            Assert.Equal(10.03, TopProfileMath.ElevationAt(r.Points, 50).Value, 3);
+        }
+
+        [Fact]
+        public void CableLeavingTheEncasement_TopLeavesItThere()
+        {
+            // Cable top falls 10.0 -> 9.5 over 0-100 (0.1 high), encasement 10.2 level (0.5 high, bottom 9.7): the cable's
+            // bottom (9.9 - 0.005 s) leaves the encasement's (9.7) at sta 40. Inside mode follows the cable up to there.
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 100, 9.5) { Height = 0.1 },
+                new DuctSegment("Enc", 0, 10.2, 100, 10.2) { Height = 0.5 },
+            }, 0, 100, insideEncasement: true);
+            Assert.Equal(9.9, TopProfileMath.ElevationAt(r.Points, 20).Value, 3);
+            Assert.Contains(r.Points, p => System.Math.Abs(p.Station - 40) < 0.01);
+        }
+
+        [Fact]
+        public void SmallEncasementRise_StillAStepNotARamp()
+        {
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1 },
+                new DuctSegment("Enc", 40, 10.015, 60, 10.015) { Height = 0.5 },
+            }, 0, 100);
+            Assert.Equal(2, r.EncasementSteps);
+            Assert.Equal(10.0, TopProfileMath.ElevationAt(r.Points, 20).Value, 4);
+        }
+
+        [Fact]
         public void PipeBesideAnother_IsNotAnEncasement()
         {
             // A taller pipe lying higher (its bottom above the cable's): not around it, so the TOP follows it in both modes.
