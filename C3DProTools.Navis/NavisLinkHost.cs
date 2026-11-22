@@ -87,7 +87,10 @@ namespace C3DProTools.Navis
                 case "hello":
                     return new NavisResponse { Ok = true, Document = doc.FileName ?? "", Units = doc.Units.ToString(), SelectedCount = doc.CurrentSelection.SelectedItems.Count };
                 case "selection":
-                    return NavisExtractor.ReadSelection(doc);
+                    NavisResponse sel = NavisExtractor.ReadSelection(doc);
+                    // Sent from the Clash Grouper: the clash areas go with it, for revision clouds in Civil 3D.
+                    sel.ClashAreas = ClashGrouperEngine.AreasForSelection(doc);
+                    return sel;
                 case "select":
                     return NavisExtractor.Select(doc, request.Guids);
                 default:

@@ -735,7 +735,8 @@ namespace C3DProTools
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             Bind(doc);
             _session.RefreshExisting(doc);
-            _lblLink.Text = $"● {Path.GetFileName(response.Document)}  ·  {response.Elements.Count} item(s) read in {sw.Elapsed.TotalSeconds:0.0} s";
+            _lblLink.Text = $"● {Path.GetFileName(response.Document)}  ·  {response.Elements.Count} item(s) read in {sw.Elapsed.TotalSeconds:0.0} s" +
+                            (_session.ClashAreas.Count > 0 ? $"  ·  {_session.ClashAreas.Count} clash area(s): a revision cloud each on import" : "");
             FillGrid();
             if (response.Warnings.Count > 0) SetStatus(string.Join("  ", response.Warnings.Take(3)), true);
             RunPlan(false);
@@ -1304,11 +1305,19 @@ namespace C3DProTools
             _session.Record(report, doc);
             _markers.Clear();
             RefreshRows();
+            // Sent from the Clash Grouper: a revision cloud around each clash area.
+            int clouds = 0;
+            if (_session.ClashAreas.Count > 0)
+            {
+                try { using (doc.LockDocument()) clouds = ClashClouds.Draw(doc.Database, _session.ClashAreas, NavisImporter.DrawingScale(doc.Database)); }
+                catch (Exception ex) { C3DProLogger.Error("Navisworks Import: the clash clouds could not be drawn", ex); }
+            }
             if (report.CatalogNotes.Count > 0)
                 MessageBox.Show(this, string.Join("\n", report.CatalogNotes), "Navisworks Import - catalog", MessageBoxButtons.OK, MessageBoxIcon.Information);
             int ok = report.Rows.Values.Count(r => !r.Failed && r.Created.Count > 0), failed = report.Rows.Values.Count(r => r.Failed);
             int objects = report.Rows.Values.Sum(r => r.Created.Count);
-            SetStatus($"Imported {ok} row(s) as {objects} object(s)" + (failed > 0 ? $"; {failed} failed (see the Result column)." : ".") + " Use UNDO to reverse.", failed > 0);
+            SetStatus($"Imported {ok} row(s) as {objects} object(s)" + (failed > 0 ? $"; {failed} failed (see the Result column)." : ".") +
+                      (clouds > 0 ? $" {clouds} clash cloud(s) on {ClashClouds.Layer}." : "") + " Use UNDO to reverse.", failed > 0);
             ZoomToCreated(doc, report.Rows.Values.SelectMany(r => r.Created).ToList());
         }
 

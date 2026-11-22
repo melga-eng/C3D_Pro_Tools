@@ -91,6 +91,9 @@ namespace C3DProTools
                                    (kv.Value.Family.Length > 0 ? $" ({kv.Value.Family} · {kv.Value.Size})" : "") + (kv.Value.Detail.Length > 0 ? " " + kv.Value.Detail : ""));
                 }
                 log.AppendLine(Connections(doc, report));
+                // Sent from the Clash Grouper: a revision cloud around each clash area (after a good import only).
+                if (report.Error.Length == 0 && session.ClashAreas.Count > 0)
+                    log.AppendLine($"Revision clouds: {ClashClouds.Draw(doc.Database, session.ClashAreas, NavisImporter.DrawingScale(doc.Database))} on {ClashClouds.Layer}.");
                 log.AppendLine($"Imported {report.Rows.Values.Count(r => r.Created.Count > 0 && !r.Failed && !r.InDrawing && r.Status != "Already imported")}, " +
                                $"in drawing {report.Rows.Values.Count(r => r.InDrawing)}, failed {report.Rows.Values.Count(r => r.Failed)}.");
             }

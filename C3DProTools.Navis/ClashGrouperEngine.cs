@@ -148,7 +148,7 @@ namespace C3DProTools.Navis
                 }
         }
 
-        /// <summary>A main-side element: its box and up to 800 of its shape's points, in metres.</summary>
+        /// <summary>A main-side element: its box and up to 4,000 of its shape's triangles, in metres.</summary>
         private static MainElement Element(ModelItem m, double toMetres)
         {
             var e = new MainElement { Name = m.DisplayName ?? "" };
@@ -163,9 +163,10 @@ namespace C3DProTools.Navis
                 var tris = new List<double>();
                 if (m.HasGeometry) NavisExtractor.AddTriangles(m, tris, toMetres);
                 else foreach (ModelItem d in m.Descendants) if (d.HasGeometry) NavisExtractor.AddTriangles(d, tris, toMetres);
-                int n = tris.Count / 3, step = Math.Max(1, n / 800);
+                // Whole triangles (every k-th, up to 4,000), so a point can be measured to the faces.
+                int nt = tris.Count / 9, step = Math.Max(1, nt / 4000);
                 var pts = new List<double>();
-                for (int i = 0; i < n; i += step) { pts.Add(tris[3 * i]); pts.Add(tris[3 * i + 1]); pts.Add(tris[3 * i + 2]); }
+                for (int k = 0; k < nt; k += step) for (int q = 0; q < 9; q++) pts.Add(tris[9 * k + q]);
                 e.Points = pts.ToArray();
             }
             catch (Exception ex) { C3DProLogger.Warn($"Clash Grouper: the shape of {e.Name} could not be read; its box is used", ex); }
@@ -188,6 +189,62 @@ namespace C3DProTools.Navis
                 }
             }
             return items;
+        }
+
+        // ---- Send to Civil 3D: the other side's items selected, and their clash areas kept for the link ----
+
+        private static HashSet<ModelItem> _sentItems;
+        private static List<NavisLink.NavisClashArea> _sentAreas = new List<NavisLink.NavisClashArea>();
+
+        /// <summary>
+        /// Selects the other side's items of the chosen groups and single clashes (the main side, the network being changed, is
+        /// not imported) and keeps one area per group or clash for Civil 3D. Returns the number of items and areas.
+        /// </summary>
+        public static (int items, int areas) Send(Document doc, ClashTest test, IEnumerable<string> names, bool item1Main)
+        {
+            double toMetres = NavisExtractor.ToMetres(doc.Units);
+            var chosen = new HashSet<string>(names ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+            var items = new ModelItemCollection();
+            var areas = new List<NavisLink.NavisClashArea>();
+            foreach (SavedItem s in test.Children)
+            {
+                if (!chosen.Contains(s.DisplayName)) continue;
+                List<ClashResult> rs = s is ClashResult r ? new List<ClashResult> { r } : s is GroupItem g ? g.Children.OfType<ClashResult>().ToList() : new List<ClashResult>();
+                if (rs.Count == 0) continue;
+                var a = new NavisLink.NavisClashArea
+                {
+                    Name = s.DisplayName, Test = test.DisplayName, Clashes = rs.Count,
+                    Status = rs.Select(x => x.Status.ToString()).Distinct().Count() == 1 ? rs[0].Status.ToString() : "mixed",
+                    MinX = double.MaxValue, MinY = double.MaxValue, MaxX = double.MinValue, MaxY = double.MinValue
+                };
+                double z = 0;
+                foreach (ClashResult c in rs)
+                {
+                    ModelItem other = item1Main ? c.Item2 : c.Item1;
+                    if (other != null) items.Add(other);
+                    // The clash point, not the result's box: that box covers both whole elements, so a long duct made a 24 x 40 m
+                    // area of clashes 6 m apart (test 04, 2026-11-22). Civil 3D adds the margin round the points.
+                    Point3D p = c.Center;
+                    a.MinX = Math.Min(a.MinX, p.X * toMetres); a.MaxX = Math.Max(a.MaxX, p.X * toMetres);
+                    a.MinY = Math.Min(a.MinY, p.Y * toMetres); a.MaxY = Math.Max(a.MaxY, p.Y * toMetres);
+                    z += p.Z * toMetres;
+                }
+                a.Z = z / rs.Count;
+                areas.Add(a);
+            }
+            doc.CurrentSelection.CopyFrom(items);
+            _sentItems = new HashSet<ModelItem>(doc.CurrentSelection.SelectedItems.Cast<ModelItem>());
+            _sentAreas = areas;
+            return (items.Count, areas.Count);
+        }
+
+        /// <summary>The areas sent with the current selection: only while it is still exactly what Send selected.</summary>
+        public static List<NavisLink.NavisClashArea> AreasForSelection(Document doc)
+        {
+            if (_sentItems == null) return new List<NavisLink.NavisClashArea>();
+            ModelItemCollection now = doc.CurrentSelection.SelectedItems;
+            if (now.Count != _sentItems.Count || now.Cast<ModelItem>().Any(m => !_sentItems.Contains(m))) return new List<NavisLink.NavisClashArea>();
+            return _sentAreas;
         }
 
         public static string Describe(IEnumerable<TestGrouping> runs)

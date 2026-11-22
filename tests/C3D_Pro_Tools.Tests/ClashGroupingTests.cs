@@ -7,12 +7,25 @@ namespace C3DProTools.Tests
 {
     public class ClashGroupingTests
     {
-        /// <summary>A straight duct piece along X from x0 to x1 at y, 0.5 m wide, with its end points.</summary>
-        private static MainElement Duct(string name, double x0, double x1, double y = 0) => new MainElement
+        /// <summary>An axis-aligned box as an element with its 12 face triangles.</summary>
+        private static MainElement Box(string name, double x0, double y0, double z0, double x1, double y1, double z1)
         {
-            Name = name, MinX = x0, MaxX = x1, MinY = y - 0.25, MaxY = y + 0.25, MinZ = 0, MaxZ = 0.5,
-            Points = new[] { x0, y, 0.0, x1, y, 0.0, (x0 + x1) / 2, y, 0.0 }
-        };
+            double[][] v =
+            {
+                new[] { x0, y0, z0 }, new[] { x1, y0, z0 }, new[] { x1, y1, z0 }, new[] { x0, y1, z0 },
+                new[] { x0, y0, z1 }, new[] { x1, y0, z1 }, new[] { x1, y1, z1 }, new[] { x0, y1, z1 },
+            };
+            int[][] f = { new[] { 0, 1, 2 }, new[] { 0, 2, 3 }, new[] { 4, 5, 6 }, new[] { 4, 6, 7 }, new[] { 0, 1, 5 }, new[] { 0, 5, 4 },
+                          new[] { 1, 2, 6 }, new[] { 1, 6, 5 }, new[] { 2, 3, 7 }, new[] { 2, 7, 6 }, new[] { 3, 0, 4 }, new[] { 3, 4, 7 } };
+            return new MainElement
+            {
+                Name = name, MinX = x0, MinY = y0, MinZ = z0, MaxX = x1, MaxY = y1, MaxZ = z1,
+                Points = f.SelectMany(t => t.SelectMany(i => v[i])).ToArray()
+            };
+        }
+
+        /// <summary>A straight duct piece along X from x0 to x1, 0.5 m square.</summary>
+        private static MainElement Duct(string name, double x0, double x1, double y = 0) => Box(name, x0, y - 0.25, 0, x1, y + 0.25, 0.5);
 
         private static ClashPoint C(int i, double x, int element, string status = "New", double y = 0) =>
             new ClashPoint { Index = i, X = x, Y = y, Element = element, Status = status };
@@ -24,6 +37,18 @@ namespace C3DProTools.Tests
             int[] set = ClashGrouping.ConnectedSets(e, 1.0);
             Assert.Equal(set[0], set[2]);       // A-B-C chained, within 1 m at each joint
             Assert.NotEqual(set[0], set[3]);    // 10 m away
+        }
+
+        [Fact]
+        public void A_duct_ending_in_the_middle_of_a_manhole_wall_is_connected_to_it()
+        {
+            // 4 x 4 x 3 m manhole; the duct ends at the middle of its east wall, 2.5 m and more from every corner.
+            MainElement manhole = Box("manhole", 0, 0, 0, 4, 4, 3);
+            MainElement duct = Box("duct", 4.0, 1.75, 1.25, 12, 2.25, 1.75);
+            Assert.True(ClashGrouping.Touch(duct, manhole, 1.0));
+            Assert.True(ClashGrouping.Touch(manhole, duct, 1.0));
+            var clashes = new[] { C(1, 2, 0), C(2, 8, 1) };   // one item 2 crossing both
+            Assert.Single(ClashGrouping.Group(clashes, ClashGrouping.ConnectedSets(new List<MainElement> { manhole, duct }, 1.0), new GroupingOptions()));
         }
 
         [Fact]
@@ -40,7 +65,6 @@ namespace C3DProTools.Tests
         [Fact]
         public void No_group_spans_more_than_the_largest_span_even_along_one_route()
         {
-            var e = new List<MainElement> { Duct("route", 0, 100) };
             var clashes = Enumerable.Range(0, 11).Select(i => C(i, i * 10, 0)).ToArray();   // every 10 m along 100 m
             List<List<int>> g = ClashGrouping.Group(clashes, new[] { 0 }, new GroupingOptions { MaxSpan = 25 });
             Assert.All(g, grp => Assert.True(grp.Max() * 10 - grp.Min() * 10 <= 25));
@@ -62,10 +86,19 @@ namespace C3DProTools.Tests
         [Fact]
         public void A_diagonal_duct_whose_box_overlaps_but_whose_shape_is_far_is_not_connected()
         {
-            var diagonal = new MainElement { Name = "diag", MinX = 0, MaxX = 20, MinY = 0, MaxY = 20, MinZ = 0, MaxZ = 1, Points = new[] { 0, 0, 0.0, 20, 20, 0.0, 10, 10, 0.0 } };
-            var corner = new MainElement { Name = "corner", MinX = 18, MaxX = 19, MinY = 1, MaxY = 2, MinZ = 0, MaxZ = 1, Points = new[] { 18, 1, 0.0, 19, 2, 0.0 } };
+            // A flat strip along the diagonal (0,0)-(20,20): its box covers the corner piece at (18..19, 1..2), its shape does not.
+            var diagonal = new MainElement
+            {
+                Name = "diag", MinX = 0, MaxX = 20.2, MinY = 0, MaxY = 20.2, MinZ = 0, MaxZ = 0,
+                Points = new double[] { 0, 0, 0, 20, 20, 0, 20.2, 19.8, 0, 0, 0, 0, 20.2, 19.8, 0, 0.2, -0.2, 0 }
+            };
+            MainElement corner = Box("corner", 18, 1, 0, 19, 2, 1);
             Assert.False(ClashGrouping.Touch(diagonal, corner, 1.0));
         }
+
+        [Fact]
+        public void Point_to_triangle_distance_is_measured_to_the_face_not_the_corners() =>
+            Assert.Equal(0.25, ClashGrouping.PointTriangle2(5, 5, 0.5, 0, 0, 0, 10, 0, 0, 0, 10, 0), 9);
 
         [Theory]
         [InlineData("IF-PIP-MVDCT-T1-212 (3)", "IF-PIP-MVDCT-T1-212")]

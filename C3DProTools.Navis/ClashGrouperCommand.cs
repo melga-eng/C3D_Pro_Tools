@@ -46,6 +46,27 @@ namespace C3DProTools.Navis
                 File.WriteAllText(args[6], ClashGrouperEngine.Describe(runs), Encoding.UTF8);
                 return 0;
             }
+            // "run", test: runs the clash test again (background tests on a model whose files changed).
+            if (args != null && args.Length >= 2 && args[0] == "run")
+            {
+                ClashTest t = ClashGrouperEngine.Tests(doc).FirstOrDefault(x => x.DisplayName == args[1]);
+                if (t != null) doc.GetClash().TestsData.TestsRunTest(t);
+                return 0;
+            }
+            // "send", test, group names joined by | ("*" = every group), main side "1"/"2", file: Send to Civil 3D, the
+            // selection and its clash areas saved as Navisworks Import reads them (background tests).
+            if (args != null && args.Length >= 5 && args[0] == "send")
+            {
+                ClashTest t = ClashGrouperEngine.Tests(doc).FirstOrDefault(x => x.DisplayName == args[1]);
+                if (t == null) { File.WriteAllText(args[4], "no test " + args[1]); return 1; }
+                List<string> names = args[2] == "*" ? t.Children.OfType<GroupItem>().Select(g => g.DisplayName).ToList() : args[2].Split('|').ToList();
+                ClashGrouperEngine.Send(doc, t, names, args[3] != "2");
+                NavisLink.NavisResponse r = NavisExtractor.ReadSelection(doc);
+                r.ClashAreas = ClashGrouperEngine.AreasForSelection(doc);
+                using (FileStream f = File.Create(args[4]))
+                    new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(NavisLink.NavisResponse)).WriteObject(f, r);
+                return 0;
+            }
             if (doc == null || doc.IsClear) { MessageBox.Show("Open a model with clash tests first.", "Clash Grouper"); return 0; }
             if (_form == null || _form.IsDisposed) _form = new FormClashGrouper();
             _form.Show();
@@ -114,6 +135,7 @@ namespace C3DProTools.Navis
             sel.Controls.Add(Button("All", (s, e) => SelectItems(true, true)));
             sel.Controls.Add(Button("Item 1", (s, e) => SelectItems(true, false)));
             sel.Controls.Add(Button("Item 2", (s, e) => SelectItems(false, true)));
+            sel.Controls.Add(Button("Send to Civil 3D", (s, e) => SendToCivil()));
             sel.Controls.Add(Button("Tick groups", (s, e) => { for (int i = 0; i < _groups.Items.Count; i++) _groups.SetItemChecked(i, !_groups.Items[i].ToString().StartsWith("   ")); }));
             right.Controls.Add(sel, 0, 3);
             right.Controls.Add(_log, 0, 4);
@@ -206,10 +228,28 @@ namespace C3DProTools.Navis
                 _groups.Items.Add(s is GroupItem g ? $"{s.DisplayName}" : $"   {s.DisplayName} ({(s as ClashResult)?.Status})", false);
         }
 
+        private List<string> TickedNames() =>
+            _groups.CheckedItems.Cast<string>().Select(n => n.StartsWith("   ") ? n.Trim().Substring(0, n.Trim().LastIndexOf(" (", StringComparison.Ordinal)) : n).ToList();
+
+        /// <summary>
+        /// The other side's items of the ticked groups and clashes selected, with their areas kept for Civil 3D: Navisworks
+        /// Import's "Get selection" then imports them and draws a revision cloud around each area.
+        /// </summary>
+        private void SendToCivil()
+        {
+            if (!(_groupTest.SelectedItem is TestItem ti) || Find(ti.Name) is not ClashTest t) return;
+            List<string> names = TickedNames();
+            if (names.Count == 0) { MessageBox.Show(this, "Tick the groups or clashes to send.", Text); return; }
+            (int items, int areas) = ClashGrouperEngine.Send(Doc, t, names, _item1.Checked);
+            _log.Text = $"Selected {items} item(s) of the {(_item1.Checked ? "item 2" : "item 1")} side in {areas} clash area(s)." + Environment.NewLine +
+                        "In Civil 3D: Navisworks Import > Get selection, then Import. A revision cloud is drawn around each area." + Environment.NewLine +
+                        "(The areas go with this selection only: selecting something else in Navisworks drops them.)";
+        }
+
         private void SelectItems(bool item1, bool item2)
         {
             if (!(_groupTest.SelectedItem is TestItem ti) || Find(ti.Name) is not ClashTest t) return;
-            var names = _groups.CheckedItems.Cast<string>().Select(n => n.StartsWith("   ") ? n.Trim().Substring(0, n.Trim().LastIndexOf(" (", StringComparison.Ordinal)) : n).ToList();
+            var names = TickedNames();
             if (names.Count == 0) { MessageBox.Show(this, "Tick the groups or clashes whose items to select.", Text); return; }
             ModelItemCollection items = ClashGrouperEngine.Items(t, names, item1, item2);
             Doc.CurrentSelection.CopyFrom(items);

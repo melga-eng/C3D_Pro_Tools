@@ -20,7 +20,7 @@ namespace C3DProTools.Navis
     {
         public string Name = "";
         public double MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
-        /// <summary>Points of its shape (triangle corners); empty when only the box is known.</summary>
+        /// <summary>Its shape as triangles (nine numbers each: three corners); empty when only the box is known.</summary>
         public double[] Points = new double[0];
     }
 
@@ -53,29 +53,66 @@ namespace C3DProTools.Navis
             return Enumerable.Range(0, n).Select(Find).ToArray();
         }
 
-        /// <summary>True when the boxes are within the gap and (when both shapes are known) two of their points are.</summary>
+        /// <summary>
+        /// True when the boxes are within the gap and (when both shapes are known) a corner of one is within the gap of a face of
+        /// the other. Faces, not corners only: a duct ending in the middle of a manhole wall is far from every corner of the
+        /// manhole (your duct and manhole, 2026-11-22, were left apart).
+        /// </summary>
         public static bool Touch(MainElement a, MainElement b, double gap)
         {
             double dx = Math.Max(0, Math.Max(a.MinX - b.MaxX, b.MinX - a.MaxX));
             double dy = Math.Max(0, Math.Max(a.MinY - b.MaxY, b.MinY - a.MaxY));
             double dz = Math.Max(0, Math.Max(a.MinZ - b.MaxZ, b.MinZ - a.MaxZ));
             if (dx * dx + dy * dy + dz * dz > gap * gap) return false;
-            if (a.Points.Length < 3 || b.Points.Length < 3) return true;
+            if (a.Points.Length < 9 || b.Points.Length < 9) return true;
             // A long diagonal duct's box covers ground it is far from: the shapes decide.
+            return CornerNearFace(a, b, gap) || CornerNearFace(b, a, gap);
+        }
+
+        /// <summary>A corner of <paramref name="a"/> (its triangles' corners) within the gap of a triangle of <paramref name="b"/>.</summary>
+        private static bool CornerNearFace(MainElement a, MainElement b, double gap)
+        {
             double g2 = gap * gap;
+            double[] t = b.Points;
             for (int i = 0; i + 2 < a.Points.Length; i += 3)
             {
                 double x = a.Points[i], y = a.Points[i + 1], z = a.Points[i + 2];
                 if (x < b.MinX - gap || x > b.MaxX + gap || y < b.MinY - gap || y > b.MaxY + gap || z < b.MinZ - gap || z > b.MaxZ + gap) continue;
-                for (int j = 0; j + 2 < b.Points.Length; j += 3)
-                {
-                    double ex = x - b.Points[j], ey = y - b.Points[j + 1], ez = z - b.Points[j + 2];
-                    if (ex * ex + ey * ey + ez * ez <= g2) return true;
-                }
+                for (int j = 0; j + 8 < t.Length; j += 9)
+                    if (PointTriangle2(x, y, z, t[j], t[j + 1], t[j + 2], t[j + 3], t[j + 4], t[j + 5], t[j + 6], t[j + 7], t[j + 8]) <= g2) return true;
             }
             return false;
         }
 
+        /// <summary>The squared distance from a point to a triangle (closest point on the triangle, Ericson's method).</summary>
+        public static double PointTriangle2(double px, double py, double pz, double ax, double ay, double az, double bx, double by, double bz, double cx, double cy, double cz)
+        {
+            double abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
+            double apx = px - ax, apy = py - ay, apz = pz - az;
+            double d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+            double qx, qy, qz;
+            if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; }
+            else
+            {
+                double bpx = px - bx, bpy = py - by, bpz = pz - bz;
+                double d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+                double cpx = px - cx, cpy = py - cy, cpz = pz - cz;
+                double d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+                double vc = d1 * d4 - d3 * d2, vb = d5 * d2 - d1 * d6, va = d3 * d6 - d5 * d4;
+                if (d3 >= 0 && d4 <= d3) { qx = bx; qy = by; qz = bz; }
+                else if (vc <= 0 && d1 >= 0 && d3 <= 0) { double v = d1 / (d1 - d3); qx = ax + v * abx; qy = ay + v * aby; qz = az + v * abz; }
+                else if (d6 >= 0 && d5 <= d6) { qx = cx; qy = cy; qz = cz; }
+                else if (vb <= 0 && d2 >= 0 && d6 <= 0) { double w = d2 / (d2 - d6); qx = ax + w * acx; qy = ay + w * acy; qz = az + w * acz; }
+                else if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) { double w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); qx = bx + w * (cx - bx); qy = by + w * (cy - by); qz = bz + w * (cz - bz); }
+                else
+                {
+                    double denom = 1.0 / (va + vb + vc), v = vb * denom, w = vc * denom;
+                    qx = ax + abx * v + acx * w; qy = ay + aby * v + acy * w; qz = az + abz * v + acz * w;
+                }
+            }
+            double ex = px - qx, ey = py - qy, ez = pz - qz;
+            return ex * ex + ey * ey + ez * ez;
+        }
         /// <summary>
         /// The groups (each a list of clash indexes, two or more), largest first. Within one status and one connected element
         /// set, clashes are joined closest first while every clash stays within the largest span of every other (complete

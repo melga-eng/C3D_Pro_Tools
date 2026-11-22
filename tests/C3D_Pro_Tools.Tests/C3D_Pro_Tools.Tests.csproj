@@ -28,6 +28,7 @@
 		<Compile Include="..\..\C3D_Pro_Tools\Features\Surfaces\MeshTriangles.cs" Link="Engine\MeshTriangles.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\Features\ProfileTool\SurfaceGuess.cs" Link="Engine\SurfaceGuess.cs" />
 		<Compile Include="..\..\C3DProTools.Navis\ClashGrouping.cs" Link="Engine\ClashGrouping.cs" />
+		<Compile Include="..\..\C3D_Pro_Tools\ClashCloudShape.cs" Link="Engine\ClashCloudShape.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverSolver.cs" Link="Engine\CoverSolver.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\CoverEvaluation.cs" Link="Engine\CoverEvaluation.cs" />
 		<Compile Include="..\..\C3D_Pro_Tools\NavisGeometryFit.cs" Link="Engine\NavisGeometryFit.cs" />

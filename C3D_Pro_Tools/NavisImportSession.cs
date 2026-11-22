@@ -34,6 +34,8 @@ namespace C3DProTools
         public Document Document { get; private set; }
         /// <summary>Navisworks → drawing: turn about the origin, then shift; applied as rows are read.</summary>
         public NavisTransform Transform { get; set; } = new NavisTransform();
+        /// <summary>The clash areas sent with the selection by the Clash Grouper, moved like the rows; empty for a plain selection.</summary>
+        public List<ClashCloud> ClashAreas { get; private set; } = new List<ClashCloud>();
 
         /// <summary>
         /// Makes the matched parts, chosen parts and "already imported" marks those of <paramref name="doc"/>. For another drawing
@@ -76,6 +78,7 @@ namespace C3DProTools
         public void Load(NavisResponse response)
         {
             SourceDocument = response.Document;
+            ClashAreas = ClashClouds.From(response.ClashAreas, Transform);
             Rows.Clear(); Plan.Clear(); Done.Clear(); Ticked.Clear(); Overrides.Clear(); NetworkOverrides.Clear(); Destinations.Clear();
             foreach (NavisElement e in response.Elements)
             {
