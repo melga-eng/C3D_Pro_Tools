@@ -22,6 +22,113 @@ namespace C3DProTools.Tests
             Assert.Empty(r.Warnings);
         }
 
+        // A cable (top 10.0, 0.1 high) over 0-100, an encasement around it over 40-60 (top 10.2, 0.5 high, bottom 9.7).
+        private static DuctSegment[] CableInEncasement() => new[]
+        {
+            new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1 },
+            new DuctSegment("Enc", 40, 10.2, 60, 10.2) { Height = 0.5 },
+        };
+
+        [Fact]
+        public void Encasement_FollowedByDefault()
+        {
+            var r = TopProfileMath.Compute(CableInEncasement(), 0, 100);
+            // A vertical step at each end of the encasement: cable top and encasement top, 0.1 mm apart.
+            var pts = r.Points.Select(p => (System.Math.Round(p.Station, 4), System.Math.Round(p.Elevation, 3))).ToList();
+            Assert.Equal(new List<(double, double)> { (0, 10.0), (40, 10.0), (40.0001, 10.2), (60, 10.2), (60.0001, 10.0), (100, 10.0) }, pts);
+            Assert.Equal(2, r.EncasementSteps);
+            Assert.Contains(r.Warnings, w => w.StartsWith("Encasement followed: Enc around Cable"));
+            Assert.Equal(0, r.EncasementsLeftOut);
+        }
+
+        [Fact]
+        public void Encasement_InSeveralPieces_StepsOnlyAtTheRunEnds()
+        {
+            // Three encasement pieces 40-50-55-60 around two cable pieces split at 50: steps at 40 and 60 only.
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable1", 0, 10.0, 50, 10.0) { Height = 0.1 },
+                new DuctSegment("Cable2", 50, 10.0, 100, 10.0) { Height = 0.1 },
+                new DuctSegment("Enc1", 40, 10.2, 50, 10.2) { Height = 0.5 },
+                new DuctSegment("Enc2", 50, 10.2, 55, 10.2) { Height = 0.5 },
+                new DuctSegment("Enc3", 55, 10.2, 60, 10.2) { Height = 0.5 },
+            }, 0, 100);
+            Assert.Equal(2, r.EncasementSteps);
+            Assert.All(r.Points.Where(p => p.Station > 40.001 && p.Station < 59.999), p => Assert.Equal(10.2, p.Elevation, 3));
+        }
+
+        [Fact]
+        public void Encasement_LeftOutWhenFollowingTheInside()
+        {
+            var r = TopProfileMath.Compute(CableInEncasement(), 0, 100, insideEncasement: true);
+            Assert.All(r.Points, p => Assert.Equal(10.0, p.Elevation, 3));
+            Assert.Equal(1, r.EncasementsLeftOut);
+        }
+
+        [Fact]
+        public void Encasement_WithNothingInsideStillCounts()
+        {
+            // The cable stops at 50; the encasement goes on to 60 with nothing in it.
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 50, 10.0) { Height = 0.1 },
+                new DuctSegment("Enc", 40, 10.2, 60, 10.2) { Height = 0.5 },
+            }, 0, 100, insideEncasement: true);
+            Assert.Equal(10.0, Pts(r).First(p => p.s == 50).z);
+            Assert.Equal(10.2, Pts(r).Last().z);
+        }
+
+        [Fact]
+        public void BiggerPipeBesideTheCableInPlan_IsNotAnEncasement()
+        {
+            // Same depth band, but 0.5 m apart in plan: the bigger pipe is not around the cable.
+            var cable = new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1, Width = 0.1, Offset = 0.25 };
+            var duct = new DuctSegment("Duct", 40, 10.03, 60, 10.03) { Height = 0.16, Width = 0.16, Offset = -0.25 };
+            Assert.False(TopProfileMath.Holds(duct, cable, 50));
+            var r = TopProfileMath.Compute(new[] { cable, duct }, 0, 100, insideEncasement: true);
+            Assert.Equal(0, r.EncasementsLeftOut);
+            Assert.Equal(10.03, TopProfileMath.ElevationAt(r.Points, 50).Value, 3);
+        }
+
+        [Fact]
+        public void CableLeavingTheEncasement_TopLeavesItThere()
+        {
+            // Cable top falls 10.0 -> 9.5 over 0-100 (0.1 high), encasement 10.2 level (0.5 high, bottom 9.7): the cable's
+            // bottom (9.9 - 0.005 s) leaves the encasement's (9.7) at sta 40. Inside mode follows the cable up to there.
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 100, 9.5) { Height = 0.1 },
+                new DuctSegment("Enc", 0, 10.2, 100, 10.2) { Height = 0.5 },
+            }, 0, 100, insideEncasement: true);
+            Assert.Equal(9.9, TopProfileMath.ElevationAt(r.Points, 20).Value, 3);
+            Assert.Contains(r.Points, p => System.Math.Abs(p.Station - 40) < 0.01);
+        }
+
+        [Fact]
+        public void SmallEncasementRise_StillAStepNotARamp()
+        {
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1 },
+                new DuctSegment("Enc", 40, 10.015, 60, 10.015) { Height = 0.5 },
+            }, 0, 100);
+            Assert.Equal(2, r.EncasementSteps);
+            Assert.Equal(10.0, TopProfileMath.ElevationAt(r.Points, 20).Value, 4);
+        }
+
+        [Fact]
+        public void PipeBesideAnother_IsNotAnEncasement()
+        {
+            // A taller pipe lying higher (its bottom above the cable's): not around it, so the TOP follows it in both modes.
+            var r = TopProfileMath.Compute(new[]
+            {
+                new DuctSegment("Cable", 0, 10.0, 100, 10.0) { Height = 0.1 },
+                new DuctSegment("Duct", 40, 10.8, 60, 10.8) { Height = 0.5 },
+            }, 0, 100, insideEncasement: true);
+            Assert.Equal(10.8, Pts(r).First(p => p.s == 40).z);
+            Assert.Equal(0, r.EncasementsLeftOut);
+        }
+
         [Fact]
         public void ReversedDuct_IsNormalised()
         {

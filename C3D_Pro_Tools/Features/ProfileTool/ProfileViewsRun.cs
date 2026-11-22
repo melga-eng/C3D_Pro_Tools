@@ -41,6 +41,8 @@ namespace C3DProTools.ProfileTool
         public bool OuterFace { get; set; } = true;
         public bool ShownOnly { get; set; } = true;
         public bool CreateMissingTop { get; set; } = false;
+        /// <summary>False (default): TOP follows the highest outside, encasement included. True: the cable or duct inside an encasement.</summary>
+        public bool TopInsideEncasement { get; set; } = false;
         public string TopNameTemplate { get; set; } = "{alignment}-Duct-TOP";
         public string TopStyle { get; set; } = "";
         public string TopLabelSet { get; set; } = "";
@@ -85,7 +87,7 @@ namespace C3DProTools.ProfileTool
 
         public TopOptions Top() => new TopOptions
         {
-            Pattern = TopPattern, OffsetTolerance = OffsetTolerance, OuterFace = OuterFace, ShownOnly = ShownOnly,
+            Pattern = TopPattern, OffsetTolerance = OffsetTolerance, OuterFace = OuterFace, ShownOnly = ShownOnly, InsideEncasement = TopInsideEncasement,
         };
 
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions
@@ -196,12 +198,16 @@ namespace C3DProTools.ProfileTool
             TopScan scan = TopProfileCivil.Scan(doc.Database, civil, s.Top());
             List<AlignmentFit> fits = scan.Alignments.Where(a => s.Includes(a.Alignment)).OrderBy(a => a.Alignment).ToList();
             log.AppendLine($"TOP: {fits.Count} alignments with profile views; " +
-                           string.Join(", ", fits.GroupBy(f => f.Status).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key}")));
+                           string.Join(", ", fits.GroupBy(f => f.Status).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key}")) +
+                           (s.TopInsideEncasement ? "; TOP follows the cable or duct inside an encasement" : "; TOP follows the highest outside (encasement included)"));
             foreach (AlignmentFit f in fits)
             {
                 string diff = f.MaxDiff.HasValue ? $" max diff {f.MaxDiff:F3} m" : "";
-                log.AppendLine($"  {f.Alignment,-28} {f.Status,-12} ducts {f.Ducts.Count,3}  TOP {f.Primary?.Name ?? "-"}{diff}");
+                string enc = f.Result.EncasementSteps > 0 ? $"  encasement steps {f.Result.EncasementSteps}" : "";
+                if (f.Result.EncasementsLeftOut > 0) enc += $"  encasements left out {f.Result.EncasementsLeftOut}";
+                log.AppendLine($"  {f.Alignment,-28} {f.Status,-12} ducts {f.Ducts.Count,3}  TOP {f.Primary?.Name ?? "-"}{diff}{enc}");
                 foreach (string n in f.Notes.Take(3)) log.AppendLine($"      {n}");
+                foreach (string w in f.Result.Warnings.Where(w => w.StartsWith("Encasement")).Take(5)) log.AppendLine($"      {w}");
             }
             if (!write) return;
 

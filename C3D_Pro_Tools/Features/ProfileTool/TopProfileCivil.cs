@@ -16,6 +16,11 @@ namespace C3DProTools.ProfileTool
         public bool OuterFace = true;
         /// <summary>True: only ducts shown in the alignment's profile views. False: every duct along the alignment.</summary>
         public bool ShownOnly = true;
+        /// <summary>
+        /// False: the TOP follows the highest outside, an encasement drawn around a cable included. True: where one pipe holds
+        /// another (an encasement around a cable), the TOP follows the pipe inside.
+        /// </summary>
+        public bool InsideEncasement = false;
     }
 
     public sealed class ProfileRef
@@ -115,17 +120,17 @@ namespace C3DProTools.ProfileTool
                 {
                     if (o.ShownOnly && !shownIn[pipe.ObjectId].Overlaps(viewSet)) continue;
                     if (reach.HasValue && !InBox(reach.Value, a) && !InBox(reach.Value, b)) continue;
-                    if (!Along(al, a, b, o.OffsetTolerance, out double s0, out double s1)) continue;
+                    if (!Along(al, a, b, o.OffsetTolerance, out double s0, out double s1, out double offset)) continue;
                     double half = OuterHeightOf(pipe) / 2.0;
                     fit.Ducts.Add(new DuctInfo
                     {
                         Name = pipe.Name,
                         Network = network,
-                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half),
+                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half) { Height = 2 * half, Offset = offset, Width = C3DProTools.CoverRoute.OuterWidthOf(pipe) },
                     });
                 }
                 fit.Ducts.Sort((x, y) => x.Segment.S0.CompareTo(y.Segment.S0));
-                fit.Result = TopProfileMath.Compute(fit.Ducts.Select(d => d.Segment), fit.Start, fit.End);
+                fit.Result = TopProfileMath.Compute(fit.Ducts.Select(d => d.Segment), fit.Start, fit.End, o.InsideEncasement);
 
                 foreach (ObjectId pid in al.GetProfileIds())
                 {
@@ -354,13 +359,15 @@ namespace C3DProTools.ProfileTool
             new Point3d(s.X + (e.X - s.X) * t, s.Y + (e.Y - s.Y) * t, s.Z + (e.Z - s.Z) * t);
 
         /// <summary>Both ends and the middle within tolerance of the alignment. Stations are clipped to the alignment later.</summary>
-        private static bool Along(Alignment al, Point3d a, Point3d b, double tol, out double s0, out double s1)
+        private static bool Along(Alignment al, Point3d a, Point3d b, double tol, out double s0, out double s1, out double offset)
         {
-            s0 = s1 = 0;
+            s0 = s1 = offset = 0;
             if (!StaOff(al, a, out s0, out double o0) || Math.Abs(o0) > tol) return false;
             if (!StaOff(al, b, out s1, out double o1) || Math.Abs(o1) > tol) return false;
             var mid = Lerp(a, b, 0.5);
-            return StaOff(al, mid, out _, out double om) && Math.Abs(om) <= tol;
+            if (!StaOff(al, mid, out _, out double om) || Math.Abs(om) > tol) return false;
+            offset = om;
+            return true;
         }
 
         private static bool StaOff(Alignment al, Point3d p, out double station, out double offset)
@@ -397,6 +404,15 @@ namespace C3DProTools.ProfileTool
             double ps = p.StartingStation, pe = p.EndingStation;
             var stations = fit.Select(f => f.Station).ToList();
             try { foreach (ProfilePVI v in p.PVIs) stations.Add(v.RawStation); } catch { }
+            // A vertical step (two PVIs a hair apart) has two heights at its station: compared just before and after it instead.
+            var steps = new List<double>();
+            for (int i = 0; i + 1 < fit.Count; i++)
+                if (fit[i + 1].Station - fit[i].Station < TopProfileMath.StationEps) steps.Add(fit[i].Station);
+            if (steps.Count > 0)
+            {
+                stations = stations.Where(s => !steps.Any(t => Math.Abs(s - t) < 5 * TopProfileMath.StepRun)).ToList();
+                foreach (double t in steps) { stations.Add(t - 0.002); stations.Add(t + 0.002); }
+            }
             double max = 0, maxAt = 0;
             foreach (double s in stations)
             {

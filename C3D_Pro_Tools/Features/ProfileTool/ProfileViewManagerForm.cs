@@ -23,6 +23,7 @@ namespace C3DProTools.ProfileTool
         private readonly TextBox _tol = new() { Text = "0.30", Width = 45 };
         private readonly ComboBox _end = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
         private readonly CheckBox _shownOnly = new() { Text = "Only ducts shown in the views", AutoSize = true, Checked = true };
+        private readonly CheckBox _inside = new() { Text = "Follow the cable inside an encasement", AutoSize = true };
         private readonly Button _rescan = new() { Text = "Rescan", AutoSize = true };
 
         // filters
@@ -152,6 +153,8 @@ namespace C3DProTools.ProfileTool
             opts.Controls.Add(_end);
             _shownOnly.Margin = new Padding(8, 6, 3, 0);
             opts.Controls.Add(_shownOnly);
+            _inside.Margin = new Padding(8, 6, 3, 0);
+            opts.Controls.Add(_inside);
             opts.Controls.Add(_rescan);
             root.Controls.Add(opts, 0, 0);
 
@@ -210,6 +213,7 @@ namespace C3DProTools.ProfileTool
                 OffsetTolerance = tol,
                 OuterFace = _end.SelectedIndex == 0,
                 ShownOnly = _shownOnly.Checked,
+                InsideEncasement = _inside.Checked,
             };
         }
 

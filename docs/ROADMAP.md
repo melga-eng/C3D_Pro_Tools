@@ -67,6 +67,8 @@ Tests always run on copies.
 
 - Clash Grouper (Navisworks, your request 2026-11-20): groups by status, connected main-side elements (1 m) and span (25 m); Send to Civil 3D imports the other side's items with a revision cloud per area. Merged 2026-11-22; needs your try of the duct-into-manhole fix and Send.
 
+- TOP profile and encasement (your request 2026-11-22): follow the encasement with a vertical step at each end of a run, or the cable inside it (a setting). Merged 2026-11-22; needs your try.
+
 ## Public release 1 (started 2026-11-19)
 
 First package for people outside the project, shared on LinkedIn: **Navisworks Import, Surface from Solids, Rebuild Network**.
