@@ -55,6 +55,10 @@ namespace C3DProTools.Tests.Drawing
                 }
                 Point3d far = new Point3d(structures[0].Location.X + 10000, structures[0].Location.Y, 0);
                 response.Elements.Add(Element("FAR-1", far, far + new Vector3d(20, 0, -0.2), 0.08));
+                // Clash areas as the Clash Grouper sends them: one round the first new duct's start, one round the far duct.
+                Point3d s0 = structures[0].Location;
+                response.ClashAreas.Add(new NavisClashArea { Name = "New 01 - FIXTURE - 3 clashes", Status = "New", Test = "FIXTURE", Clashes = 3, MinX = s0.X - 1, MinY = s0.Y - 1, MaxX = s0.X + 4, MaxY = s0.Y + 3, Z = s0.Z });
+                response.ClashAreas.Add(new NavisClashArea { Name = "Clash9", Status = "Active", Test = "FIXTURE", Clashes = 1, MinX = far.X, MinY = far.Y - 0.5, MaxX = far.X + 20, MaxY = far.Y + 0.5, Z = 0 });
                 tr.Commit();
                 ed.WriteMessage($"\nFixture from network \"{net.Name}\": {pipes.Count} copies, {structures.Count} new ducts, 1 far duct -> {file}");
             }

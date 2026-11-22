@@ -1,0 +1,4 @@
+- Branch: `feature/clash-grouper` (merged to main 2026-11-22).
+- Changed: Navisworks Clash Grouper (group by status + connected main-side elements + span, undo, select items, Send to Civil 3D); Navisworks Import draws one revision cloud per sent area on `Z-Zz_10_40-M-ClashClouds`.
+- Checked: 868 unit tests; Navisworks automation on a copy of Federated Model.nwf (tests 04 and 02, save/reopen, send); `tests/drawing/navis-clash-clouds.scr` on Test.dwg PASS; Codex end review, five findings fixed.
+- Not done: the grouper window itself is not automation-tested; test 04's Selection A is stale since the MV NWC was swapped (user must reselect and rerun).

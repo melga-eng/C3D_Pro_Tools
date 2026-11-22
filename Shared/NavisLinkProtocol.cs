@@ -62,6 +62,22 @@ namespace C3DProTools.NavisLink
         [DataMember] public List<string> Warnings = new List<string>();
         /// <summary>The answering add-in's <see cref="NavisLinkWire.ProtocolVersion"/>; 0 from add-ins older than version 2.</summary>
         [DataMember] public int Version = NavisLinkWire.ProtocolVersion;
+        /// <summary>
+        /// The clash areas sent with this selection by the Clash Grouper (one per group or single clash), for revision clouds;
+        /// null or empty for a plain selection (and from older add-ins).
+        /// </summary>
+        [DataMember(IsRequired = false, EmitDefaultValue = false)] public List<NavisClashArea> ClashAreas = new List<NavisClashArea>();
+    }
+
+    /// <summary>A clash group (or single clash) area in Navisworks coordinates, metres: a box in plan and the level of its centre.</summary>
+    [DataContract]
+    public sealed class NavisClashArea
+    {
+        [DataMember] public string Name = "";
+        [DataMember] public string Status = "";
+        [DataMember] public string Test = "";
+        [DataMember] public int Clashes;
+        [DataMember] public double MinX, MinY, MaxX, MaxY, Z;
     }
 
     /// <summary>Length-prefixed JSON messages over a local named pipe. Each Navisworks window serves its own pipe.</summary>

@@ -128,7 +128,7 @@ namespace C3DProTools.Navis
             public void SnapPoint(ComApi.InwSimpleVertex v1) { }
         }
 
-        private static void AddTriangles(ModelItem item, List<double> into, double toMetres)
+        internal static void AddTriangles(ModelItem item, List<double> into, double toMetres)
         {
             ComApi.InwOaPath path = ComApiBridge.ToInwOaPath(item);
             Array own = (Array)path.ArrayData;

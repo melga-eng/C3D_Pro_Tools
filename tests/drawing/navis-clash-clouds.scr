@@ -1,0 +1,14 @@
+NETLOAD
+"C:/Users/melga/source/repos/C3D_Pro_Tools/tests/drawing/NavisFixture/bin/Debug/net10.0-windows/NavisFixture.dll"
+C3DPROTESTFIXTURE
+C:/Users/melga/AppData/Local/Temp/c3dpro-navis-fixture.json
+C3DPRONAVIS
+C:/Users/melga/AppData/Local/Temp/c3dpro-navis-fixture.json
+Auto
+Yes
+(princ (strcat "\nCLOUDS " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_40-M-ClashClouds")(0 . "LWPOLYLINE"))))) " TEXTS " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_40-M-ClashClouds")(0 . "MTEXT")))))))
+C3DPRONAVIS
+C:/Users/melga/AppData/Local/Temp/c3dpro-navis-fixture.json
+Auto
+Yes
+(princ (strcat "\nCLOUDS-AGAIN " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_40-M-ClashClouds")(0 . "LWPOLYLINE")))))))
