@@ -100,13 +100,16 @@ namespace C3DProTools.Navis
 
             // TestsEditTestFromCopy takes the settings only, not the results (2026-11-22, the groups were not written):
             // the whole test is replaced by the copy.
-            Before[test.DisplayName] = (ClashTest)test.CreateCopy();
+            Before[Key(doc, test)] = (ClashTest)test.CreateCopy();
             Replace(doc, test, copy);
             report.Groups = groups.Count;
             report.Grouped = used.Count;
             report.Single = results.Count - used.Count;
             return report;
         }
+
+        /// <summary>The undo key: the model file and the test name (review finding: another model's test of the same name must not be overwritten).</summary>
+        private static string Key(Document doc, ClashTest test) => (doc.FileName ?? "") + "|" + test.DisplayName;
 
         /// <summary>Replaces the test (settings and results) by the copy, in its place in the list.</summary>
         private static void Replace(Document doc, ClashTest test, ClashTest copy)
@@ -121,9 +124,9 @@ namespace C3DProTools.Navis
         /// <summary>Puts the test back as it was before its last grouping; false when there is none.</summary>
         public static bool Undo(Document doc, ClashTest test)
         {
-            if (!Before.TryGetValue(test.DisplayName, out ClashTest was)) return false;
+            if (!Before.TryGetValue(Key(doc, test), out ClashTest was)) return false;
             Replace(doc, test, was);
-            Before.Remove(test.DisplayName);
+            Before.Remove(Key(doc, test));
             return true;
         }
 
@@ -243,7 +246,13 @@ namespace C3DProTools.Navis
         {
             if (_sentItems == null) return new List<NavisLink.NavisClashArea>();
             ModelItemCollection now = doc.CurrentSelection.SelectedItems;
-            if (now.Count != _sentItems.Count || now.Cast<ModelItem>().Any(m => !_sentItems.Contains(m))) return new List<NavisLink.NavisClashArea>();
+            if (now.Count != _sentItems.Count || now.Cast<ModelItem>().Any(m => !_sentItems.Contains(m)))
+            {
+                // The selection changed: the areas are forgotten, so they never come back with a later plain selection (review finding).
+                _sentItems = null;
+                _sentAreas = new List<NavisLink.NavisClashArea>();
+                return new List<NavisLink.NavisClashArea>();
+            }
             return _sentAreas;
         }
 

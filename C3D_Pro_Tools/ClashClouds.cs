@@ -98,6 +98,9 @@ namespace C3DProTools
             return n;
         }
 
+        /// <summary>True when the import put something in the drawing, or found it there already: the clouds then mark real objects.</summary>
+        public static bool SomethingThere(ImportReport report) => report.Rows.Values.Any(r => !r.Failed && (r.Created.Count > 0 || r.InDrawing));
+
         private static string Tag(ClashCloud c) => "clash:" + c.Test + "|" + c.Name;
 
         private static ObjectId EnsureLayer(Transaction tr, Database db)

@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Text;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -92,8 +92,13 @@ namespace C3DProTools
                 }
                 log.AppendLine(Connections(doc, report));
                 // Sent from the Clash Grouper: a revision cloud around each clash area (after a good import only).
-                if (report.Error.Length == 0 && session.ClashAreas.Count > 0)
-                    log.AppendLine($"Revision clouds: {ClashClouds.Draw(doc.Database, session.ClashAreas, NavisImporter.DrawingScale(doc.Database))} on {ClashClouds.Layer}.");
+                // Only when something is in the drawing for the areas: an import where every row failed leaves the clouds as they
+                // were; a cloud failure is said on its own, the import is done (review findings).
+                if (report.Error.Length == 0 && session.ClashAreas.Count > 0 && ClashClouds.SomethingThere(report))
+                {
+                    try { log.AppendLine($"Revision clouds: {ClashClouds.Draw(doc.Database, session.ClashAreas, NavisImporter.DrawingScale(doc.Database))} on {ClashClouds.Layer}."); }
+                    catch (System.Exception ex) { C3DProLogger.Error("C3DPRONAVIS: the clash clouds could not be drawn", ex); log.AppendLine($"Revision clouds not drawn: {ex.Message} (the import itself is done)."); }
+                }
                 log.AppendLine($"Imported {report.Rows.Values.Count(r => r.Created.Count > 0 && !r.Failed && !r.InDrawing && r.Status != "Already imported")}, " +
                                $"in drawing {report.Rows.Values.Count(r => r.InDrawing)}, failed {report.Rows.Values.Count(r => r.Failed)}.");
             }

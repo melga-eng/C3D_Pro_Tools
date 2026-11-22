@@ -6,12 +6,12 @@ namespace C3DProTools
 {
     /// <summary>
     /// A revision cloud's outline (plain data): the area's corners, counter-clockwise, every edge split into arcs that bulge
-    /// outward. Each vertex carries the bulge of the arc that leaves it (AutoCAD polyline bulge: negative turns clockwise,
-    /// which for a counter-clockwise outline bulges outward).
+    /// outward. Each vertex carries the bulge of the arc that leaves it (AutoCAD polyline bulge: positive runs counter-clockwise,
+    /// its middle to the right of the chord, which is outside a counter-clockwise outline).
     /// </summary>
     internal static class ClashCloudShape
     {
-        public const double Bulge = -0.5;
+        public const double Bulge = 0.5;   // positive: the arc lies right of p->q, outside a counter-clockwise outline (review finding)
 
         /// <summary>The cloud's vertices for a closed polygon (any turn; made counter-clockwise), arcs about <paramref name="arc"/> long.</summary>
         public static List<(double X, double Y, double B)> Outline(IReadOnlyList<(double X, double Y)> corners, double arc)

@@ -1307,7 +1307,7 @@ namespace C3DProTools
             RefreshRows();
             // Sent from the Clash Grouper: a revision cloud around each clash area.
             int clouds = 0;
-            if (_session.ClashAreas.Count > 0)
+            if (_session.ClashAreas.Count > 0 && ClashClouds.SomethingThere(report))
             {
                 try { using (doc.LockDocument()) clouds = ClashClouds.Draw(doc.Database, _session.ClashAreas, NavisImporter.DrawingScale(doc.Database)); }
                 catch (Exception ex) { C3DProLogger.Error("Navisworks Import: the clash clouds could not be drawn", ex); }
