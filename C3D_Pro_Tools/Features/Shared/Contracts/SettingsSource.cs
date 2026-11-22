@@ -66,7 +66,7 @@ namespace C3DProTools.Features.Shared.Contracts
           },
           "networks": {
             "networks": "*",
-            "surface": "CE_PROP-CONT-NCRD",
+            "surface": "PROPOSED_SURFACE",
             "fitFace": "InnerWall",
             "coverMax": 6
           },
