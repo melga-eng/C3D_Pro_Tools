@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<!-- Navisworks Manage 2026 add-in. Navisworks still runs on .NET Framework 4.8, so this is a separate, small assembly;
 	     the shared link protocol is compiled into both it and the Civil 3D plugin. Navisworks loads it from
 	     %ProgramData%\Autodesk\Navisworks Manage 2026\Plugins\C3DProTools.Navis\ (folder name = assembly name). -->
@@ -26,6 +26,7 @@
 	<ItemGroup>
 		<Reference Include="System.Runtime.Serialization" />
 		<Reference Include="Autodesk.Navisworks.Api"><HintPath>$(NavisDir)Autodesk.Navisworks.Api.dll</HintPath><Private>False</Private></Reference>
+		<Reference Include="Autodesk.Navisworks.Clash"><HintPath>$(NavisDir)Autodesk.Navisworks.Clash.dll</HintPath><Private>False</Private></Reference>
 		<Reference Include="Autodesk.Navisworks.ComApi"><HintPath>$(NavisDir)Autodesk.Navisworks.ComApi.dll</HintPath><Private>False</Private></Reference>
 		<Reference Include="Autodesk.Navisworks.Interop.ComApi"><HintPath>$(NavisDir)Autodesk.Navisworks.Interop.ComApi.dll</HintPath><Private>False</Private><EmbedInteropTypes>False</EmbedInteropTypes></Reference>
 	</ItemGroup>
