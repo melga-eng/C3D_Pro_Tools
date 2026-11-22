@@ -392,7 +392,7 @@ namespace C3DProTools.Features.Shared
             ToolUi.Add(stack, steps);
 
             TableLayoutPanel set = ToolUi.Card("Settings", "Cover is measured to the top of the encasement. The minimum cover, paved and unpaved, is set on the Pavement tab.");
-            Surfaces(_rimSurface, _net.Surface);
+            Surfaces(_rimSurface, _net.Surface, true, false);
             foreach (string f in new[] { "InnerWall", "OuterWall", "Center" }) _fitFace.Items.Add(f);
             ToolUi.Select(_fitFace, _net.FitFace);
             _coverMax.Text = ToolUi.Format(_net.CoverMax);

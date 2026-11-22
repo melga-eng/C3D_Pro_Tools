@@ -140,6 +140,7 @@ namespace C3DProTools.Features.Networks.Civil3D
             {
                 if (ConduitCivil3DAccess.Metres(doc.Database.Insunits) != 1.0)
                     throw new InvalidOperationException($"the drawing units are {doc.Database.Insunits}; C3DPRONET works in metre drawings only. Nothing was changed.");
+                ResolveSurface(doc, s, log);
                 bool all = mode == "All";
                 // Report and All run every step (Report as a preview); a single step runs only itself.
                 bool Runs(string step) => mode == "Report" || all || mode == step;
@@ -155,6 +156,36 @@ namespace C3DProTools.Features.Networks.Civil3D
                 log.AppendLine($"C3DPRONET failed: {ex.Message}");
             }
             return log.ToString();
+        }
+
+        /// <summary>
+        /// The proposed surface rims and cover use: the saved name when the drawing has it; otherwise the drawing's own surface whose
+        /// name says proposed (PROPOSED_SURFACE, KSIA_Proposed-Surface, KSIA_Proposed_Surface…), for this run, said in the report.
+        /// The name differs between drawings (your note, 2026-11-22).
+        /// </summary>
+        private static void ResolveSurface(Document doc, NetworksSettings s, StringBuilder log)
+        {
+            var names = new List<string>();
+            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+            {
+                foreach (ObjectId id in Autodesk.Civil.ApplicationServices.CivilDocument.GetCivilDocument(doc.Database).GetSurfaceIds())
+                    if (tr.GetObject(id, OpenMode.ForRead) is Surface sf) names.Add(sf.Name);
+                tr.Commit();
+            }
+            void Fix(string what, string saved, Action<string> set)
+            {
+                if (string.IsNullOrWhiteSpace(saved) && what == "cover") return;  // cover falls back to the rim surface
+                string found = Features.ProfileTool.SurfaceGuess.Pick(false, saved, names);
+                if (found != null && found.Equals(saved ?? "", StringComparison.OrdinalIgnoreCase)) return;
+                if (found != null)
+                {
+                    log.AppendLine($"Surfaces: the {what} surface \"{saved}\" is not in this drawing; using \"{found}\" (its name says proposed). Choose another in the Pro Run window if it is wrong.");
+                    set(found);
+                }
+                else log.AppendLine($"Surfaces: the {what} surface \"{saved}\" is not in this drawing and no surface's name says proposed: choose it in the Pro Run window.");
+            }
+            Fix("rim", s.Surface, v => s.Surface = v);
+            Fix("cover", s.CoverSurface, v => s.CoverSurface = v);
         }
 
         /// <summary>The matched networks that are not data references, with their gravity pipes.</summary>

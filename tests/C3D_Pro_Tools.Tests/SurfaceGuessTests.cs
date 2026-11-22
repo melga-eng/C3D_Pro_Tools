@@ -13,6 +13,13 @@ namespace C3DProTools.Tests
             Assert.Equal(("COMBINED NGL TILL 21-06-2026 AND NGL NOT SUBMITED", "PROPOSED_SURFACE"),
                 (SurfaceGuess.Pick(true, "KSIA_Existing-Surface", Mv), SurfaceGuess.Pick(false, "KSIA_Proposed-Surface", Mv)));
 
+        [Theory]
+        [InlineData("KSIA_Proposed_Surface")]
+        [InlineData("KSIA_Proposed-Surface")]
+        [InlineData("PROPOSED_SURFACE")]
+        public void Each_spelling_of_the_proposed_surface_is_found(string name) =>
+            Assert.Equal(name, SurfaceGuess.Pick(false, "PROPOSED_SURFACE", new[] { "CE_PROP-CONT-NCRD", "KSIA_Existing-Surface", name }));
+
         [Fact]
         public void A_saved_name_the_drawing_has_is_kept() =>
             Assert.Equal("KSIA_Proposed-Surface", SurfaceGuess.Pick(false, "ksia_proposed-surface", Ict));
