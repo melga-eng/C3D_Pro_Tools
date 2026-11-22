@@ -16,6 +16,11 @@ namespace C3DProTools.ProfileTool
         public bool OuterFace = true;
         /// <summary>True: only ducts shown in the alignment's profile views. False: every duct along the alignment.</summary>
         public bool ShownOnly = true;
+        /// <summary>
+        /// False: the TOP follows the highest outside, an encasement drawn around a cable included. True: where one pipe holds
+        /// another (an encasement around a cable), the TOP follows the pipe inside.
+        /// </summary>
+        public bool InsideEncasement = false;
     }
 
     public sealed class ProfileRef
@@ -121,11 +126,11 @@ namespace C3DProTools.ProfileTool
                     {
                         Name = pipe.Name,
                         Network = network,
-                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half),
+                        Segment = new DuctSegment(pipe.Name, s0, a.Z + half, s1, b.Z + half) { Height = 2 * half },
                     });
                 }
                 fit.Ducts.Sort((x, y) => x.Segment.S0.CompareTo(y.Segment.S0));
-                fit.Result = TopProfileMath.Compute(fit.Ducts.Select(d => d.Segment), fit.Start, fit.End);
+                fit.Result = TopProfileMath.Compute(fit.Ducts.Select(d => d.Segment), fit.Start, fit.End, o.InsideEncasement);
 
                 foreach (ObjectId pid in al.GetProfileIds())
                 {
@@ -397,6 +402,15 @@ namespace C3DProTools.ProfileTool
             double ps = p.StartingStation, pe = p.EndingStation;
             var stations = fit.Select(f => f.Station).ToList();
             try { foreach (ProfilePVI v in p.PVIs) stations.Add(v.RawStation); } catch { }
+            // A vertical step (two PVIs a hair apart) has two heights at its station: compared just before and after it instead.
+            var steps = new List<double>();
+            for (int i = 0; i + 1 < fit.Count; i++)
+                if (fit[i + 1].Station - fit[i].Station < TopProfileMath.StationEps) steps.Add(fit[i].Station);
+            if (steps.Count > 0)
+            {
+                stations = stations.Where(s => !steps.Any(t => Math.Abs(s - t) < 2 * TopProfileMath.StationEps)).ToList();
+                foreach (double t in steps) { stations.Add(t - 0.01); stations.Add(t + 0.01); }
+            }
             double max = 0, maxAt = 0;
             foreach (double s in stations)
             {

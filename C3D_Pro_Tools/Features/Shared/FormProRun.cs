@@ -166,6 +166,7 @@ namespace C3DProTools.Features.Shared
             _pv.ProposedSurface = Pick(_proposed);
             _pv.ProposedProfile = _proposedProfile.Text.Trim();
             _pv.CreateMissingTop = _createTop.Checked;
+            _pv.TopInsideEncasement = _topInside.Checked;
             _pv.MatchTemplate = _matchTemplate.Text.Trim();
             _pv.SplitLength = Num(_splitLength, _pv.SplitLength);
             _pv.SplitGap = Num(_splitGap, _pv.SplitGap);
@@ -335,6 +336,7 @@ namespace C3DProTools.Features.Shared
 
         private readonly List<string> _surfaceNotes = new List<string>();
         private readonly CheckBox _createTop = new CheckBox { Text = "Create missing TOP profiles (Fit TOP and All)", AutoSize = true };
+        private readonly CheckBox _topInside = new CheckBox { Text = "TOP follows the cable inside an encasement (not the encasement)", AutoSize = true };
 
         private Control ProfilePage()
         {
@@ -366,6 +368,8 @@ namespace C3DProTools.Features.Shared
             ToolUi.Field(set, "Proposed surface", _proposed);
             if (_surfaceNotes.Count > 0) ToolUi.Wide(set, new Label { AutoSize = true, ForeColor = StyleUi.Danger, Text = "Surfaces: " + string.Join(" ", _surfaceNotes), Margin = new Padding(3, 2, 3, 6) });
             ToolUi.Wide(set, _createTop);
+            _topInside.Checked = _pv.TopInsideEncasement;
+            ToolUi.Wide(set, _topInside);
             ToolUi.Field(set, "Proposed profile (name contains)", _proposedProfile);
             ToolUi.Wide(set, ToolUi.Note("Pavement labels sit on the alignment's proposed profile; without one, on the proposed surface."));
             ToolUi.Field(set, "Match: template view", _matchTemplate);
