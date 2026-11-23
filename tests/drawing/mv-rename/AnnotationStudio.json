@@ -1,0 +1,18 @@
+﻿{
+    "RouteCenterTolerance":  0.05,
+    "Naming":  {
+                   "StructureType":  3,
+                   "Pipes":  true,
+                   "PipeType":  3,
+                   "TypeCodes":  {
+
+                                 },
+                   "Structures":  true,
+                   "Parallel":  0,
+                   "Sheet":  0,
+                   "PipeTemplate":  "IF-PIP-MVDCT-{type}-{n:0000}",
+                   "StructureTemplate":  "IF-STR-MV{type}-{n:000}",
+                   "Numbering":  1
+               },
+    "RouteGap":  1
+}

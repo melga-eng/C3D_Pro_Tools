@@ -1,0 +1,4 @@
+﻿- Branch: `feature/utility-templates` (Codex built the pavement/cover part).
+- Changed: Rename presets (ICT, MV) and numbering scope; MV type codes (NameCodes.cs); cover check takes any duct type codes with ICT/MV presets; Split view From - To in Profile View Tools and `C3DPROPV Split` (`splitFrom`/`splitTo`).
+- Checked: 939 unit tests; MV copy: rename 136 parts (`mv-rename.scr`), split 500-900 one part then "split before" (`pv-split-range.scr`), MV cover with T1-T4 (`mv-cover.scr`); TEST DRAWING: ICT cover report identical to the old code (`net-cover.scr`). Codex review: 3 findings fixed.
+- Not done: the windows (Annotation Studio presets, Pavement presets, From - To) are not drawing-tested.

@@ -74,6 +74,9 @@ namespace C3DProTools.ProfileTool
         public double SplitGap { get; set; } = 30;
         /// <summary>A last part shorter than this (m) is joined to the one before it.</summary>
         public double SplitMinLast { get; set; } = 100;
+        /// <summary>Both set (to &gt; from): Split makes only one part, over these stations, and keeps the long view.</summary>
+        public double SplitFrom { get; set; }
+        public double SplitTo { get; set; }
 
         /// <summary>Role rules with this preset's surface names over the saved ones; null when the preset names none.</summary>
         public ProfileRoleRules RoleRules()
@@ -232,14 +235,15 @@ namespace C3DProTools.ProfileTool
         /// </summary>
         private static void SplitStep(Document doc, CivilDocument civil, ProfileViewsSettings s, bool write, StringBuilder log)
         {
-            if (s.SplitLength <= 0) { log.AppendLine("Split: off (splitLength is 0)."); return; }
+            bool range = s.SplitTo > s.SplitFrom;
+            if (s.SplitLength <= 0 && !range) { log.AppendLine("Split: off (splitLength is 0)."); return; }
             Database db = doc.Database;
             ProfileRoleRules rules = s.RoleRules() ?? ProfileViewToolsSettings.Load().Rules ?? new ProfileRoleRules();
             var o = new SplitOptions
             {
-                Length = s.SplitLength, Round = 0, Overlap = 0, MinLast = Math.Max(0, s.SplitMinLast), Below = true, Gap = Math.Max(0, s.SplitGap),
+                Length = range ? 1 : s.SplitLength, Round = 0, Overlap = 0, MinLast = range ? 0 : Math.Max(0, s.SplitMinLast), Below = true, Gap = Math.Max(0, s.SplitGap),
                 NamePattern = s.SplitName, TrimParts = true, CopyLabels = true, FitElevation = true, DatumIncrement = 1.0, Margin = 1.0,
-                Rules = rules,
+                Rules = rules, OnlyRange = range, From = s.SplitFrom, To = s.SplitTo,
             };
             // Long views of the chosen alignments; one whose first part already exists was split before.
             var todo = new List<(ObjectId id, string name, List<SplitPart> parts)>();
@@ -252,12 +256,18 @@ namespace C3DProTools.ProfileTool
                 foreach (ObjectId aid in civil.GetAlignmentIds())
                 {
                     if (!(tr.GetObject(aid, OpenMode.ForRead) is Alignment al) || !s.Includes(al.Name)) continue;
+                    // From - to: only the longest view covering the whole stretch (not the parts already made from it, which would be
+                    // split again; drawing test 2026-11-23).
+                    ObjectId rangeView = !range ? ObjectId.Null : al.GetProfileViewIds().Cast<ObjectId>()
+                        .Select(id => (ProfileView)tr.GetObject(id, OpenMode.ForRead))
+                        .Where(pv => pv.StationStart <= Math.Min(s.SplitFrom, s.SplitTo) + 1e-3 && pv.StationEnd >= Math.Max(s.SplitFrom, s.SplitTo) - 1e-3)
+                        .OrderByDescending(pv => pv.StationEnd - pv.StationStart).Select(pv => pv.ObjectId).FirstOrDefault();
                     foreach (ObjectId vid in al.GetProfileViewIds())
                     {
                         var v = (ProfileView)tr.GetObject(vid, OpenMode.ForRead);
-                        if (v.StationEnd - v.StationStart <= s.SplitLength + 0.5) continue;
+                        if (range ? vid != rangeView : v.StationEnd - v.StationStart <= s.SplitLength + 0.5) continue;
                         List<SplitPart> parts = ProfileViewSplit.Plan(tr, v, o, surfaces);
-                        if (parts.Count < 2) continue;
+                        if (parts.Count < (range ? 1 : 2)) continue;
                         // All parts there: split before. Only some: an earlier split stopped part way; left for the user to
                         // finish or delete (a second set of parts would be named "(2)").
                         int existing = parts.Count(p => names.Contains(p.Name));
@@ -268,7 +278,8 @@ namespace C3DProTools.ProfileTool
                 }
                 tr.Commit();
             }
-            log.AppendLine($"Split ({s.SplitLength:0.##} m parts named \"{s.SplitName}\"): {todo.Count} long views to split into {todo.Sum(t => t.parts.Count)} parts" +
+            log.AppendLine((range ? $"Split (one part, stations {s.SplitFrom:0.###} to {s.SplitTo:0.###}, named \"{s.SplitName}\")" : $"Split ({s.SplitLength:0.##} m parts named \"{s.SplitName}\")") +
+                           $": {todo.Count} long views to split into {todo.Sum(t => t.parts.Count)} parts" +
                            (already > 0 ? $", {already} split before (left alone)" : "") +
                            (partly.Count > 0 ? $", {partly.Count} only partly split (left alone; delete their parts and run Split again): {string.Join("; ", partly)}" : "") + ".");
             foreach (var t in todo)

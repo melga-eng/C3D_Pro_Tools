@@ -118,6 +118,13 @@ namespace C3DProTools
         private readonly ComboBox _cbSheetSource = ToolUi.Combo(300);
         private readonly TextBox _txtSheetPattern = new TextBox { Width = 200 }, _txtFixedSheet = new TextBox { Width = 120 };
         private readonly ComboBox _cbPipeType = ToolUi.Combo(220), _cbStructType = ToolUi.Combo(220);
+        private readonly ComboBox _cbNamePreset = ToolUi.Combo(520), _cbNumbering = ToolUi.Combo(360);
+        private static readonly string[] NumberingText =
+        {
+            "Per name: each sheet and type counts from 1",
+            "Across the network: one running number",
+            "Per sheet: each sheet counts from 1",
+        };
         private readonly DataGridView _gridCodes = ToolUi.Grid();
         private readonly RadioButton _rbRouteByRoute = new RadioButton { Text = "Route by route (each parallel route start to end, then the next)", AutoSize = true };
         private readonly RadioButton _rbSetBySet = new RadioButton { Text = "Set by set (across the parallel pipes, then the next set along)", AutoSize = true };
@@ -620,10 +627,20 @@ namespace C3DProTools
             (Panel host, TableLayoutPanel stack) = ToolUi.Page();
 
             TableLayoutPanel target = ToolUi.Card("Parts to rename",
-                "Each network is split into routes (parallel pipes kept apart) and numbered along them. Numbering restarts for every distinct name " +
-                "around the number, so each sheet and type counts from 1. Data shortcut references cannot be renamed and are listed as such.");
+                "Each network is split into routes (parallel pipes kept apart) and numbered along them, per name, across the network or per sheet " +
+                "(Numbering below). Data shortcut references cannot be renamed and are listed as such.");
             AddTarget(target, _nameTarget, "Parts selected in the drawing (numbered among themselves)", "\nSelect the pipes and structures to rename: ", false);
             ToolUi.Add(stack, target);
+
+            TableLayoutPanel pattern = ToolUi.Card("Name pattern",
+                "Patterns used on the project (ICT and MV). Apply fills the pipe and structure templates and the numbering; edit them after as you like.");
+            _cbNamePreset.Items.AddRange(NamingPreset.All.Select(p => (object)p.Name).ToArray());
+            ToolUi.Field(pattern, "Preset", _cbNamePreset);
+            ToolUi.Wide(pattern, Buttons(StyleUi.Secondary("Apply preset", (s, e) => ApplyNamePreset())));
+            ToolUi.Field(pattern, "Numbering", _cbNumbering);
+            _cbNumbering.Items.AddRange(NumberingText);
+            _cbNumbering.SelectedIndexChanged += (s, e) => UpdateExamples();
+            ToolUi.Add(stack, pattern);
 
             TableLayoutPanel names = ToolUi.Card("Pipe names",
                 "Tokens: {sheet}, {type}, {network}, {n}. Write {n:2} (or {n:00}) for two digits. Everything else is written as it is, so put any prefix " +
@@ -769,6 +786,7 @@ namespace C3DProTools
             _cbPipeType.SelectedIndex = (int)n.PipeType;
             _cbStructType.SelectedIndex = (int)n.StructureType;
             (n.Parallel == ParallelOrder.SetBySet ? _rbSetBySet : _rbRouteByRoute).Checked = true;
+            _cbNumbering.SelectedIndex = Math.Max(0, Math.Min(NumberingText.Length - 1, (int)n.Numbering));
             _txtRouteGap.Text = ToolUi.Format(_s.RouteGap);
             _txtRouteCenter.Text = ToolUi.Format(_s.RouteCenterTolerance);
             foreach (KeyValuePair<string, string> kv in n.TypeCodes) _gridCodes.Rows.Add(kv.Key, kv.Value);
@@ -841,6 +859,17 @@ namespace C3DProTools
             return true;
         }
 
+        /// <summary>The chosen pattern into the templates and numbering (still editable); the type codes stay as they are.</summary>
+        private void ApplyNamePreset()
+        {
+            NamingPreset p = NamingPreset.All.ElementAtOrDefault(_cbNamePreset.SelectedIndex);
+            if (p == null) return;
+            _txtPipeTemplate.Text = p.Pipe;
+            _txtStructTemplate.Text = p.Structure;
+            _cbNumbering.SelectedIndex = (int)p.Numbering;
+            UpdateExamples();
+        }
+
         private bool ReadNamingOptions(bool quiet = false)
         {
             NamingOptions n = _s.Naming;
@@ -854,6 +883,7 @@ namespace C3DProTools
             n.PipeType = (TypeSource)Math.Max(0, _cbPipeType.SelectedIndex);
             n.StructureType = (TypeSource)Math.Max(0, _cbStructType.SelectedIndex);
             n.Parallel = _rbSetBySet.Checked ? ParallelOrder.SetBySet : ParallelOrder.RouteByRoute;
+            n.Numbering = (NumberingScope)Math.Max(0, _cbNumbering.SelectedIndex);
             foreach (DataGridViewRow r in _gridCodes.Rows)
             {
                 string value = r.Cells[0].Value as string;

@@ -71,6 +71,8 @@ namespace C3DProTools
         // Split
         private readonly ComboBox _cbSplitView = ToolUi.Combo(420);
         private readonly RadioButton _rbEvery = new RadioButton { Text = "Every", AutoSize = true }, _rbFitSheet = new RadioButton { Text = "What fits the viewport of the sheet", AutoSize = true };
+        private readonly RadioButton _rbRange = new RadioButton { Text = "Only one part, from station", AutoSize = true };
+        private readonly TextBox _txtFrom = new TextBox { Width = 80 }, _txtTo = new TextBox { Width = 80 };
         private readonly TextBox _txtLength = ToolUi.Number(450, 70), _txtRound = ToolUi.Number(10, 50), _txtOverlap = ToolUi.Number(0, 50), _txtMinLast = ToolUi.Number(100, 60);
         private readonly ComboBox _cbViewportSheet = ToolUi.Combo(420), _cbSheetTemplate = ToolUi.Combo(420);
         private readonly Label _lblFit = ToolUi.Note("");
@@ -265,6 +267,9 @@ namespace C3DProTools
             TableLayoutPanel len = ToolUi.Card("Length of each part");
             ToolUi.Wide(len, ToolUi.Inline(_rbEvery, _txtLength, Muted("m")));
             ToolUi.Wide(len, ToolUi.Inline(_rbFitSheet, _cbViewportSheet));
+            ToolUi.Wide(len, ToolUi.Inline(_rbRange, _txtFrom, Muted("to"), _txtTo, Muted("(e.g. 450 or 0+450; the long view stays)")));
+            _txtFrom.TextChanged += (s, e) => _rbRange.Checked = true;
+            _txtTo.TextChanged += (s, e) => _rbRange.Checked = true;
             ToolUi.Wide(len, _lblFit);
             ToolUi.Field(len, "Breaks at", ToolUi.Inline(_txtRound, Muted("m round stations;  overlap"), _txtOverlap, Muted("m;  a last part under"), _txtMinLast, Muted("m joins the one before")));
             ToolUi.Add(stack, len);
@@ -299,7 +304,7 @@ namespace C3DProTools
             ToolUi.Wide(plan, ToolUi.Inline(StyleUi.Secondary("Show the plan", (s, e) => PlanSplit(true))));
             ToolUi.Add(stack, plan);
 
-            ToolUi.Exclusive(_rbEvery, _rbFitSheet);
+            ToolUi.Exclusive(_rbEvery, _rbFitSheet, _rbRange);
             ToolUi.Exclusive(_rbBelow, _rbRight);
             _rbFitSheet.CheckedChanged += (s, e) => UpdateFitLength();
             _cbViewportSheet.SelectedIndexChanged += (s, e) => { _rbFitSheet.Checked = true; UpdateFitLength(); };
@@ -1026,6 +1031,17 @@ namespace C3DProTools
             catch (Exception ex) { _lblFit.Text = ex.Message; }
         }
 
+        /// <summary>A station typed as 450, 450.5 or 0+450 (the "+" form as on the drawings).</summary>
+        private static bool StationNumber(string text, out double station)
+        {
+            string t = (text ?? "").Trim().Replace(" ", "");
+            bool negative = t.StartsWith("-");
+            t = t.TrimStart('-').Replace("+", "");
+            bool ok = double.TryParse(t.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out station) && t.Length > 0;
+            if (negative) station = -station;
+            return ok;
+        }
+
         private SplitOptions SplitChoices(out string problem)
         {
             problem = null;
@@ -1034,6 +1050,20 @@ namespace C3DProTools
                 FirstSheetName = _txtFirstSheet.Text.Trim(), NumberPartTitle = _chkPartTitle.Checked, DatumIncrement = Datum(),
                 ZoneLayers = _chkSplitZones.Checked ? _txtZoneLayers.Text.Trim() : "", ZoneLabel = ZoneLabel() };
             o.FirstSheetNo = int.TryParse(_txtSheetNo.Text, out int firstNo) ? firstNo : 1;
+            o.OnlyRange = _rbRange.Checked;
+            if (o.OnlyRange)
+            {
+                // One part out of the view: the long view is never deleted, and the length settings do not apply.
+                o.DeleteSource = false;
+                o.Length = 1; o.Round = 0; o.Overlap = 0; o.MinLast = 0;
+                if (!StationNumber(_txtFrom.Text, out o.From) || !StationNumber(_txtTo.Text, out o.To) || Math.Abs(o.To - o.From) < 1e-3)
+                    problem = "Enter the stations the part goes from and to (e.g. 450 and 900, or 0+450 and 0+900).";
+                else if (!ToolUi.TryNumber(_txtGap, out o.Gap) || o.Gap < 0) problem = "Enter the gap between parts.";
+                else if (o.Sheets && o.SheetTemplate.Length == 0) problem = "Choose the sheet to copy for each part.";
+                else if (_chkSplitZones.Checked && _txtZoneLayers.Text.Trim().Length == 0) problem = "Enter the layers of the zone polylines, or untick the cover zones.";
+                ToolUi.TryNumber(_txtMargin, out o.Margin);
+                return o;
+            }
             if (!ToolUi.TryNumber(_txtLength, out o.Length) || o.Length <= 0) problem = "Enter the length of each part.";
             else if (!ToolUi.TryNumber(_txtRound, out o.Round) || o.Round < 0) problem = "Enter the station rounding (0 for none).";
             else if (!ToolUi.TryNumber(_txtOverlap, out o.Overlap) || o.Overlap < 0 || o.Overlap >= o.Length) problem = "Enter an overlap smaller than the part length.";

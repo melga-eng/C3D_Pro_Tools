@@ -31,6 +31,12 @@ namespace C3DProTools
         public string ZoneLayers = "";
         public string ZoneLabel = "Paved";
         public bool DeleteSource;
+        /// <summary>
+        /// Set: only one part, from <see cref="From"/> to <see cref="To"/> (stations within the view), a full copy of the view over that
+        /// stretch; the long view always stays.
+        /// </summary>
+        public bool OnlyRange;
+        public double From, To;
         public ProfileRoleRules Rules = new ProfileRoleRules();
         /// <summary>The sheet viewport's size in model units (0 = no viewport to check against).</summary>
         public double ViewportWidth, ViewportHeight;
@@ -97,10 +103,19 @@ namespace C3DProTools
 
         public static List<SplitPart> Plan(Transaction tr, ProfileView v, SplitOptions o, ProfileViewMatch.Surfaces surfaces)
         {
-            if (o.Length <= 0) throw new InvalidOperationException("The part length must be positive.");
             double s0 = v.StationStart, s1 = v.StationEnd;
             List<double> ends = new List<double>();
-            for (int k = 1; ; k++)
+            if (o.OnlyRange)
+            {
+                // One part over the chosen stretch, kept inside the view.
+                double from = Math.Max(s0, Math.Min(o.From, o.To)), to = Math.Min(s1, Math.Max(o.From, o.To));
+                if (to - from < 1e-3)
+                    throw new InvalidOperationException($"From {Station(o.From)} to {Station(o.To)} is not inside the view's stations ({Station(s0)} to {Station(s1)}).");
+                s0 = from;
+                ends.Add(to);
+            }
+            else if (o.Length <= 0) throw new InvalidOperationException("The part length must be positive.");
+            for (int k = 1; !o.OnlyRange; k++)
             {
                 double end = s0 + k * o.Length;
                 if (o.Round > 0) end = Math.Floor(end / o.Round) * o.Round;

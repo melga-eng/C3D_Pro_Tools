@@ -51,7 +51,10 @@ namespace C3DProTools
         public double RouteGap { get; set; } = 1.0;
         public double RouteCenterTolerance { get; set; } = 0.05;
 
-        private static string FilePath => Path.Combine(
+        /// <summary>Drawing tests set this to their own file, so a test never reads or writes the user's Annotation Studio settings.</summary>
+        public const string TestFileVariable = "C3DPRO_ANNOTATION_FILE";
+
+        private static string FilePath => Environment.GetEnvironmentVariable(TestFileVariable) is string test && test.Length > 0 ? test : Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "AnnotationStudio.json");
 
         public static AnnotationSettings Load()

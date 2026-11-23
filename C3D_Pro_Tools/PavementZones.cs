@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace C3DProTools
@@ -13,7 +14,7 @@ namespace C3DProTools
         public double MinCover { get; set; }
         /// <summary>Most cover here (m); 0 = the general maximum, or no maximum when this zone's minimum is at or above it.</summary>
         public double MaxCover { get; set; }
-        /// <summary>The duct type letter required here ("A" = reinforced); empty = any.</summary>
+        /// <summary>Accepted duct type codes, separated by commas or whitespace ("A" or "T1,T3"); empty = any.</summary>
         public string DuctType { get; set; } = "";
         /// <summary>
         /// Width (m) along the inside of the surface's edge where this zone's cover and duct type are not required (a taxiway
@@ -155,29 +156,91 @@ namespace C3DProTools
 
         /// <summary>
         /// A duct's type against the strictest pavement it passes under (the one asking most cover): null when it fits, else
-        /// (fails, text). A reinforced (A) duct where B is asked is stronger than needed: a note, not a failure.
+        /// (fails, text). A type accepted by a zone asking more cover is stronger than needed: a note, not a failure.
         /// </summary>
-        public static (bool fails, string text)? CheckType(string type, PavementZone strictest)
+        public static (bool fails, string text)? CheckType(string type, PavementZone strictest, IReadOnlyList<PavementZone> zones)
         {
-            if (strictest == null || string.IsNullOrEmpty(strictest.DuctType) || string.IsNullOrEmpty(type)) return null;
-            if (string.Equals(type, strictest.DuctType, StringComparison.OrdinalIgnoreCase)) return null;
-            bool fails = !string.Equals(type, "A", StringComparison.OrdinalIgnoreCase);
+            if (strictest == null || !IsTypeChecked(type, zones) || AcceptsType(strictest, type)) return null;
+            bool fails = !zones.Any(z => z.MinCover > strictest.MinCover && Lists(z, type));
             return (fails, fails ? $"Under {strictest.Name}: needs duct type {strictest.DuctType} (is {type})"
                                  : $"type {type} where {strictest.Name} asks {strictest.DuctType} (stronger than needed)");
         }
 
-        private static readonly Regex TypeInName = new Regex(@"IC-?\d([A-Z])(?![A-Z])", RegexOptions.IgnoreCase);
+        public static bool AcceptsType(PavementZone zone, string type) =>
+            string.IsNullOrWhiteSpace(zone.DuctType) || Regex.Split(zone.DuctType.Trim(), @"[,\s]+")
+                .Any(code => string.Equals(code, type?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>A zone names this type in its list (an empty list, "any", names none).</summary>
+        private static bool Lists(PavementZone zone, string type) => !string.IsNullOrWhiteSpace(zone.DuctType) && AcceptsType(zone, type);
 
         /// <summary>
-        /// The duct type letter of a duct: from its name ("IC-124-IC3A-06" → A), else from its size ("Reinforcement" → A), else
-        /// null (unknown: not checked).
+        /// Only types some zone names are checked: types outside the rules (ICT 1C micro ducts, untyped cables) are left out, even
+        /// where a zone accepts "any" (review: an empty list must not bring every type into the check).
         /// </summary>
-        public static string DuctTypeOf(string name, string size)
+        public static bool IsTypeChecked(string type, IReadOnlyList<PavementZone> zones) =>
+            !string.IsNullOrWhiteSpace(type) && zones.Any(z => Lists(z, type));
+
+        private static readonly Regex TypeInName = new Regex(@"IC-?\d([A-Z])(?![A-Z])", RegexOptions.IgnoreCase);
+        private static readonly Regex LetterType = new Regex(@"(?<![A-Z0-9])\d([ABC])(?![A-Z0-9])", RegexOptions.IgnoreCase);
+        private static readonly Regex NumberType = new Regex(@"\b(?:TYPE\s*[-_:]?\s*|T)0*(\d+)(?![A-Z0-9])", RegexOptions.IgnoreCase);
+        private static readonly Regex MultipleTypes = new Regex(@"\b(?:TYPE\s*[-_:]?\s*|T)\d+\s*(?:&|/|,|\+|AND\b|OR\b)\s*(?:(?:TYPE\s*[-_:]?\s*|T))?\d+\b", RegexOptions.IgnoreCase);
+        private static readonly Regex MvContext = new Regex(@"\b(?:MV|MEDIUM[\s-]+VOLTAGE|TRENCH|DUCT[\s_-]*BANK)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex MvName = new Regex(@"-T(\d)-", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// A type from the first unambiguous source: description, size, then name. ICT gives a letter; MV gives T + number.
+        /// </summary>
+        public static string DuctTypeOf(string name, string size, string description)
         {
+            string FromText(string text)
+            {
+                text ??= "";
+                Match letter = LetterType.Match(text);
+                // "3C x 500 mm2 Cable" describes cable cores, not an ICT micro-duct type.
+                if (letter.Success && !Regex.IsMatch(text, @"\bCABLE\b", RegexOptions.IgnoreCase)) return letter.Groups[1].Value.ToUpperInvariant();
+                if (MultipleTypes.IsMatch(text)) return null;
+                var codes = NumberType.Matches(text).Cast<Match>()
+                    .Where(m => MvContext.IsMatch(text) || m.Value.StartsWith("T", StringComparison.OrdinalIgnoreCase) && !m.Value.StartsWith("TYPE", StringComparison.OrdinalIgnoreCase))
+                    .Select(m => "T" + m.Groups[1].Value).Distinct().ToList();
+                if (codes.Count > 1) return null;
+                if (codes.Count == 1) return codes[0];
+                // ICT "Reinforcement" sizes are type A; an MV text with its own numbered type is read above first (review finding).
+                return text.IndexOf("Reinforc", StringComparison.OrdinalIgnoreCase) >= 0 ? "A" : null;
+            }
+            // The name first: on the project the type is written in the name (ICT "IC-125-IC2B-01" → B, MV "IF-PIP-MVDCT-T1-0189" → T1),
+            // as the old check did (ICT drawing test, 2026-11-23: four "2B" ducts whose part says A stay B). The part's description
+            // and size only when the name carries no type.
             Match m = TypeInName.Match(name ?? "");
             if (m.Success) return m.Groups[1].Value.ToUpperInvariant();
-            if ((size ?? "").IndexOf("Reinforc", StringComparison.OrdinalIgnoreCase) >= 0) return "A";
-            return null;
+            m = Regex.Match(name ?? "", @"(?:^|-)\d([A-Z])(?=-|$)", RegexOptions.IgnoreCase);
+            if (m.Success) return m.Groups[1].Value.ToUpperInvariant();
+            m = MvName.Match(name ?? "");
+            if (m.Success) return "T" + m.Groups[1].Value;
+            return FromText(description) ?? FromText(size);
+        }
+    }
+
+    /// <summary>Templates for accepted types only: cover, surfaces and edge bands stay as configured.</summary>
+    internal sealed class PavementDuctTypePreset
+    {
+        public static readonly IReadOnlyList<PavementDuctTypePreset> All = Array.AsReadOnly(new[]
+        {
+            new PavementDuctTypePreset("ICT (A under pavement, B elsewhere)", "A", "B"),
+            new PavementDuctTypePreset("MV (T1,T3 under pavement, T2,T4 elsewhere)", "T1,T3", "T2,T4"),
+            new PavementDuctTypePreset("ICT + MV (A,T1,T3 under pavement; B,T2,T4 elsewhere)", "A,T1,T3", "B,T2,T4"),
+        });
+
+        private readonly string _name, _underPavement, _elsewhere;
+        private PavementDuctTypePreset(string name, string underPavement, string elsewhere)
+        { _name = name; _underPavement = underPavement; _elsewhere = elsewhere; }
+        public override string ToString() => _name;
+
+        public void Apply(IReadOnlyList<PavementZone> zones, PavementZone unpaved)
+        {
+            double largest = zones.Count > 0 ? zones.Max(z => z.MinCover) : 0;
+            foreach (PavementZone zone in zones)
+                zone.DuctType = zone.MinCover == largest ? _underPavement : _elsewhere;
+            unpaved.DuctType = _elsewhere;
         }
     }
 }

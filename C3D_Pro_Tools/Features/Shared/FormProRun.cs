@@ -57,13 +57,16 @@ namespace C3DProTools.Features.Shared
         // Pavement
         private readonly DataGridView _zones = ToolUi.Grid();
         private readonly TextBox _unpavedCover = ToolUi.Number(0.6);
-        private readonly ComboBox _unpavedType = ToolUi.Combo(80);
+        private readonly TextBox _unpavedType = StyleUi.Box();
+        private readonly ToolTip _pavementTips = new ToolTip();
+        private const string DuctTypeTip = "Type code(s) accepted here, e.g. A or T1,T3; empty = any";
         private readonly CheckBox _coverBand = ToolUi.Check("Cover check: the edge band (shoulder, blast pad) does not have to meet that pavement's rule");
         private readonly CheckBox _labelBand = ToolUi.Check("Start / end labels: mark the pavement edge inside the edge band, not the surface edge");
 
         public FormProRun(Document doc)
         {
             _doc = doc;
+            Disposed += (s, e) => _pavementTips.Dispose();
             Text = "C3D Pro Run";
             Font = StyleUi.Base;
             BackColor = StyleUi.Surface;
@@ -192,12 +195,12 @@ namespace C3DProTools.Features.Shared
                 _pav.Zones.Add(new PavementZone
                 {
                     Surface = surface, Name = r.Cells[1].Value as string is { Length: > 0 } n ? n : surface,
-                    MinCover = D(2), DuctType = r.Cells[3].Value as string ?? "", EdgeBand = D(4), MaxCover = D(5),
+                    MinCover = D(2), DuctType = (r.Cells[3].Value as string ?? "").Trim(), EdgeBand = D(4), MaxCover = D(5),
                     StartLabelStyle = was?.StartLabelStyle ?? "", EndLabelStyle = was?.EndLabelStyle ?? "",
                 });
             }
             _pav.Unpaved.MinCover = Num(_unpavedCover, _pav.Unpaved.MinCover);
-            _pav.Unpaved.DuctType = _unpavedType.SelectedItem as string ?? "";
+            _pav.Unpaved.DuctType = _unpavedType.Text.Trim();
             // One unpaved minimum: the cover check takes it from the pavement section, or from networks when no pavement is set.
             _net.CoverMin = _pav.Unpaved.MinCover;
             _pav.CoverUsesEdgeBand = _coverBand.Checked;
@@ -443,8 +446,7 @@ namespace C3DProTools.Features.Shared
                 "Used by the cover check (Networks) and the start / end of pavement labels (Profile views).");
             var surface = new DataGridViewComboBoxColumn { HeaderText = "Surface", FlatStyle = FlatStyle.Flat, FillWeight = 180 };
             foreach (string s in _surfaces.Concat(_pav.Zones.Select(z => z.Surface ?? "")).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)) surface.Items.Add(s);
-            var type = new DataGridViewComboBoxColumn { HeaderText = "Duct type", FlatStyle = FlatStyle.Flat, FillWeight = 60 };
-            foreach (string t in new[] { "", "A", "B" }) type.Items.Add(t);
+            var type = new DataGridViewTextBoxColumn { HeaderText = "Duct type", FillWeight = 90, ToolTipText = DuctTypeTip };
             _zones.Columns.Add(surface);
             _zones.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name on labels", FillWeight = 140 });
             _zones.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Min cover (m)", FillWeight = 70 });
@@ -461,17 +463,36 @@ namespace C3DProTools.Features.Shared
             _zones.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
             _zones.DataError += (s, e) => e.ThrowException = false;
             foreach (PavementZone z in _pav.Zones)
-                _zones.Rows.Add(z.Surface, z.Name, ToolUi.Format(z.MinCover), type.Items.Contains(z.DuctType ?? "") ? z.DuctType ?? "" : "", ToolUi.Format(z.EdgeBand), ToolUi.Format(z.MaxCover));
+                _zones.Rows.Add(z.Surface, z.Name, ToolUi.Format(z.MinCover), z.DuctType ?? "", ToolUi.Format(z.EdgeBand), ToolUi.Format(z.MaxCover));
             ToolUi.Wide(zones, _zones);
             ToolUi.Wide(zones, ToolUi.Note("Add a kind in the empty last row; select a row and press Delete to remove it."));
+            var preset = ToolUi.Combo(460);
+            preset.DropDownWidth = 650;
+            foreach (PavementDuctTypePreset p in PavementDuctTypePreset.All) preset.Items.Add(p);
+            preset.SelectedIndex = 0;
+            ToolUi.Field(zones, "Duct type preset", ToolUi.Inline(preset, StyleUi.Secondary("Apply", (s, e) =>
+            {
+                _zones.EndEdit();
+                var rows = _zones.Rows.Cast<DataGridViewRow>()
+                    .Where(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(r.Cells[0].Value as string)).ToList();
+                var values = rows.Select(r => new PavementZone
+                {
+                    MinCover = double.TryParse(Convert.ToString(r.Cells[2].Value, System.Globalization.CultureInfo.InvariantCulture)?.Replace(',', '.'),
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : 0,
+                }).ToList();
+                var unpaved = new PavementZone();
+                ((PavementDuctTypePreset)preset.SelectedItem).Apply(values, unpaved);
+                for (int i = 0; i < rows.Count; i++) rows[i].Cells[3].Value = values[i].DuctType;
+                _unpavedType.Text = unpaved.DuctType;
+            })));
+            ToolUi.Wide(zones, ToolUi.Note("Apply sets types only: rows with the largest minimum cover use the under-pavement set; other rows and unpaved use the elsewhere set."));
             ToolUi.Add(stack, zones);
 
             TableLayoutPanel unpaved = ToolUi.Card("Unpaved");
             _unpavedCover.Text = ToolUi.Format(_pav.Unpaved.MinCover);
-            foreach (string t in new[] { "", "A", "B" }) _unpavedType.Items.Add(t);
-            ToolUi.Select(_unpavedType, _pav.Unpaved.DuctType ?? "");
+            _unpavedType.Text = _pav.Unpaved.DuctType ?? "";
             ToolUi.Field(unpaved, "Min cover", ToolUi.WithUnit(_unpavedCover, "m"));
-            ToolUi.Field(unpaved, "Duct type", _unpavedType);
+            ToolUi.Field(unpaved, "Duct type", _unpavedType, _pavementTips, DuctTypeTip);
             ToolUi.Add(stack, unpaved);
 
             TableLayoutPanel band = ToolUi.Card("Edge band (shoulder, blast pad)", "The band width is set per kind above.");
