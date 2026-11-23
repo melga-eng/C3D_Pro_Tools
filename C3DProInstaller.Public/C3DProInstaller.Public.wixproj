@@ -9,7 +9,8 @@
 		<SuppressIces>ICE61</SuppressIces>
 		<PluginDll>$(MSBuildThisFileDirectory)..\C3D_Pro_Tools\bin\Public\$(Configuration)\net10.0-windows\C3D_Pro_Tools.dll</PluginDll>
 		<NavisDll>$(MSBuildThisFileDirectory)..\C3DProTools.Navis\bin\$(Configuration)\net48\C3DProTools.Navis.dll</NavisDll>
-		<DefineConstants>PluginDll=$(PluginDll);NavisDll=$(NavisDll)</DefineConstants>
+		<NavisDir>$(MSBuildThisFileDirectory)..\C3DProTools.Navis\bin\$(Configuration)\net48\</NavisDir>
+		<DefineConstants>PluginDll=$(PluginDll);NavisDll=$(NavisDll);NavisDir=$(NavisDir)</DefineConstants>
 	</PropertyGroup>
 
 	<ItemGroup>

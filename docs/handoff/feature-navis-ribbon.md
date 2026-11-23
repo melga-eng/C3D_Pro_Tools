@@ -1,0 +1,4 @@
+﻿- Branch: `feature/navis-ribbon`.
+- Changed: Navisworks gets a C3D Pro tab (Clashes: Clash Grouper; Civil 3D: Civil 3D Link) with icons; our buttons are off the Add-ins tab (Clash Grouper kept as a hidden add-in for background tests). Layout and icons shipped by both installers.
+- Checked: build and 876 unit tests; the layout parsed with Navisworks' own ribbon library (1 tab, 2 panels, 2 buttons); both MSIs list the files. Codex end review: no findings.
+- Not done: the tab was not seen in a running Navisworks (the installed add-in is locked while Navisworks is open).
