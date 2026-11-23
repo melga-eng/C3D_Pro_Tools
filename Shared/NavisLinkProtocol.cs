@@ -80,6 +80,33 @@ namespace C3DProTools.NavisLink
         [DataMember] public double MinX, MinY, MaxX, MaxY, Z;
     }
 
+    /// <summary>
+    /// The clash package: what the Clash Grouper's "Send to Civil 3D" last sent (the other side's items and one area per group or
+    /// clash), a <see cref="NavisResponse"/> saved as a file. Navisworks Import's "Import clashes" reads it, so nothing depends on
+    /// what is selected in Navisworks afterwards.
+    /// </summary>
+    public static class NavisClashPackage
+    {
+        public static string Path => System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "C3DProTools", "NavisClashPackage.json");
+
+        public static void Save(NavisResponse package)
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path));
+            string temp = Path + ".tmp";
+            using (FileStream f = File.Create(temp))
+                new DataContractJsonSerializer(typeof(NavisResponse)).WriteObject(f, package);
+            if (File.Exists(Path)) File.Delete(Path);
+            File.Move(temp, Path);
+        }
+
+        public static NavisResponse Load()
+        {
+            using (FileStream f = File.OpenRead(Path))
+                return (NavisResponse)new DataContractJsonSerializer(typeof(NavisResponse)).ReadObject(f);
+        }
+    }
+
     /// <summary>Length-prefixed JSON messages over a local named pipe. Each Navisworks window serves its own pipe.</summary>
     public static class NavisLinkWire
     {

@@ -17,11 +17,13 @@ namespace C3DProTools.Navis
             "LcOaMaterial", "LcOpGeometryProperty", "3D Visualization"
         };
 
-        public static NavisResponse ReadSelection(Document doc)
+        public static NavisResponse ReadSelection(Document doc) => ReadItems(doc, doc.CurrentSelection.SelectedItems);
+
+        /// <summary>The given items read as for a selection (the Clash Grouper's package reads the clashing items this way).</summary>
+        public static NavisResponse ReadItems(Document doc, ModelItemCollection selected)
         {
             NavisResponse response = new NavisResponse { Ok = true, Document = doc.FileName ?? "", Units = doc.Units.ToString() };
             double toMetres = ToMetres(doc.Units);
-            ModelItemCollection selected = doc.CurrentSelection.SelectedItems;
             response.SelectedCount = selected.Count;
 
             HashSet<Guid> seen = new HashSet<Guid>();
