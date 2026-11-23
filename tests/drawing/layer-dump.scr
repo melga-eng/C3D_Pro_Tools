@@ -1,0 +1,1 @@
+(progn (setq n 0 f (open "C:/Users/melga/AppData/Local/Temp/c3dpro-layers.txt" "w")) (setq r (tblnext "LAYER" T)) (while r (write-line (cdr (assoc 2 r)) f) (setq r (tblnext "LAYER"))) (close f) (princ "LAYERS-DONE"))

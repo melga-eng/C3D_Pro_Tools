@@ -1,0 +1,3 @@
+C3DPROSTANDARDS
+Layers
+(princ (strcat "\nML-ON-0 " (itoa (if (setq s (ssget "X" '((0 . "MULTILEADER")(8 . "0")(410 . "Model")))) (sslength s) 0)) " BG " (if (tblsearch "LAYER" "Background") "still" "gone") " NEW " (if (tblsearch "LAYER" "Z-Zz_90-M-Background") "yes" "no") " REV " (if (setq s (ssget "X" '((8 . "_REVCLOUD")))) (itoa (sslength s)) "0")))

@@ -66,7 +66,8 @@ namespace C3DProTools.Features.Standards
             var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 4, 8, 8), BackColor = StyleUi.Surface };
             footer.Controls.Add(close);
             footer.Controls.Add(fix);
-            footer.Controls.Add(ToolUi.Note("Only two rules have a fix here (units, xref paths); the rest is listed for you. Layers of network parts: Network Layers. Sheets: Sheet Manager. Purge: Drawing Cleaner."));
+            footer.Controls.Add(StyleUi.Secondary("Layer names…", (s, e) => { using (var f = new FormLayerMap(_doc)) f.ShowDialog(this); Read(); }));
+            footer.Controls.Add(ToolUi.Note("Layer names: each layer and the objects on layer 0 to a KSIA layer. Layers of network parts: Network Layers. Sheets: Sheet Manager. Purge: Drawing Cleaner."));
 
             Controls.Add(body);
             Controls.Add(footer);

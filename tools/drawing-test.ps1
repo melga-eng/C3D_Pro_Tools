@@ -32,7 +32,9 @@ param(
     # Tests the public edition (built with -p:Edition=Public) instead of the full one.
     [switch]$Public,
     # Annotation Studio settings for this test (a copy is used); without it the test uses a fresh, empty file, never the user's.
-    [string]$AnnotationSettings = ''
+    [string]$AnnotationSettings = '',
+    # Layer names choices for this test (a copy is used); without it the test starts with none.
+    [string]$LayerMap = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,6 +61,9 @@ if (Test-Path -LiteralPath $sheetSettings) {
 $annotationCopy = Join-Path $run 'AnnotationStudio.json'
 if ($AnnotationSettings) { Copy-Item -LiteralPath $AnnotationSettings $annotationCopy }
 $env:C3DPRO_ANNOTATION_FILE = $annotationCopy
+# Layer names: the test's own remembered choices (empty), never the user's.
+$env:C3DPRO_LAYERMAP_FILE = Join-Path $run 'LayerMap.json'
+if ($LayerMap) { Copy-Item -LiteralPath $LayerMap $env:C3DPRO_LAYERMAP_FILE }
 $dwg = Join-Path $run 'test.dwg'
 Copy-Item -LiteralPath $Drawing $dwg
 Copy-Item "$pluginOut\*" "$run\bin" -Recurse
