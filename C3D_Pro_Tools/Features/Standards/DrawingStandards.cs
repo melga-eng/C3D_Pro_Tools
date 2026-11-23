@@ -50,7 +50,7 @@ namespace C3DProTools.Features.Standards
             Document doc = AcApp.DocumentManager.MdiActiveDocument;
             if (doc == null) return;
             var kw = new PromptKeywordOptions("\nDrawing standards") { AllowNone = true };
-            kw.Keywords.Add("Check"); kw.Keywords.Add("Fix");
+            kw.Keywords.Add("Check"); kw.Keywords.Add("Fix"); kw.Keywords.Add("Layers");
             kw.Keywords.Default = "Check";
             PromptResult kr = doc.Editor.GetKeywords(kw);
             if (kr.Status != PromptStatus.OK && kr.Status != PromptStatus.None) return;
@@ -58,9 +58,21 @@ namespace C3DProTools.Features.Standards
             var log = new StringBuilder();
             try
             {
-                List<StandardFinding> found = Check(doc);
-                Describe(found, log);
-                if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null).ToList(), log);
+                if (mode == "Layers")
+                {
+                    // Layer names: the remembered choices and the sure suggestions (as ticked in the Layer names window).
+                    List<LayerMapRow> rows = ScanLayers(doc);
+                    log.AppendLine($"Layer names: {rows.Count(r => r.Kind == null)} layers not in the KSIA form, {rows.Count(r => r.Kind != null)} kinds of objects on 0 / Defpoints; " +
+                                   $"{rows.Count(r => r.Tick)} ticked (your earlier choices and sure suggestions), {rows.Count(r => r.FrozenInViewport)} frozen in a viewport (left).");
+                    foreach (LayerMapRow r in rows) log.AppendLine($"  {(r.Tick ? "[x]" : "[ ]")} {r.What} ({r.Objects}) -> {(r.Target.Length > 0 ? r.Target : "-")}  {r.Why}");
+                    log.AppendLine(LayerMap.Apply(doc, rows.Where(r => r.Tick).ToList()));
+                }
+                else
+                {
+                    List<StandardFinding> found = Check(doc);
+                    Describe(found, log);
+                    if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null).ToList(), log);
+                }
             }
             catch (Exception ex)
             {
@@ -68,6 +80,19 @@ namespace C3DProTools.Features.Standards
                 log.AppendLine($"C3DPROSTANDARDS failed: {ex.Message}. Nothing was changed.");
             }
             doc.Editor.WriteMessage("\n" + RunReport.Write(log.ToString(), "C3DPROSTANDARDS", mode) + "\n");
+        }
+
+        /// <summary>The layer names table for the drawing (KSIA template layers, remembered choices, suggestions).</summary>
+        internal static List<LayerMapRow> ScanLayers(Document doc)
+        {
+            List<string> template = LayerAudit.TemplateLayers(LayerAudit.TemplatePath());
+            using (doc.LockDocument())
+            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+            {
+                List<LayerMapRow> rows = LayerMap.Scan(tr, doc.Database, template, LayerMap.Remembered());
+                tr.Commit();
+                return rows;
+            }
         }
 
         internal static void Describe(List<StandardFinding> found, StringBuilder log)
@@ -208,9 +233,11 @@ namespace C3DProTools.Features.Standards
         private static void Layers(List<LayerTableRecord> layers, List<StandardFinding> found)
         {
             var own = layers.Where(l => !l.IsDependent && l.Name != "0" && !l.Name.Equals("Defpoints", StringComparison.OrdinalIgnoreCase)).ToList();
-            List<string> badNames = own.Where(l => !LayerRules.IsStandardName(l.Name)).Select(l => l.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            // KSIA template layers count as standard, and an underscore inside a section is correct (your rule, 2026-11-23).
+            var template = new HashSet<string>(LayerAudit.TemplateLayers(LayerAudit.TemplatePath()), StringComparer.OrdinalIgnoreCase);
+            List<string> badNames = own.Where(l => !LayerSuggest.IsStandard(l.Name, template)).Select(l => l.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
             if (badNames.Count > 0)
-                found.Add(new StandardFinding { Area = "Layers", Rule = "STD 5.6", Text = $"{badNames.Count} of {own.Count} layers are not named Role-Uniclass code-Presentation-Description.", Items = badNames });
+                found.Add(new StandardFinding { Area = "Layers", Rule = "STD 5.6", Text = $"{badNames.Count} of {own.Count} layers are not named Role-Uniclass code-Presentation-Description (Layer names window: pick a KSIA layer for each).", Items = badNames });
             var weights = own.Where(l => !StandardRules.LineWeightAllowed((int)l.LineWeight)).GroupBy(l => (int)l.LineWeight).OrderBy(g => g.Key).ToList();
             if (weights.Count > 0)
                 found.Add(new StandardFinding
