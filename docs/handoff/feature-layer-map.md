@@ -1,0 +1,4 @@
+﻿- Branch: `feature/layer-map` (Codex wrote LayerSuggest.cs and its tests).
+- Changed: Drawing Standards > Layer names window and `C3DPROSTANDARDS Layers`; template names and "_" inside a section count as standard (532 -> 410 on TEST DRAWING); suggestions (bound xref back to its name, old AIA names matched by meaning); objects of model and sheets moved, block contents and layers frozen in a viewport (source or target) left; choices remembered (`%APPDATA%\C3DProTools\LayerMap.json`).
+- Checked: 969 unit tests; TEST DRAWING copy: `std-layers.scr` (no choices: 2 sure, 15 frozen left), `std-layers-map.scr` (68 MLeaders off 0, C-ANNO-TABL merged and deleted, Background renamed, _REVCLOUD frozen skipped). Codex review: 3 findings fixed.
+- Not done: the Layer names window is not drawing-tested; old layers still used inside blocks are kept.

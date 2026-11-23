@@ -117,8 +117,11 @@ namespace C3DProTools.Features.Standards
             foreach (KeyValuePair<(string layer, string kind, string space), int> g in zero.OrderByDescending(x => x.Value))
             {
                 var row = new LayerMapRow { Layer = g.Key.layer, Kind = g.Key.kind, Space = g.Key.space, Objects = g.Value };
+                row.FrozenInViewport = lt.Has(g.Key.layer) && frozen.Contains(lt[g.Key.layer]);
                 if (remembered.TryGetValue(row.Key, out string chosen)) { row.Target = chosen; row.Tick = true; row.Why = "your earlier choice"; }
                 else row.Why = "on " + g.Key.layer + ": you choose";
+                // Layer 0 / Defpoints frozen in a viewport: its objects stay too (review finding).
+                if (row.FrozenInViewport) { row.Tick = false; row.Why = "frozen in a viewport: left as it is"; }
                 rows.Add(row);
             }
             return rows;
@@ -142,6 +145,7 @@ namespace C3DProTools.Features.Standards
                 var lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
                 // The entities of model and sheets once, by layer.
                 var byLayer = new Dictionary<string, List<ObjectId>>(StringComparer.OrdinalIgnoreCase);
+                var frozen = new HashSet<ObjectId>();
                 var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                 foreach (ObjectId bid in bt)
                 {
@@ -149,15 +153,36 @@ namespace C3DProTools.Features.Standards
                     if (!btr.IsLayout) continue;
                     foreach (ObjectId id in btr)
                     {
-                        if (!(tr.GetObject(id, OpenMode.ForRead) is Entity e) || e is Viewport) continue;
+                        if (!(tr.GetObject(id, OpenMode.ForRead) is Entity e)) continue;
+                        if (e is Viewport vp)
+                        {
+                            try { foreach (ObjectId f in vp.GetFrozenLayers()) frozen.Add(f); } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
+                            continue;
+                        }
                         if (!byLayer.TryGetValue(e.Layer, out List<ObjectId> list)) byLayer[e.Layer] = list = new List<ObjectId>();
                         list.Add(id);
                     }
                 }
-                foreach (LayerMapRow r in chosen.Where(x => x.Tick && !x.FrozenInViewport && !string.IsNullOrWhiteSpace(x.Target)))
+                List<LayerMapRow> todo = chosen.Where(x => x.Tick && !x.FrozenInViewport && !string.IsNullOrWhiteSpace(x.Target)).ToList();
+                // A layer that is both a target and moved / renamed itself in the same run: its rows are left (review finding).
+                var sources = new HashSet<string>(todo.Where(x => x.Kind == null).Select(x => x.Layer), StringComparer.OrdinalIgnoreCase);
+                var targets = new HashSet<string>(todo.Select(x => x.Target.Trim()), StringComparer.OrdinalIgnoreCase);
+                foreach (LayerMapRow r in todo)
                 {
                     string target = r.Target.Trim();
                     if (target.Equals(r.Layer, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (sources.Contains(target) || (r.Kind == null && targets.Contains(r.Layer)))
+                    {
+                        failed++;
+                        log.AppendLine($"  {r.What}: not changed ({(sources.Contains(target) ? target + " is itself moved in this run" : r.Layer + " is also a target in this run")}; apply it on its own)");
+                        continue;
+                    }
+                    if (lt.Has(target) && frozen.Contains(lt[target]))
+                    {
+                        failed++;
+                        log.AppendLine($"  {r.What}: not changed ({target} is frozen in a viewport: its objects would disappear there)");
+                        continue;
+                    }
                     // One row at a time inside its own nested transaction: a failure leaves that row as it was.
                     using (Transaction one = tr.TransactionManager.StartTransaction())
                     {
