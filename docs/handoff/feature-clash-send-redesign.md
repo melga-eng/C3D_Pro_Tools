@@ -1,0 +1,4 @@
+- Branch: `feature/clash-send-redesign`.
+- Changed: Clash Grouper "Send to Civil 3D" writes a clash package (`NavisClashPackage`, items + areas) instead of relying on the selection; Navisworks Import has its own "Import clashes" button (clash mode until the next Get selection; clouds only in that mode, clouds-only after a yes); Clash Grouper window redesigned as two steps.
+- Checked: 876 unit tests; Send run in a background Navisworks on the grouped federated-model copy (package: 20 items, 5 areas); `tests/drawing/navis-clash-package.scr` and `navis-clash-clouds.scr` on Test.dwg PASS. Codex end review: three findings, fixed.
+- Not done: both windows are not tested (forms cannot run in the background). A leftover test add-in `C:\ProgramData\Autodesk\Navisworks Manage 2026\Plugins\C3DProGrouperTest` must be deleted once Navisworks is closed.
