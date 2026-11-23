@@ -30,7 +30,9 @@ param(
     # The plugin reads the settings saved in the drawing (as the product does), not a settings file.
     [switch]$DrawingSettings,
     # Tests the public edition (built with -p:Edition=Public) instead of the full one.
-    [switch]$Public
+    [switch]$Public,
+    # Annotation Studio settings for this test (a copy is used); without it the test uses a fresh, empty file, never the user's.
+    [string]$AnnotationSettings = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +56,9 @@ if (Test-Path -LiteralPath $sheetSettings) {
     New-Item -ItemType Directory -Force "$run\iso\Roaming\C3DProTools" | Out-Null
     Copy-Item -LiteralPath $sheetSettings "$run\iso\Roaming\C3DProTools\SheetManager.json"
 }
+$annotationCopy = Join-Path $run 'AnnotationStudio.json'
+if ($AnnotationSettings) { Copy-Item -LiteralPath $AnnotationSettings $annotationCopy }
+$env:C3DPRO_ANNOTATION_FILE = $annotationCopy
 $dwg = Join-Path $run 'test.dwg'
 Copy-Item -LiteralPath $Drawing $dwg
 Copy-Item "$pluginOut\*" "$run\bin" -Recurse

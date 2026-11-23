@@ -1,4 +1,4 @@
-using Autodesk.AutoCAD.DatabaseServices;
+﻿using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.Civil.DatabaseServices;
 using System;
@@ -13,6 +13,28 @@ namespace C3DProTools
     internal enum SheetSource { NetworkName, SheetText, Fixed }
     internal enum TypeSource { Style, PartSize, Family, Description }
     internal enum ParallelOrder { RouteByRoute, SetBySet }
+    /// <summary>
+    /// How numbers run: per distinct name (each sheet and type from 1), across the network (one running number over the networks
+    /// being renamed), or per sheet (each sheet from 1).
+    /// </summary>
+    internal enum NumberingScope { PerName, AcrossNetwork, PerSheet }
+
+    /// <summary>A name pattern to pick from (learned from the project's ICT and MV drawings); the templates stay editable.</summary>
+    internal sealed class NamingPreset
+    {
+        public string Name = "", Pipe = "", Structure = "";
+        public NumberingScope Numbering;
+
+        public static readonly NamingPreset[] All =
+        {
+            new NamingPreset { Name = "ICT per sheet (ICT-105-2B-01, ICT-STR-TMHC-2_13)", Pipe = "ICT-{sheet}-{type}-{n:00}", Structure = "ICT-STR-{type}_{n}", Numbering = NumberingScope.PerName },
+            new NamingPreset { Name = "ICT per sheet, IC prefix (IC-124-IC3A-06)", Pipe = "IC-{sheet}-{type}-{n:00}", Structure = "ICT-STR-{type}_{n}", Numbering = NumberingScope.PerName },
+            new NamingPreset { Name = "ICT across the network (IC-PIP-TDB-NCRD-71)", Pipe = "IC-PIP-TDB-NCRD-{n}", Structure = "ICT-STR-{type}_{n}", Numbering = NumberingScope.AcrossNetwork },
+            new NamingPreset { Name = "MV duct bank across the network (IF-PIP-MVDCT-T1-0189, IF-STR-MVALMH-T2-018)", Pipe = "IF-PIP-MVDCT-{type}-{n:0000}", Structure = "IF-STR-MV{type}-{n:000}", Numbering = NumberingScope.AcrossNetwork },
+            new NamingPreset { Name = "MV duct bank per sheet (IF-PIP-MVDCT-124-T1-01)", Pipe = "IF-PIP-MVDCT-{sheet}-{type}-{n:00}", Structure = "IF-STR-MV{type}-{sheet}-{n:00}", Numbering = NumberingScope.PerSheet },
+            new NamingPreset { Name = "MV direct buried (IF-MVDB-PIPE-38)", Pipe = "IF-MVDB-PIPE-{n}", Structure = "IF-STR-MV{type}-{n:000}", Numbering = NumberingScope.AcrossNetwork },
+        };
+    }
 
     /// <summary>How parts are named: templates with tokens, where the sheet number and type come from, and the order of numbering.</summary>
     internal sealed class NamingOptions
@@ -25,9 +47,10 @@ namespace C3DProTools
         public string FixedSheet { get; set; } = "";
         public TypeSource PipeType { get; set; } = TypeSource.Style;
         public TypeSource StructureType { get; set; } = TypeSource.Family;
-        /// <summary>Type values as found (style name, size…) → the code written in names.</summary>
+        /// <summary>Type values as found (style name, sizeâ€¦) â†’ the code written in names.</summary>
         public Dictionary<string, string> TypeCodes { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public ParallelOrder Parallel { get; set; } = ParallelOrder.RouteByRoute;
+        public NumberingScope Numbering { get; set; } = NumberingScope.PerName;
         public bool Pipes { get; set; } = true;
         public bool Structures { get; set; } = true;
     }
@@ -45,7 +68,7 @@ namespace C3DProTools
 
     /// <summary>
     /// Numbers network parts along their routes: each network is split into routes (parallel pipes kept apart), pipes are
-    /// numbered route by route or set by set, each distinct name prefix (sheet, type…) counting from 1 again.
+    /// numbered route by route or set by set, each distinct name prefix (sheet, typeâ€¦) counting from 1 again.
     /// </summary>
     internal static class AnnotNaming
     {
@@ -78,17 +101,8 @@ namespace C3DProTools
             return values;
         }
 
-        /// <summary>A short code suggested for a type value: the part after the last "-"/"_" with letters and digits (e.g. "Duct IC-3B" → "IC3B").</summary>
-        public static string SuggestCode(string value)
-        {
-            // A code written as a word of its own ("Type:IC-3B" → "IC3B"), not part of a size such as "6x4".
-            Match m = Regex.Match(value ?? "", @"\b([A-Za-z]{1,4})[-_ ]?(\d+[A-Za-z]?)\b");
-            if (m.Success) return (m.Groups[1].Value + m.Groups[2].Value).ToUpperInvariant();
-            // Else the short token at the end ("KSIA ICT 6x4 - 3B" → "3B").
-            Match tail = Regex.Match(value ?? "", @"([A-Za-z0-9]{1,6})[^A-Za-z0-9]*$");
-            if (tail.Success && Regex.IsMatch(tail.Groups[1].Value, @"\d")) return tail.Groups[1].Value.ToUpperInvariant();
-            return Regex.Replace(value ?? "", @"[^A-Za-z0-9]", "");
-        }
+        /// <summary>A short code suggested for a type value (see <see cref="NameCodes.Suggest"/>).</summary>
+        public static string SuggestCode(string value) => NameCodes.Suggest(value);
 
         /// <param name="only">When given, only these parts are renamed (numbered among themselves, in route order).</param>
         public static List<RenameRow> Plan(Transaction tr, IEnumerable<ObjectId> networkIds, NamingOptions o, List<SheetInfo> sheets, double gap, double centerTolerance,
@@ -155,7 +169,7 @@ namespace C3DProTools
                         Point3d mid = new Point3d((p.StartPoint.X + p.EndPoint.X) / 2, (p.StartPoint.Y + p.EndPoint.Y) / 2, 0);
                         RenameRow row = new RenameRow { Id = id, IsPipe = true, Network = net.Name, Old = p.Name, Sheet = SheetOf(mid), Type = Code(TypeValue(tr, p, o.PipeType)) };
                         row.Route = routes.FindIndex(r => r.Pipes.Any(x => x.id == id)) + 1;
-                        row.New = pipeTemplate.Errors.Count > 0 ? row.Old : Render(pipeTemplate, row, net.Name, counters);
+                        row.New = pipeTemplate.Errors.Count > 0 ? row.Old : Render(pipeTemplate, row, net.Name, counters, o.Numbering);
                         if (pipeTemplate.Errors.Count > 0) row.Note = "Pipe template: " + pipeTemplate.Errors[0];
                         if (reference) row.Note = "Data reference: rename it in its source drawing";
                         rows.Add(row);
@@ -180,7 +194,7 @@ namespace C3DProTools
                         if (only != null && !only.Contains(id)) continue;
                         Structure st = (Structure)tr.GetObject(id, OpenMode.ForRead);
                         RenameRow row = new RenameRow { Id = id, IsPipe = false, Network = net.Name, Old = st.Name, Sheet = SheetOf(st.Location), Type = Code(TypeValue(tr, st, o.StructureType)) };
-                        row.New = structureTemplate.Errors.Count > 0 ? row.Old : Render(structureTemplate, row, net.Name, counters);
+                        row.New = structureTemplate.Errors.Count > 0 ? row.Old : Render(structureTemplate, row, net.Name, counters, o.Numbering);
                         if (structureTemplate.Errors.Count > 0) row.Note = "Structure template: " + structureTemplate.Errors[0];
                         if (reference) row.Note = "Data reference: rename it in its source drawing";
                         rows.Add(row);
@@ -245,11 +259,17 @@ namespace C3DProTools
             return order;
         }
 
-        /// <summary>The name from the template; the counter is kept per distinct prefix, so each sheet and type starts at 1.</summary>
-        private static string Render(NameTemplate template, RenameRow row, string network, Dictionary<string, int> counters)
+        /// <summary>
+        /// The name from the template. The counter runs per distinct name (each sheet and type from 1), across the whole network,
+        /// or per sheet of the network, as <paramref name="scope"/> says; pipes and structures count apart.
+        /// </summary>
+        private static string Render(NameTemplate template, RenameRow row, string network, Dictionary<string, int> counters, NumberingScope scope)
         {
             string Value(string token) => token == "sheet" ? row.Sheet : token == "type" ? row.Type : token == "network" ? network : "";
-            string key = (row.IsPipe ? "P|" : "S|") + network + "|" + template.Render(Value, null);
+            // Across the network / per sheet: one sequence over all the networks being renamed (one network: that network), so
+            // networks sharing a template never get the same names (MV drawing test, 2026-11-23).
+            string key = (row.IsPipe ? "P|" : "S|") +
+                         (scope == NumberingScope.AcrossNetwork ? "" : scope == NumberingScope.PerSheet ? "sheet " + row.Sheet : network + "|" + template.Render(Value, null));
             counters.TryGetValue(key, out int count);
             counters[key] = ++count;
             return template.Render(Value, count);
@@ -320,7 +340,7 @@ namespace C3DProTools
                     ((Part)tr.GetObject(r.Id, OpenMode.ForWrite)).Name = r.New;
                     renamed++;
                 }
-                catch (Exception ex) { errors.Add($"{r.Old} → {r.New}: {ex.Message}"); }
+                catch (Exception ex) { errors.Add($"{r.Old} â†’ {r.New}: {ex.Message}"); }
             }
             return (renamed, errors.Count, errors, errors.Count == 0);
         }
