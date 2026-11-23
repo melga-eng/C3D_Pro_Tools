@@ -1,0 +1,5 @@
+C3DPRONAVIS
+C:\Users\melga\AppData\Roaming\C3DProTools\NavisClashPackage.json
+Auto
+Yes
+(princ (strcat "\nCLOUDS " (itoa (sslength (ssget "X" '((8 . "Z-Zz_10_40-M-ClashClouds")(0 . "LWPOLYLINE")))))))

@@ -186,6 +186,10 @@ namespace C3DProTools
             Button get = StyleUi.Primary("⬇  Get selection from Navisworks", async (s, e) => await GetSelection());
             get.Margin = new Padding(8, 4, 3, 3);
             bar.Controls.Add(get);
+            Button clashes = StyleUi.HeaderButton("Import clashes", (s, e) => ImportClashes());
+            clashes.Margin = new Padding(8, 4, 3, 3);
+            _tips.SetToolTip(clashes, "Imports what the Clash Grouper in Navisworks last sent (Send to Civil 3D), with a revision cloud around each clash area.");
+            bar.Controls.Add(clashes);
             _btnCancelGet.Margin = new Padding(3, 4, 3, 3);
             _btnCancelGet.Visible = false;
             _btnCancelGet.Click += (s, e) => _reading?.Cancel();
@@ -735,8 +739,7 @@ namespace C3DProTools
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             Bind(doc);
             _session.RefreshExisting(doc);
-            _lblLink.Text = $"● {Path.GetFileName(response.Document)}  ·  {response.Elements.Count} item(s) read in {sw.Elapsed.TotalSeconds:0.0} s" +
-                            (_session.ClashAreas.Count > 0 ? $"  ·  {_session.ClashAreas.Count} clash area(s): a revision cloud each on import" : "");
+            _lblLink.Text = $"● {Path.GetFileName(response.Document)}  ·  {response.Elements.Count} item(s) read in {sw.Elapsed.TotalSeconds:0.0} s";
             FillGrid();
             if (response.Warnings.Count > 0) SetStatus(string.Join("  ", response.Warnings.Take(3)), true);
             RunPlan(false);
@@ -1260,7 +1263,48 @@ namespace C3DProTools
             }
         }
 
-        private void ImportTicked()
+        /// <summary>
+        /// Import clashes: the Clash Grouper's package (what "Send to Civil 3D" last sent) loaded as the rows, imported with this
+        /// window's settings after the usual confirmation, and a revision cloud drawn around each clash area. One UNDO each.
+        /// </summary>
+        private void ImportClashes()
+        {
+            if (_busy) return;
+            Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+            if (!File.Exists(NavisClashPackage.Path))
+            {
+                SetStatus("Nothing sent yet: in Navisworks, Clash Grouper > tick groups > Send ticked to Civil 3D, then Import clashes here.", true);
+                return;
+            }
+            NavisResponse package;
+            try { package = NavisClashPackage.Load(); }
+            catch (Exception ex) { C3DProLogger.Error("Navisworks Import: the clash package could not be read", ex); SetStatus("The clash package could not be read: " + ex.Message, true); return; }
+            package.ClashAreas ??= new List<NavisClashArea>();
+            if (package.Elements.Count == 0 && package.ClashAreas.Count == 0) { SetStatus("The clash package is empty: send the groups again from the Clash Grouper.", true); return; }
+
+            DateTime sent = File.GetLastWriteTime(NavisClashPackage.Path);
+            string tests = string.Join(", ", package.ClashAreas.Select(a => a.Test).Distinct());
+            _session.Transform = ReadTransform();
+            _session.Load(package);
+            Bind(doc);
+            _session.RefreshExisting(doc);
+            _lblLink.Text = $"● Clash package from {tests} ({sent:dd MMM HH:mm})  ·  {package.Elements.Count} item(s), {package.ClashAreas.Count} clash area(s)";
+            FillGrid();
+            RunPlan(false);
+            if (package.Elements.Count == 0)
+            {
+                // Areas only (every item already left out in Navisworks): the clouds alone.
+                int n;
+                try { using (doc.LockDocument()) n = ClashClouds.Draw(doc.Database, _session.ClashAreas, NavisImporter.DrawingScale(doc.Database)); }
+                catch (Exception ex) { C3DProLogger.Error("Navisworks Import: the clash clouds could not be drawn", ex); SetStatus("The clash clouds could not be drawn: " + ex.Message, true); return; }
+                SetStatus($"No items in the clash package; {n} clash cloud(s) drawn on {ClashClouds.Layer}. Use UNDO to reverse.");
+                return;
+            }
+            ImportTicked(clashClouds: true);
+        }
+
+        private void ImportTicked(bool clashClouds = false)
         {
             Document doc = AcadCoreApp.DocumentManager.MdiActiveDocument;
             List<ImportCandidate> rows = TickedRows();
@@ -1276,6 +1320,8 @@ namespace C3DProTools
             foreach (string sz in plan.AddedSizes) preview.Add(new PreviewRow { Cells = new[] { "Size", sz, "Added to the parts list", "" }, Enabled = false });
             foreach (string n in plan.Networks) preview.Add(new PreviewRow { Cells = new[] { "Network", n, n.EndsWith("(new)") ? "Created" : "Parts added to it", "" }, Enabled = false });
             foreach (string a in plan.CatalogAdditions) preview.Add(new PreviewRow { Cells = new[] { "Catalog", a, "Added to the catalog family (backup kept)", "Method B" }, Enabled = false });
+            if (clashClouds && _session.ClashAreas.Count > 0)
+                preview.Add(new PreviewRow { Cells = new[] { "Clouds", $"{_session.ClashAreas.Count} clash area(s)", "One revision cloud each", ClashClouds.Layer }, Enabled = false });
             foreach (ImportCandidate c in rows)
             {
                 RowOutcome p = plan.Rows[c];
@@ -1305,9 +1351,9 @@ namespace C3DProTools
             _session.Record(report, doc);
             _markers.Clear();
             RefreshRows();
-            // Sent from the Clash Grouper: a revision cloud around each clash area.
+            // Import clashes only: a revision cloud around each clash area.
             int clouds = 0;
-            if (_session.ClashAreas.Count > 0 && ClashClouds.SomethingThere(report))
+            if (clashClouds && _session.ClashAreas.Count > 0 && ClashClouds.SomethingThere(report))
             {
                 try { using (doc.LockDocument()) clouds = ClashClouds.Draw(doc.Database, _session.ClashAreas, NavisImporter.DrawingScale(doc.Database)); }
                 catch (Exception ex) { C3DProLogger.Error("Navisworks Import: the clash clouds could not be drawn", ex); }

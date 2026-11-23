@@ -194,16 +194,14 @@ namespace C3DProTools.Navis
             return items;
         }
 
-        // ---- Send to Civil 3D: the other side's items selected, and their clash areas kept for the link ----
-
-        private static HashSet<ModelItem> _sentItems;
-        private static List<NavisLink.NavisClashArea> _sentAreas = new List<NavisLink.NavisClashArea>();
+        // ---- Send to Civil 3D: the other side's items and one area per group or clash, saved as the clash package ----
 
         /// <summary>
-        /// Selects the other side's items of the chosen groups and single clashes (the main side, the network being changed, is
-        /// not imported) and keeps one area per group or clash for Civil 3D. Returns the number of items and areas.
+        /// Saves the clash package (<see cref="NavisLink.NavisClashPackage"/>): the other side's items of the chosen groups and
+        /// single clashes (the main side, the network being changed, is not imported), read with their geometry, and one area per
+        /// group or clash. The items are also selected, to show what was sent. Returns the package.
         /// </summary>
-        public static (int items, int areas) Send(Document doc, ClashTest test, IEnumerable<string> names, bool item1Main)
+        public static NavisLink.NavisResponse Send(Document doc, ClashTest test, IEnumerable<string> names, bool item1Main)
         {
             double toMetres = NavisExtractor.ToMetres(doc.Units);
             var chosen = new HashSet<string>(names ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
@@ -235,25 +233,11 @@ namespace C3DProTools.Navis
                 a.Z = z / rs.Count;
                 areas.Add(a);
             }
+            NavisLink.NavisResponse package = NavisExtractor.ReadItems(doc, items);
+            package.ClashAreas = areas;
+            NavisLink.NavisClashPackage.Save(package);
             doc.CurrentSelection.CopyFrom(items);
-            _sentItems = new HashSet<ModelItem>(doc.CurrentSelection.SelectedItems.Cast<ModelItem>());
-            _sentAreas = areas;
-            return (items.Count, areas.Count);
-        }
-
-        /// <summary>The areas sent with the current selection: only while it is still exactly what Send selected.</summary>
-        public static List<NavisLink.NavisClashArea> AreasForSelection(Document doc)
-        {
-            if (_sentItems == null) return new List<NavisLink.NavisClashArea>();
-            ModelItemCollection now = doc.CurrentSelection.SelectedItems;
-            if (now.Count != _sentItems.Count || now.Cast<ModelItem>().Any(m => !_sentItems.Contains(m)))
-            {
-                // The selection changed: the areas are forgotten, so they never come back with a later plain selection (review finding).
-                _sentItems = null;
-                _sentAreas = new List<NavisLink.NavisClashArea>();
-                return new List<NavisLink.NavisClashArea>();
-            }
-            return _sentAreas;
+            return package;
         }
 
         public static string Describe(IEnumerable<TestGrouping> runs)
