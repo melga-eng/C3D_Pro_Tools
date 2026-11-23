@@ -21,7 +21,8 @@ namespace C3DProTools.Navis
     /// ("1" or "2"), report file.
     /// </summary>
     [Plugin("C3DProTools.ClashGrouper", "C3DPro", DisplayName = "Clash Grouper", ToolTip = "Group clashes by connected elements, area and status")]
-    [AddInPlugin(AddInLocation.AddIn)]
+    // Not on the Add-ins tab (the C3D Pro tab opens the window); kept as an add-in so background tests can run it with arguments.
+    [AddInPlugin(AddInLocation.None)]
     public class ClashGrouperCommand : AddInPlugin
     {
         private static FormClashGrouper _form;
@@ -66,12 +67,19 @@ namespace C3DProTools.Navis
                 File.Copy(NavisLink.NavisClashPackage.Path, args[4], true);
                 return 0;
             }
-            if (doc == null || doc.IsClear) { MessageBox.Show("Open a model with clash tests first.", "Clash Grouper"); return 0; }
+            ShowWindow();
+            return 0;
+        }
+
+        /// <summary>Opens (or brings back) the Clash Grouper window.</summary>
+        public static void ShowWindow()
+        {
+            Document doc = NavisApp.ActiveDocument;
+            if (doc == null || doc.IsClear) { MessageBox.Show("Open a model with clash tests first.", "Clash Grouper"); return; }
             if (_form == null || _form.IsDisposed) _form = new FormClashGrouper();
             _form.Show();
             _form.Activate();
             _form.Fill();
-            return 0;
         }
     }
 

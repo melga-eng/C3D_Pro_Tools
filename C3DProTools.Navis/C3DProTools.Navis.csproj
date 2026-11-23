@@ -24,6 +24,12 @@
 		<Compile Include="..\Shared\C3DProLogger.cs" Link="Shared\C3DProLogger.cs" />
 	</ItemGroup>
 	<ItemGroup>
+		<!-- The C3D Pro tab: the layout beside the add-in and in en-US (Navisworks looks in the culture folder first), the icons beside it. -->
+		<None Include="Ribbon\C3DProRibbon.xaml" Link="C3DProRibbon.xaml" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="Ribbon\C3DProRibbon.xaml" Link="en-US\C3DProRibbon.xaml" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="Ribbon\*.png" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+	</ItemGroup>
+	<ItemGroup>
 		<Reference Include="System.Runtime.Serialization" />
 		<Reference Include="Autodesk.Navisworks.Api"><HintPath>$(NavisDir)Autodesk.Navisworks.Api.dll</HintPath><Private>False</Private></Reference>
 		<Reference Include="Autodesk.Navisworks.Clash"><HintPath>$(NavisDir)Autodesk.Navisworks.Clash.dll</HintPath><Private>False</Private></Reference>

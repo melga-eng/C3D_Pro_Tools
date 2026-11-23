@@ -97,12 +97,10 @@ namespace C3DProTools.Navis
         }
     }
 
-    /// <summary>Add-ins tab button showing whether the link is running.</summary>
-    [Plugin("C3DProTools.LinkStatus", "C3DPro", DisplayName = "Civil 3D Link", ToolTip = "Shows the C3D Pro Tools link to Civil 3D")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class LinkStatusCommand : AddInPlugin
+    /// <summary>The C3D Pro tab's Civil 3D Link button: whether the link is running.</summary>
+    public static class LinkStatusCommand
     {
-        public override int Execute(params string[] parameters)
+        public static void ShowStatus()
         {
             Document doc = NavisApp.ActiveDocument;
             int selected = doc == null ? 0 : doc.CurrentSelection.SelectedItems.Count;
@@ -112,7 +110,6 @@ namespace C3DProTools.Navis
                 (NavisLinkHost.LastError.Length > 0 ? $"Last error: {NavisLinkHost.LastError}\n" : "") +
                 "\nIn Civil 3D, open Navisworks Import and click \"Get selection\".",
                 "Civil 3D Link", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return 0;
         }
     }
 }

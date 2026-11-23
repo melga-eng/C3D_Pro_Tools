@@ -31,7 +31,7 @@
 				<!-- Navisworks loads per-machine add-ins from C:\ProgramData\Autodesk\Navisworks Manage 2026\Plugins\<Name>\<Name>.dll -->
 				<Directory Id="NavisManageFolder" Name="Navisworks Manage 2026">
 					<Directory Id="NavisPluginsFolder" Name="Plugins">
-						<Directory Id="NavisAddinFolder" Name="C3DProTools.Navis" />
+						<Directory Id="NavisAddinFolder" Name="C3DProTools.Navis"><Directory Id="NavisAddinEnUsFolder" Name="en-US" /></Directory>
 					</Directory>
 				</Directory>
 				<Directory Id="ApplicationPluginsFolder" Name="ApplicationPlugins">
@@ -62,6 +62,14 @@
 		<ComponentGroup Id="NavisworksComponents">
 			<Component Id="NavisAddinDLL" Directory="NavisAddinFolder">
 				<File Id="NavisDllFile" Name="C3DProTools.Navis.dll" Source="$(var.C3DProTools.Navis.TargetPath)" KeyPath="yes" />
+				<File Id="NavisRibbonXaml" Name="C3DProRibbon.xaml" Source="$(var.C3DProTools.Navis.TargetDir)C3DProRibbon.xaml" />
+				<File Id="NavisIconGrouper16" Name="ClashGrouper_16.png" Source="$(var.C3DProTools.Navis.TargetDir)ClashGrouper_16.png" />
+				<File Id="NavisIconGrouper32" Name="ClashGrouper_32.png" Source="$(var.C3DProTools.Navis.TargetDir)ClashGrouper_32.png" />
+				<File Id="NavisIconLink16" Name="CivilLink_16.png" Source="$(var.C3DProTools.Navis.TargetDir)CivilLink_16.png" />
+				<File Id="NavisIconLink32" Name="CivilLink_32.png" Source="$(var.C3DProTools.Navis.TargetDir)CivilLink_32.png" />
+			</Component>
+			<Component Id="NavisRibbonEnUs" Directory="NavisAddinEnUsFolder">
+				<File Id="NavisRibbonXamlEnUs" Name="C3DProRibbon.xaml" Source="$(var.C3DProTools.Navis.TargetDir)en-US\C3DProRibbon.xaml" KeyPath="yes" />
 			</Component>
 		</ComponentGroup>
 	</Fragment>
