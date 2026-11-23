@@ -111,3 +111,5 @@ Ideas from civil3dfactory (github.com/hellojessieluo-svg/civil3dfactory, Apache-
    drawing open between steps (only once tests run many steps on big drawings); their `create_plan_frames_from_alignment`,
    `restyle_profile_view_bands` and `set_block_attributes` as references when we need them.
 
+
+- ICT and MV as templates (your request 2026-11-23): Rename name-pattern presets (ICT, MV) and numbering per name / across the network / per sheet, MV type codes T1-T4 and ALMH/VLMH; cover check with any duct types and ICT/MV presets; Split view From - To (one part, long view kept). Merged 2026-11-23; needs your try.

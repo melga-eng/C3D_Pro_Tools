@@ -1,0 +1,6 @@
+﻿{ "pavement": {
+    "zones": [
+      { "surface": "KSIA_TAXIWAY-PAVEMENT", "name": "Taxiway Pavement", "minCover": 1.5, "ductType": "T1,T3", "edgeBand": 16.5 },
+      { "surface": "KSIA_ROAD-AIRSIDE", "name": "Road Pavement", "minCover": 0.6, "ductType": "T2,T4" }
+    ],
+    "unpaved": { "name": "Unpaved", "minCover": 0.6, "ductType": "T2,T4" } } }

@@ -416,9 +416,13 @@ namespace C3DProTools.Features.Networks.Civil3D
                     break;
                 }
                 if (!PavementZones.IsTypeChecked(type, zones)) continue;
-                PavementZone strictest = PavementZones.KindsBetween(stations, kinds, row.Pipe.S0, row.Pipe.S1)
-                    .Select(k => pav.Of(k)).OrderByDescending(z => z.MinCover).FirstOrDefault();
-                var check = PavementZones.CheckType(type, strictest, zones);
+                // The deepest pavement(s) the duct passes under: when two ask the same cover with different types, both are checked
+                // and a failure under either wins (review finding); shallower ones are not checked, as before.
+                var under = PavementZones.KindsBetween(stations, kinds, row.Pipe.S0, row.Pipe.S1).Select(k => pav.Of(k)).Where(z => z != null).Distinct().ToList();
+                double deepest = under.Count == 0 ? 0 : under.Max(z => z.MinCover);
+                var check = under.Where(z => Math.Abs(z.MinCover - deepest) < 1e-9)
+                    .Select(z => PavementZones.CheckType(type, z, zones)).Where(c => c != null)
+                    .OrderByDescending(c => c.Value.fails).FirstOrDefault();
                 if (check == null) continue;
                 if (check.Value.fails)
                 {

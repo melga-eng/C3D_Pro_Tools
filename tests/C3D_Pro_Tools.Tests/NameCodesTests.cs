@@ -20,6 +20,8 @@ namespace C3DProTools.Tests
 
         [Theory]
         [InlineData("MV 5x3 way Duct Bank (Type-1 & 2)")]   // two types: no single code
+        [InlineData("MV Duct Bank Type-1 & Type-2")]
+        [InlineData("MV Duct Bank Type-1 or Type-2")]
         [InlineData("Prop ICT Ductbank (6x4 110 mm TYPE-3B)")] // ICT letter type
         [InlineData("TYPE C TYPE 2 MNH")]                    // not MV
         [InlineData("MV Direct Buried 3C x 500 mm2 Cable - D=103.4 mm")]

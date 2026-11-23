@@ -143,6 +143,7 @@ namespace C3D_Pro_Tools.Tests
         [InlineData("", "", "MV 5x 3 WAY DUCT BANK TYPE-1", "T1")]
         [InlineData("", "", "TYPE - 04 - 5 X 1 Duct Bank (Under Road Crossing)", "T4")]
         [InlineData("", "", "MV Trench Type 03", "T3")]
+        [InlineData("", "", "MV Reinforced Duct Bank Type-2", "T2")]
         [InlineData("", "", "T1", "T1")]
         [InlineData("IF-PIP-MVDCT-T1-0189", "", "", "T1")]
         [InlineData("", "MV 5x3 way Duct Bank (Type-1 & 2)", "", null)]

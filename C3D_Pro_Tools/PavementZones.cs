@@ -198,12 +198,14 @@ namespace C3DProTools
                 Match letter = LetterType.Match(text);
                 // "3C x 500 mm2 Cable" describes cable cores, not an ICT micro-duct type.
                 if (letter.Success && !Regex.IsMatch(text, @"\bCABLE\b", RegexOptions.IgnoreCase)) return letter.Groups[1].Value.ToUpperInvariant();
-                if (text.IndexOf("Reinforc", StringComparison.OrdinalIgnoreCase) >= 0) return "A";
                 if (MultipleTypes.IsMatch(text)) return null;
                 var codes = NumberType.Matches(text).Cast<Match>()
                     .Where(m => MvContext.IsMatch(text) || m.Value.StartsWith("T", StringComparison.OrdinalIgnoreCase) && !m.Value.StartsWith("TYPE", StringComparison.OrdinalIgnoreCase))
                     .Select(m => "T" + m.Groups[1].Value).Distinct().ToList();
-                return codes.Count == 1 ? codes[0] : null;
+                if (codes.Count > 1) return null;
+                if (codes.Count == 1) return codes[0];
+                // ICT "Reinforcement" sizes are type A; an MV text with its own numbered type is read above first (review finding).
+                return text.IndexOf("Reinforc", StringComparison.OrdinalIgnoreCase) >= 0 ? "A" : null;
             }
             // The name first: on the project the type is written in the name (ICT "IC-125-IC2B-01" → B, MV "IF-PIP-MVDCT-T1-0189" → T1),
             // as the old check did (ICT drawing test, 2026-11-23: four "2B" ducts whose part says A stay B). The part's description

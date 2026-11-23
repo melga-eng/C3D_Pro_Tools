@@ -1,4 +1,6 @@
-﻿using System.Globalization;
+﻿using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace C3DProTools
@@ -39,9 +41,17 @@ namespace C3DProTools
         {
             string v = value ?? "";
             if (!Regex.IsMatch(v, @"medium\s*voltage|\bMV\b|trench|duct\s*bank", RegexOptions.IgnoreCase)) return null;
-            Match m = Regex.Match(v, @"\bTYPE\s*[-:_]?\s*0?(\d{1,2})(?![\dA-Za-z])(?!\s*(?:&|and|/|,)\s*\d)", RegexOptions.IgnoreCase);
-            if (!m.Success) m = Regex.Match(v, @"(?<![A-Za-z])T0?(\d)(?![\dA-Za-z])(?!\s*(?:&|and|/|,)\s*\d)");
-            return m.Success ? int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) : null;
+            // Every type number written ("Type-1 & Type-2", "Type-1 & 2" are two): one distinct number or none (review finding).
+            var numbers = new HashSet<int>();
+            foreach (Match t in Regex.Matches(v, @"\bTYPE\s*[-:_]?\s*0?(\d{1,2})(?![\dA-Za-z])((?:\s*(?:&|and|/|,|or)\s*0?\d{1,2}(?![\dA-Za-z]))*)", RegexOptions.IgnoreCase))
+            {
+                numbers.Add(int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture));
+                foreach (Match more in Regex.Matches(t.Groups[2].Value, @"\d{1,2}")) numbers.Add(int.Parse(more.Value, CultureInfo.InvariantCulture));
+            }
+            if (numbers.Count == 0)
+                foreach (Match t in Regex.Matches(v, @"(?<![A-Za-z])T0?(\d)(?![\dA-Za-z])"))
+                    numbers.Add(int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture));
+            return numbers.Count == 1 ? numbers.First().ToString(CultureInfo.InvariantCulture) : null;
         }
     }
 }
