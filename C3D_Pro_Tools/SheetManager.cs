@@ -22,6 +22,8 @@ namespace C3DProTools
         public string Layout = "";
         public int Tab;
         public string Tile = "", Part = "";
+        /// <summary>The group the user put the sheet in, for their own reference; empty when none (kept on the layout, see SheetGroups).</summary>
+        public string Group = "";
         /// <summary>Where the tile and part were read from ("sheet text", "title block", "key plan"), empty when not found.</summary>
         public string TileSource = "";
 
@@ -93,7 +95,8 @@ namespace C3DProTools
             SheetRecord s = new SheetRecord
             {
                 LayoutId = lay.ObjectId, BlockId = lay.BlockTableRecordId, Layout = lay.LayoutName, Tab = lay.TabOrder,
-                PageSetup = Safe(() => lay.PlotSettingsName), Paper = Safe(() => lay.CanonicalMediaName), Device = Safe(() => lay.PlotConfigurationName)
+                PageSetup = Safe(() => lay.PlotSettingsName), Paper = Safe(() => lay.CanonicalMediaName), Device = Safe(() => lay.PlotConfigurationName),
+                Group = SheetGroups.Get(tr, lay)
             };
             Regex idRx = Rx(p.SheetIdPattern), partRx = Rx(p.PartTextPattern), scaleRx = Rx(p.ScaleTextPattern), keyRx = Rx(p.KeyPlanPattern);
             List<(ObjectId id, Point3d c)> hatches = new List<(ObjectId, Point3d)>();
@@ -505,6 +508,8 @@ namespace C3DProTools
             string numberTag = NumberTagOf(source, p);
             lm.CloneLayout(source.Layout, newName, source.Tab + 1);
             Layout lay = (Layout)tr.GetObject(lm.GetLayoutId(newName), OpenMode.ForRead);
+            // The copy stays in the source's group, whatever CloneLayout does with the layout's extension dictionary.
+            SheetGroups.Set(tr, lay.ObjectId, source.Group);
             SheetRecord copy = ReadOne(tr, lay, p);
             // Its number, and no match lines: the source's neighbours are not the copy's.
             Dictionary<string, string> v = new Dictionary<string, string> { [numberTag] = newName };
@@ -522,6 +527,8 @@ namespace C3DProTools
             if (string.Equals(file, db.Filename, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(file))
             {
                 LayoutManager.Current.CloneLayout(layoutName, newName, LayoutCount(tr, db) + 1);
+                // A new sheet starts in no group (only Duplicate keeps the source's).
+                SheetGroups.Set(tr, LayoutManager.Current.GetLayoutId(newName), "");
                 return ReadOne(tr, (Layout)tr.GetObject(LayoutManager.Current.GetLayoutId(newName), OpenMode.ForRead), p);
             }
             using (Database src = new Database(false, true))
