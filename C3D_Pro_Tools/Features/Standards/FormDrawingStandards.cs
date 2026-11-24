@@ -84,7 +84,7 @@ namespace C3DProTools.Features.Standards
                 _grid.Rows.Clear();
                 foreach (StandardFinding f in _found)
                 {
-                    int i = _grid.Rows.Add(f.Fix != null, f.IsNote ? "note" : "problem", f.Area, f.Rule, f.Text + (f.Fix != null ? $"  [fix: {f.FixText}]" : ""));
+                    int i = _grid.Rows.Add(f.Fix != null && f.Tick, f.IsNote ? "note" : "problem", f.Area, f.Rule, f.Text + (f.Fix != null ? $"  [fix: {f.FixText}]" : ""));
                     _grid.Rows[i].Tag = f;
                     if (f.Fix == null) _grid.Rows[i].Cells["fix"].ReadOnly = true;
                     if (f.IsNote) _grid.Rows[i].DefaultCellStyle.ForeColor = StyleUi.Muted;

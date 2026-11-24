@@ -43,39 +43,33 @@ namespace C3DProTools.Tests
         }
 
         [Fact]
-        public void Bound_standard_name_returns_its_own_name_sure()
+        public void Bound_layer_becomes_XREF_and_its_own_name_sure()
         {
             const string inner = "O-Ss_50_35_06_14-M-IctManholeTypeC";
             const string layer = "NCRD_ICT Network_N2 (AGC Modified)$0$" + inner;
             var result = LayerSuggest.Suggest(layer, Template, Drawing);
             Assert.Equal(layer, result.Layer);
-            Assert.Equal(inner, result.Target);
+            Assert.Equal("XREF_" + inner, result.Target);
             Assert.True(result.Sure);
-            Assert.Equal("bound xref layer: back to its own name", result.Why);
+            Assert.Contains("bound xref", result.Why);
         }
 
         [Theory]
-        [InlineData("outer$1$nested$23$Inner", "Inner")]
-        [InlineData("outer$1$inner", "inner")]
-        public void Bound_known_names_are_sure_using_last_numbered_separator(string layer, string expected)
+        [InlineData("outer$1$nested$23$Inner", "XREF_Inner")]
+        [InlineData("outer$1$inner", "XREF_inner")]
+        [InlineData("drawing$0$C-ANNO-DIM", "XREF_C-ANNO-DIM")]
+        public void Bound_layers_use_the_name_after_the_last_separator(string layer, string expected)
         {
-            foreach (bool inTemplate in new[] { true, false })
-            {
-                var result = LayerSuggest.Suggest(layer, inTemplate ? new[] { "INNER" } : Array.Empty<string>(),
-                    inTemplate ? Array.Empty<string>() : new[] { "INNER" });
-                Assert.Equal(expected, result.Target);
-                Assert.True(result.Sure);
-            }
+            var result = LayerSuggest.Suggest(layer, Template, Drawing);
+            Assert.Equal(expected, result.Target);
+            Assert.True(result.Sure);
         }
 
         [Fact]
-        public void Bound_unknown_Aia_name_is_matched_by_meaning_and_remains_unsure()
+        public void XREF_layers_count_as_standard()
         {
-            var result = LayerSuggest.Suggest("drawing$0$C-ANNO-DIM", Template, Drawing);
-            Assert.Equal("Z-Zz_20_20-D-Dim", result.Target);
-            Assert.False(result.Sure);
-            Assert.Contains("bound xref", result.Why);
-            Assert.Null(LayerSuggest.Suggest("drawing$0$Background", Template, Array.Empty<string>()).Target);
+            Assert.True(LayerSuggest.IsStandard("XREF_C-ANNO-DIM", Template));
+            Assert.False(LayerSuggest.IsStandard("XREF_", Template));
         }
 
         [Theory]

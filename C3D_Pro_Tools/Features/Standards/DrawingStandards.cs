@@ -29,6 +29,8 @@ namespace C3DProTools.Features.Standards
         public string FixText;
         public Action<Transaction, Database, StringBuilder> Fix;
         public bool IsNote;
+        /// <summary>A fix that comes ticked (false: shown with its fix, for you to tick after a look).</summary>
+        public bool Tick = true;
     }
 
     public sealed class DrawingStandards
@@ -71,7 +73,7 @@ namespace C3DProTools.Features.Standards
                 {
                     List<StandardFinding> found = Check(doc);
                     Describe(found, log);
-                    if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null).ToList(), log);
+                    if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null && f.Tick).ToList(), log);
                 }
             }
             catch (Exception ex)
@@ -138,8 +140,10 @@ namespace C3DProTools.Features.Standards
                 CoordinateSystem(db, found);
                 var lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
                 var layers = lt.Cast<ObjectId>().Select(id => (LayerTableRecord)tr.GetObject(id, OpenMode.ForRead)).ToList();
+                ObjectLayers.Check(tr, db, found);
                 Objects(tr, db, found);
                 Layers(layers, found);
+                Names(tr, db, found);
                 Fonts(tr, db, found);
                 Viewports(tr, db, found);
                 Xrefs(tr, db, doc.Name, found);
@@ -246,6 +250,87 @@ namespace C3DProTools.Features.Standards
                     Text = $"{weights.Sum(g => g.Count())} layers have a line weight that is not an allowed plotted width (0.05, 0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0 mm). The KSIA template has the same; reported only.",
                     Items = weights.Select(g => $"{g.Key / 100.0:0.00} mm: {g.Count()} layers, e.g. {string.Join(", ", g.Take(3).Select(l => l.Name))}").ToList()
                 });
+        }
+
+        /// <summary>
+        /// Block and style names with another company's prefix (JAC, JCB, JCP) or an xref drawing's name: KSIA_ instead (your
+        /// rule, 2026-11-24). Xref blocks, layouts and anonymous blocks keep their names; a new name already taken is listed, not used.
+        /// </summary>
+        private static void Names(Transaction tr, Database db, List<StandardFinding> found)
+        {
+            var renames = new List<(ObjectId id, string what, string from, string to)>();
+            var clashes = new List<string>();
+            void Table(ObjectId tableId, string what)
+            {
+                var table = (SymbolTable)tr.GetObject(tableId, OpenMode.ForRead);
+                foreach (ObjectId id in table)
+                {
+                    if (!(tr.GetObject(id, OpenMode.ForRead) is SymbolTableRecord r) || r.IsDependent) continue;
+                    if (r is BlockTableRecord b && (b.IsLayout || b.IsFromExternalReference || b.IsAnonymous)) continue;
+                    string to = NamePrefix.Proposed(r.Name);
+                    if (to == null) continue;
+                    if (table.Has(to)) { clashes.Add($"{what} {r.Name}: {to} is already taken"); continue; }
+                    renames.Add((id, what, r.Name, to));
+                }
+            }
+            void Dictionary(ObjectId dictId, string what)
+            {
+                if (dictId.IsNull) return;
+                var dict = (DBDictionary)tr.GetObject(dictId, OpenMode.ForRead);
+                foreach (DBDictionaryEntry e in dict)
+                {
+                    string to = NamePrefix.Proposed(e.Key);
+                    if (to == null) continue;
+                    if (dict.Contains(to)) { clashes.Add($"{what} {e.Key}: {to} is already taken"); continue; }
+                    renames.Add((e.Value, what, e.Key, to));
+                }
+            }
+            Table(db.BlockTableId, "block");
+            Table(db.TextStyleTableId, "text style");
+            Table(db.DimStyleTableId, "dimension style");
+            Dictionary(db.MLeaderStyleDictionaryId, "multileader style");
+            Dictionary(db.TableStyleDictionaryId, "table style");
+            // AutoCAD's own internal copies (A$C…) keep their names; two names that would both become the same KSIA_ name are
+            // listed for you, not renamed (drawing test 462124: several bound "…$0$block 2").
+            renames.RemoveAll(r => r.to.StartsWith(NamePrefix.Ksia + "A$C", StringComparison.OrdinalIgnoreCase));
+            foreach (var dup in renames.GroupBy(r => (r.what, r.to.ToUpperInvariant())).Where(g => g.Count() > 1).ToList())
+            {
+                clashes.Add($"{dup.Key.what}s {string.Join(", ", dup.Select(r => r.from))}: all would become {dup.First().to}");
+                renames.RemoveAll(r => dup.Contains(r));
+            }
+            if (renames.Count > 0)
+                found.Add(new StandardFinding
+                {
+                    Area = "Names", Rule = "KSIA_ prefix",
+                    Text = $"{renames.Count} block and style names carry another company's prefix or an xref drawing's name (KSIA_ instead).",
+                    Items = renames.Select(r => $"{r.what} {r.from} -> {r.to}").ToList(),
+                    FixText = "rename them with KSIA_",
+                    Fix = (t, d, log) =>
+                    {
+                        int done = 0;
+                        var failed = new List<string>();
+                        foreach (var r in renames)
+                        {
+                            try
+                            {
+                                DBObject o = t.GetObject(r.id, OpenMode.ForWrite);
+                                if (o is SymbolTableRecord s) s.Name = r.to;
+                                else
+                                {
+                                    // Dictionary entries (multileader and table styles) are renamed in their dictionary.
+                                    var dict = (DBDictionary)t.GetObject(o.OwnerId, OpenMode.ForWrite);
+                                    dict.SetName(r.from, r.to);
+                                }
+                                done++;
+                            }
+                            catch (Exception ex) { failed.Add($"{r.from} ({ex.Message})"); }
+                        }
+                        log.AppendLine($"  {done} names changed to KSIA_");
+                        if (failed.Count > 0) throw new InvalidOperationException($"{failed.Count} not renamed: {string.Join(", ", failed.Take(5))}");
+                    }
+                });
+            if (clashes.Count > 0)
+                found.Add(new StandardFinding { Area = "Names", Rule = "KSIA_ prefix", Text = $"{clashes.Count} names would take a KSIA_ name that is already used: merge them by hand.", Items = clashes });
         }
 
         /// <summary>Text styles in use whose font is not Arial Narrow (STD 6).</summary>
@@ -370,6 +455,51 @@ namespace C3DProTools.Features.Standards
                     if (Regex.IsMatch(a.Key, "DATE", RegexOptions.IgnoreCase) && !StandardRules.DateOk(v)) dates.Add($"{s.Layout}: {a.Key} = {v}");
                     if (Regex.IsMatch(a.Key, "^SCALE$", RegexOptions.IgnoreCase) && !StandardRules.ScaleTextOk(v)) scales.Add($"{s.Layout}: {a.Key} = {v}");
                 }
+            // Revision letter by stage (your rule, 2026-11-24): N# on IFC drawings, C# on SDR (shop drawings).
+            var revisions = new List<string>();
+            foreach (SheetRecord s in sheets.Where(x => !x.TitleBlockId.IsNull))
+            {
+                // The tags set in Sheet Manager's profile (review finding), else the usual names.
+                string Attr(string tag, string fallback) =>
+                    !string.IsNullOrWhiteSpace(tag) && s.HasAttr(tag) ? s.Attr(tag) : s.Attributes.FirstOrDefault(a => Regex.IsMatch(a.Key, fallback, RegexOptions.IgnoreCase)).Value;
+                string stage = Attr(p.StageTag, "^STAGE$");
+                string rev = Attr(p.RevisionTag, "^REV(_?NO|ISION)?$");
+                string letter = NamePrefix.RevisionLetter(stage);
+                if (letter != null && !string.IsNullOrWhiteSpace(rev) && !NamePrefix.RevisionFits(rev, letter))
+                    revisions.Add($"{s.Layout}: stage \"{stage}\", revision {rev} (should be {letter}1, {letter}2…)");
+            }
+            if (revisions.Count > 0) found.Add(new StandardFinding { Area = "Sheets", Rule = "Revision by stage", Text = $"{revisions.Count} sheets have a revision that does not match their stage (N for IFC, C for SDR).", Items = revisions });
+
+            // North arrow and scale bar on every sheet (CRS: "provide the scale bar and north orientation"): a block named NORTH… / SCALE….
+            var noNorth = new List<string>();
+            var noScale = new List<string>();
+            foreach (SheetRecord s in sheets)
+            {
+                if (!(tr.GetObject(s.LayoutId, OpenMode.ForRead) is Layout lay)) continue;
+                // The blocks on the sheet and the blocks inside them (a north arrow often sits inside the title block); only those
+                // that plot: not on a layer that is off or frozen (review finding). Layer 0 inside a block takes the block's layer.
+                bool Shown(BlockReference br) =>
+                    !(tr.GetObject(br.LayerId, OpenMode.ForRead) is LayerTableRecord l) || (!l.IsOff && !l.IsFrozen && l.IsPlottable);
+                var names = new List<string>();
+                var seen = new HashSet<ObjectId>();
+                void Collect(ObjectId spaceId, int depth)
+                {
+                    if (depth > 4 || !seen.Add(spaceId)) return;
+                    foreach (ObjectId id in (BlockTableRecord)tr.GetObject(spaceId, OpenMode.ForRead))
+                        if (id.ObjectClass.IsDerivedFrom(RXObject.GetClass(typeof(BlockReference))) && tr.GetObject(id, OpenMode.ForRead) is BlockReference br && Shown(br))
+                        {
+                            var def = (BlockTableRecord)tr.GetObject(br.DynamicBlockTableRecord, OpenMode.ForRead);
+                            names.Add(def.Name);
+                            if (!def.IsFromExternalReference) Collect(br.BlockTableRecord, depth + 1);
+                        }
+                }
+                Collect(lay.BlockTableRecordId, 0);
+                if (!names.Any(n => Regex.IsMatch(n, "NORTH", RegexOptions.IgnoreCase))) noNorth.Add(s.Layout);
+                if (!names.Any(n => Regex.IsMatch(n, "SCALE", RegexOptions.IgnoreCase))) noScale.Add(s.Layout);
+            }
+            if (noNorth.Count > 0) found.Add(new StandardFinding { Area = "Sheets", Rule = "CRS: north orientation", Text = $"{noNorth.Count} sheets have no north arrow (no block named NORTH…).", Items = noNorth });
+            if (noScale.Count > 0) found.Add(new StandardFinding { Area = "Sheets", Rule = "CRS: scale bar", Text = $"{noScale.Count} sheets have no scale bar (no block named SCALE…).", Items = noScale });
+
             if (dates.Count > 0) found.Add(new StandardFinding { Area = "Sheets", Rule = "EIR App. E", Text = $"{dates.Count} title block dates are not written DD/MM/YYYY.", Items = dates });
             if (scales.Count > 0) found.Add(new StandardFinding { Area = "Sheets", Rule = "STD 9, EIR App. E", Text = $"{scales.Count} title block scales are not 1:n of the allowed list, NTS or As Shown.", Items = scales });
         }

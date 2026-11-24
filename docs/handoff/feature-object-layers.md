@@ -1,0 +1,4 @@
+﻿- Branch: `feature/object-layers`.
+- Changed: Drawing Standards checks and fixes Civil 3D objects on their base layer (drawing's own object-layer settings, one layer per kind, settings to no suffix; frozen/off layers left), renames blocks/styles to the KSIA_ prefix (JAC/JCB/JCP, xref drawing names; collisions listed), suggests XREF_[layer] for bound xref layers, checks revision letter by stage and north arrow / scale bar per sheet. Sheet Manager finds a title block renamed to KSIA_.
+- Checked: 1024 unit tests; TEST DRAWING copy (`std-objects.scr`): 3,454 objects moved, 71 settings; IFC 462124-N3 copy (`std-ifc.scr`): 280 names renamed, title block still found. Codex review: 4 findings fixed.
+- Not done: text overlap / mask check (CRS); the revision rule reads "Issued for Construction" as IFC (42 TEST DRAWING sheets with revision 01 flagged); windows not drawing-tested.
