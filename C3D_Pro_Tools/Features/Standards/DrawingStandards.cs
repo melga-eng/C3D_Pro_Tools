@@ -29,6 +29,8 @@ namespace C3DProTools.Features.Standards
         public string FixText;
         public Action<Transaction, Database, StringBuilder> Fix;
         public bool IsNote;
+        /// <summary>A fix that comes ticked (false: shown with its fix, for you to tick after a look).</summary>
+        public bool Tick = true;
     }
 
     public sealed class DrawingStandards
@@ -71,7 +73,7 @@ namespace C3DProTools.Features.Standards
                 {
                     List<StandardFinding> found = Check(doc);
                     Describe(found, log);
-                    if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null).ToList(), log);
+                    if (mode == "Fix") Fix(doc, found.Where(f => f.Fix != null && f.Tick).ToList(), log);
                 }
             }
             catch (Exception ex)
@@ -138,6 +140,7 @@ namespace C3DProTools.Features.Standards
                 CoordinateSystem(db, found);
                 var lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
                 var layers = lt.Cast<ObjectId>().Select(id => (LayerTableRecord)tr.GetObject(id, OpenMode.ForRead)).ToList();
+                ObjectLayers.Check(tr, db, found);
                 Objects(tr, db, found);
                 Layers(layers, found);
                 Fonts(tr, db, found);
