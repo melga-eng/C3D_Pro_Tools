@@ -1,0 +1,4 @@
+﻿- Branch `feature/sheet-groups`: Sheet Manager groups. Each sheet can carry a group name (Xrecord on the layout); Sheets page has a Group column, Group menu, Show filter, Sort ▸ Each group together; Duplicate keeps the group, New from template starts in none; `C3DPROSHEETS Group` (sheet=group, Sort) for tests.
+- Checked: `tests/drawing/sheets-groups.scr` on a TEST DRAWING copy passes (groups read back, case-merged, sort moved 102055 next to 102049, copy 102200 kept "Plans 124", removal works); 1031 unit tests incl. SheetGroupNamesTests.
+- Not checked: the window's group controls (no drawing test drives the form); groups across save and reopen (Xrecord, not reopened in the test).
+- Seen, not changed: a copy made headless gets the same tab number as the sheet after its source (pre-existing Duplicate / CloneLayout behaviour).

@@ -67,6 +67,9 @@ namespace C3DProTools
         private readonly RadioButton _rbPdfEach = new RadioButton { Text = "One PDF per sheet", AutoSize = true }, _rbPdfOne = new RadioButton { Text = "One PDF with all the sheets", AutoSize = true };
         private readonly CheckBox _chkPdfForce = ToolUi.Check("Plot with \"DWG To PDF.pc3\" whatever the sheet's own device"), _chkPdfOpen = ToolUi.Check("Open the folder afterwards");
         private readonly Dictionary<string, TextBox> _profileBoxes = new Dictionary<string, TextBox>();
+        /// <summary>Which sheets the Sheets list shows: null all, "" those in no group, else one group's.</summary>
+        private string _show;
+        private readonly ComboBox _cbShow = ToolUi.Combo(220);
 
         private FormSheetManager()
         {
@@ -257,6 +260,7 @@ namespace C3DProTools
         private void ShowPage()
         {
             for (int i = 0; i < _pages.Count; i++) _pages[i].Visible = i == _nav.Selected;
+            if (_nav.Selected == PSheets) PruneHidden();
             ApplySelection(GridOf(_nav.Selected));
         }
 
@@ -307,9 +311,28 @@ namespace C3DProTools
             sortMenu.Items.Add("By running number", null, (s, e) => SortSelected("number"));
             sortMenu.Items.Add("By tile, then part", null, (s, e) => SortSelected("tile"));
             sortMenu.Items.Add("By name", null, (s, e) => SortSelected("name"));
+            sortMenu.Items.Add("Each group together", null, (s, e) => SortSelected("group"));
             sort.Click += (s, e) => sortMenu.Show(sort, new Point(0, sort.Height));
             _tips.SetToolTip(sort, "Puts the selected sheets in order within the tab positions they hold; other sheets stay where they are.");
 
+            Button group = StyleUi.Secondary("Group ▾");
+            ContextMenuStrip groupMenu = new ContextMenuStrip();
+            groupMenu.Items.Add("Put selected in a group…", null, (s, e) => GroupSelected());
+            groupMenu.Items.Add("Take selected out of their group", null, (s, e) => SetGroup(Chosen(), ""));
+            groupMenu.Items.Add("Select the whole group", null, (s, e) => SelectGroup());
+            groupMenu.Items.Add("Rename a group…", null, (s, e) => RenameGroup());
+            group.Click += (s, e) => groupMenu.Show(group, new Point(0, group.Height));
+            _tips.SetToolTip(group, "Groups are names you give sets of sheets for your own reference. They are kept in the drawing; nothing on the sheets changes.");
+            _cbShow.SelectedIndexChanged += (s, e) =>
+            {
+                if (_filling) return;
+                _show = _cbShow.SelectedIndex <= 0 ? null : _cbShow.SelectedIndex == 1 ? "" : (string)((ComboItem)_cbShow.SelectedItem).Value;
+                FillSheets();
+                PruneHidden();
+            };
+
+            Control show = Bar(new Label { Text = "Show", AutoSize = true, Margin = new Padding(0, 9, 3, 3) }, _cbShow, group,
+                Hint("Type in the Group column, or select sheets and use Group. Sort ▸ Each group together puts the tabs in group order."));
             Control nav = Bar(StyleUi.Primary("Go to sheet", (s, e) => GoTo(Chosen().FirstOrDefault())),
                 StyleUi.Secondary("◀", (s, e) => Step(-1)), StyleUi.Secondary("▶", (s, e) => Step(1)),
                 StyleUi.Secondary("Move up", (s, e) => MoveSheets(-1)), StyleUi.Secondary("Move down", (s, e) => MoveSheets(1)), sort,
@@ -320,25 +343,119 @@ namespace C3DProTools
                 StyleUi.Secondary("Update key plans", (s, e) => UpdateKeyPlans()), StyleUi.Secondary("Fill match lines", (s, e) => FillMatchLines()));
 
             _gridSheets.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            foreach ((string name, string head, int w, bool edit) in new[] { ("tab", "#", 5, false), ("layout", "Layout (drawing number)", 46, true), ("tile", "Tile", 8, true), ("part", "Part", 6, true),
+            foreach ((string name, string head, int w, bool edit) in new[] { ("tab", "#", 5, false), ("group", "Group", 14, true), ("layout", "Layout (drawing number)", 46, true), ("tile", "Tile", 8, true), ("part", "Part", 6, true),
                          ("title", "Sheet title", 22, false), ("rev", "Rev", 6, false), ("stage", "Stage", 16, false), ("scale", "Scale", 9, false), ("setup", "Page setup", 12, false), ("issues", "Issues", 22, false) })
                 _gridSheets.Columns.Add(new DataGridViewTextBoxColumn { Name = name, HeaderText = head, FillWeight = w, ReadOnly = !edit, SortMode = DataGridViewColumnSortMode.NotSortable });
             _gridSheets.CellEndEdit += (s, e) => SheetCellEdited(e.RowIndex, e.ColumnIndex);
             // Double-click a read-only cell to open the sheet (the editable ones start editing).
             _gridSheets.CellDoubleClick += (s, e) => { if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && _gridSheets.Columns[e.ColumnIndex].ReadOnly) GoTo(_gridSheets.Rows[e.RowIndex].Tag as SheetRecord); };
             TrackSelection(_gridSheets);
-            return GridPage(_gridSheets, nav, make);
+            return GridPage(_gridSheets, show, nav, make);
+        }
+
+        /// <summary>A list entry that shows one text and stands for another (a group name with its count).</summary>
+        private sealed class ComboItem
+        {
+            public readonly string Shown; public readonly object Value;
+            public ComboItem(string shown, object value) { Shown = shown; Value = value; }
+            public override string ToString() => Shown;
+        }
+
+        /// <summary>The sheets the Sheets list shows (all, or the chosen group's).</summary>
+        private bool IsShown(SheetRecord s) => _show == null || s.Group.Equals(_show, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Sheets hidden by the Show choice are no longer chosen, so no button acts on a sheet that is not in view.</summary>
+        private void PruneHidden() => _selected.RemoveWhere(n => Sheet(n) is SheetRecord s && !IsShown(s));
+
+        private void FillShow()
+        {
+            List<(string name, int count)> groups = SheetGroupNames.Groups(_sheets.Select(s => s.Group));
+            if (_show != null && _show.Length > 0 && !groups.Any(g => g.name.Equals(_show, StringComparison.OrdinalIgnoreCase))) _show = null;
+            _cbShow.Items.Clear();
+            _cbShow.Items.Add($"All sheets ({_sheets.Count})");
+            _cbShow.Items.Add($"In no group ({_sheets.Count(s => s.Group.Length == 0)})");
+            foreach ((string name, int count) in groups) _cbShow.Items.Add(new ComboItem($"{name} ({count})", name));
+            _cbShow.SelectedIndex = _show == null ? 0 : _show.Length == 0 ? 1 : 2 + groups.FindIndex(g => g.name.Equals(_show, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void SetGroup(List<SheetRecord> sheets, string group)
+        {
+            if (sheets.Count == 0) return;
+            group = SheetGroupNames.Clean(group);
+            Change("Grouping", tr =>
+            {
+                foreach (SheetRecord s in sheets) SheetGroups.Set(tr, s.LayoutId, group);
+                return group.Length == 0 ? $"{sheets.Count} sheet(s) taken out of their group." : $"{sheets.Count} sheet(s) in group \"{group}\".";
+            });
+        }
+
+        private void GroupSelected()
+        {
+            List<SheetRecord> chosen = Chosen();
+            if (chosen.Count == 0) return;
+            string name = AskGroup($"Group for {chosen.Count} sheet(s)", "Group", chosen.Select(s => s.Group).FirstOrDefault(g => g.Length > 0) ?? "");
+            if (name == null) return;
+            if (name.Length == 0) { MessageBox.Show(this, "Type a group name (or use \"Take selected out of their group\").", Text); return; }
+            SetGroup(chosen, name);
+        }
+
+        /// <summary>The group name typed or picked from the drawing's groups; null when cancelled.</summary>
+        private string AskGroup(string title, string label, string start)
+        {
+            using (Form f = FormPartsLists.SmallDialog(title, out TableLayoutPanel body, out Button ok))
+            {
+                ComboBox box = new ComboBox { Width = 320, DropDownStyle = ComboBoxStyle.DropDown, Text = start };
+                foreach ((string name, int _) in SheetGroupNames.Groups(_sheets.Select(s => s.Group))) box.Items.Add(name);
+                box.Text = start;
+                ToolUi.Field(body, label, box);
+                ToolUi.Wide(body, ToolUi.Note("Pick a group of this drawing or type a new name."));
+                return f.ShowDialog(this) == DialogResult.OK ? SheetGroupNames.Clean(box.Text) : null;
+            }
+        }
+
+        private void SelectGroup()
+        {
+            List<string> groups = Chosen().Select(s => s.Group).Where(g => g.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (groups.Count == 0) { if (_selected.Count > 0) MessageBox.Show(this, "The selected sheets are in no group.", Text); return; }
+            foreach (SheetRecord s in _sheets.Where(s => groups.Contains(s.Group, StringComparer.OrdinalIgnoreCase) && IsShown(s))) _selected.Add(s.Layout);
+            ApplySelection(_gridSheets);
+            SetStatus($"{_selected.Count} sheet(s) selected: group {string.Join(", ", groups)}.");
+        }
+
+        private void RenameGroup()
+        {
+            List<(string name, int count)> groups = SheetGroupNames.Groups(_sheets.Select(s => s.Group));
+            if (groups.Count == 0) { MessageBox.Show(this, "This drawing has no sheet groups yet.", Text); return; }
+            string from = Chosen(false).Select(s => s.Group).FirstOrDefault(g => g.Length > 0) ?? (_show?.Length > 0 ? _show : groups[0].name);
+            using (Form f = FormPartsLists.SmallDialog("Rename a group", out TableLayoutPanel body, out Button ok))
+            {
+                ComboBox which = ToolUi.Combo(320);
+                foreach ((string g, int count) in groups) which.Items.Add(new ComboItem($"{g} ({count})", g));
+                which.SelectedIndex = Math.Max(0, groups.FindIndex(g => g.name.Equals(from, StringComparison.OrdinalIgnoreCase)));
+                TextBox to = new TextBox { Width = 320, Text = from };
+                which.SelectedIndexChanged += (s, e) => to.Text = (string)((ComboItem)which.SelectedItem).Value;
+                ToolUi.Field(body, "Group", which);
+                ToolUi.Field(body, "New name", to);
+                ToolUi.Wide(body, ToolUi.Note("A name another group has already joins the two groups."));
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                string old = (string)((ComboItem)which.SelectedItem).Value, name = SheetGroupNames.Clean(to.Text);
+                if (name.Length == 0 || name == old) return;
+                bool showing = old.Equals(_show, StringComparison.OrdinalIgnoreCase);
+                SetGroup(_sheets.Where(s => s.Group.Equals(old, StringComparison.OrdinalIgnoreCase)).ToList(), name);
+                if (showing) { _show = name; FillShow(); FillSheets(); }
+            }
         }
 
         private void FillSheets()
         {
             _filling = true;
             _gridSheets.Rows.Clear();
+            FillShow();
             Dictionary<string, int> issues = _issues.Where(i => !i.IsNote).GroupBy(i => i.Layout).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
-            foreach (SheetRecord s in _sheets)
+            foreach (SheetRecord s in _sheets.Where(IsShown))
             {
                 string scale = s.ViewportScale + (s.Attr(P.ScaleTag).Length > 0 && s.Attr(P.ScaleTag).Replace(" ", "") != s.ViewportScale ? $" ≠ {s.Attr(P.ScaleTag)}" : "");
-                int i = _gridSheets.Rows.Add(s.Tab, s.Layout, s.Tile, s.Part, s.Attr(P.SheetTitleTag), s.Attr(P.RevisionTag), s.Attr(P.StageTag), scale, s.PageSetup,
+                int i = _gridSheets.Rows.Add(s.Tab, s.Group, s.Layout, s.Tile, s.Part, s.Attr(P.SheetTitleTag), s.Attr(P.RevisionTag), s.Attr(P.StageTag), scale, s.PageSetup,
                     issues.TryGetValue(s.Layout, out int n) ? $"{n} issue(s)" : "");
                 DataGridViewRow row = _gridSheets.Rows[i];
                 row.Tag = s;
@@ -347,6 +464,7 @@ namespace C3DProTools
                 row.Selected = _selected.Contains(s.Layout);
             }
             _filling = false;
+            if (_nav.Selected == PSheets) PruneHidden();
         }
 
         private void SheetCellEdited(int rowIndex, int col)
@@ -354,7 +472,15 @@ namespace C3DProTools
             if (_filling || rowIndex < 0 || !(_gridSheets.Rows[rowIndex].Tag is SheetRecord s)) return;
             string column = _gridSheets.Columns[col].Name;
             string value = (_gridSheets.Rows[rowIndex].Cells[col].Value?.ToString() ?? "").Trim();
-            if (column == "layout" && value != s.Layout)
+            if (column == "group")
+            {
+                // Typed on a row of several selected sheets: they all go in the group.
+                string g = SheetGroupNames.Clean(value);
+                if (g.Equals(s.Group, StringComparison.Ordinal)) return;
+                List<SheetRecord> rows = _selected.Contains(s.Layout) ? Chosen(false) : new List<SheetRecord> { s };
+                BeginInvoke((Action)(() => SetGroup(rows, g)));
+            }
+            else if (column == "layout" && value != s.Layout)
             {
                 string problem = SheetManager.NameProblem(value, _sheets, s);
                 if (problem != null) { MessageBox.Show(this, problem, Text); BeginInvoke((Action)FillSheets); return; }
@@ -393,11 +519,13 @@ namespace C3DProTools
 
         private void Step(int by)
         {
-            if (_sheets.Count == 0 || !Ready()) return;
+            // Through the sheets in the list only (the Show choice), so a hidden sheet is never opened and chosen (review finding).
+            List<SheetRecord> shown = _sheets.Where(IsShown).ToList();
+            if (shown.Count == 0 || !Ready()) return;
             string cur = "";
             try { cur = LayoutManager.Current.CurrentLayout; } catch (Exception probe) when (C3DProLogger.IsProbeFailure(probe)) { }
-            int i = _sheets.FindIndex(s => s.Layout == cur);
-            GoTo(_sheets[i < 0 ? 0 : (i + by + _sheets.Count) % _sheets.Count]);
+            int i = shown.FindIndex(s => s.Layout == cur);
+            GoTo(shown[i < 0 ? 0 : (i + by + shown.Count) % shown.Count]);
         }
 
         private void MoveSheets(int by)
@@ -418,11 +546,14 @@ namespace C3DProTools
         private void SortSelected(string by)
         {
             List<SheetRecord> chosen = Chosen(false);
-            if (chosen.Count < 2) chosen = _sheets.ToList();
+            // None or one selected: the sheets in the list (the Show choice), never sheets hidden from it (review finding).
+            if (chosen.Count < 2) chosen = _sheets.Where(IsShown).ToList();
+            if (chosen.Count < 2) return;
             IComparer<string> natural = Comparer<string>.Create(SheetManager.Natural);
             List<SheetRecord> sorted = by == "tile"
                 ? chosen.OrderBy(s => s.Tile.Length == 0 ? 1 : 0).ThenBy(s => s.Tile, natural).ThenBy(s => s.IsPart ? 0 : 1).ThenBy(s => s.Part).ThenBy(s => s.Layout, natural).ToList()
                 : by == "number" ? chosen.OrderBy(s => SheetManager.NumberOf(s.Layout, P) < 0 ? 1 : 0).ThenBy(s => SheetManager.NumberOf(s.Layout, P)).ThenBy(s => s.Layout, natural).ToList()
+                : by == "group" ? SheetGroupNames.Together(chosen.Select(s => s.Group).ToList()).Select(i => chosen[i]).ToList()
                 : chosen.OrderBy(s => s.Layout, natural).ToList();
             // Into the tab positions the chosen sheets hold; the others stay put.
             List<SheetRecord> order = _sheets.ToList();
@@ -559,6 +690,9 @@ namespace C3DProTools
                 Change("Creating the sheet", tr =>
                 {
                     SheetRecord made = fromFile ? SheetManager.FromTemplate(tr, _doc.Database, path.Text, src, newName, P) : SheetManager.Duplicate(tr, _doc.Database, Sheet(src), newName, P);
+                    // A new sheet starts in no group, also when started from a grouped sheet of this drawing (review finding).
+                    SheetGroups.Set(tr, made.LayoutId, "");
+                    made.Group = "";
                     SheetManager.SetAttributes(tr, made, new Dictionary<string, string> { [SheetManager.NumberTagOf(made, P)] = newName });
                     List<string> log = new List<string>();
                     if (t.Length > 0 || pt.Length > 0) SheetManager.SetTilePart(tr, made, t.Length > 0 ? t : made.Tile, pt.Length > 0 ? pt : made.Part, P, log);
@@ -653,7 +787,7 @@ namespace C3DProTools
         private void UpdateKeyPlans()
         {
             List<SheetRecord> chosen = Chosen(false);
-            if (chosen.Count == 0) chosen = _sheets;
+            if (chosen.Count == 0) chosen = _sheets.Where(IsShown).ToList();
             Change("Updating key plans", tr =>
             {
                 List<string> log = new List<string>();
@@ -665,7 +799,7 @@ namespace C3DProTools
         private void FillMatchLines()
         {
             List<SheetRecord> chosen = Chosen(false);
-            if (chosen.Count == 0) chosen = _sheets;
+            if (chosen.Count == 0) chosen = _sheets.Where(IsShown).ToList();
             Change("Filling match lines", tr => $"Match lines filled on {SheetManager.FillMatchLines(tr, _sheets, chosen, P)} sheet(s) (neighbours within each tile; other tiles' references are kept).");
         }
 
