@@ -142,7 +142,8 @@ namespace C3DProTools
             {
                 if (count == 0) continue;
                 string name = BlockName(tr, br);
-                if (!string.IsNullOrWhiteSpace(p.TitleBlock) ? name.Equals(p.TitleBlock.Trim(), StringComparison.OrdinalIgnoreCase) : title == null || count > title.AttributeCollection.Count)
+                // The saved name still finds the block after Drawing Standards renamed its prefix (JCB-TTB_… -> KSIA_TTB_…).
+                if (!string.IsNullOrWhiteSpace(p.TitleBlock) ? Features.Standards.NamePrefix.SameIgnoringPrefix(name, p.TitleBlock) : title == null || count > title.AttributeCollection.Count)
                 {
                     title = br;
                     if (!string.IsNullOrWhiteSpace(p.TitleBlock)) break;

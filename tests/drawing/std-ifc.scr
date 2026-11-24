@@ -1,0 +1,7 @@
+C3DPROSTANDARDS
+Check
+C3DPROSTANDARDS
+Fix
+C3DPROSTANDARDS
+Check
+(princ (strcat "\nTB " (if (tblsearch "BLOCK" "KSIA_TTB_KSIAATTRIBUTES_A1") "renamed" "no") " OLD " (if (tblsearch "BLOCK" "JCB-TTB_KSIAATTRIBUTES_A1") "still" "gone")))

@@ -31,7 +31,9 @@ namespace C3DProTools.Features.Standards
 
         public static bool IsStandard(string name, ICollection<string> template) =>
             !string.IsNullOrEmpty(name) && name != "0" && !name.Equals("Defpoints", StringComparison.OrdinalIgnoreCase) &&
-            (Contains(template, name) || Standard.IsMatch(name));
+            (Contains(template, name) || Standard.IsMatch(name) ||
+             // Bound xref layers kept as XREF_[layer name] (your rule, 2026-11-24).
+             (name.StartsWith(NamePrefix.XrefLayer, StringComparison.OrdinalIgnoreCase) && name.Length > NamePrefix.XrefLayer.Length && !Bound.IsMatch(name)));
 
         public sealed class Suggestion
         {
@@ -48,10 +50,9 @@ namespace C3DProTools.Features.Standards
             bool isBound = bound.Count > 0;
             if (isBound)
             {
-                Match last = bound[bound.Count - 1];
-                inner = inner.Substring(last.Index + last.Length);
-                if (inner.Length > 0 && (IsStandard(inner, template) || Contains(template, inner) || Contains(drawingLayers, inner)))
-                    return new Suggestion { Layer = layer, Target = inner, Sure = true, Why = "bound xref layer: back to its own name" };
+                // A bound xref layer is named XREF_[its layer name] (your rule, 2026-11-24).
+                string xref = NamePrefix.XrefLayerName(layer);
+                if (xref != null) return new Suggestion { Layer = layer, Target = xref, Sure = true, Why = "bound xref layer: XREF_ and its own name" };
             }
 
             string target = MeaningMatch(inner, layer, template);
