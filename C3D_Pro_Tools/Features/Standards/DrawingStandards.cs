@@ -459,8 +459,11 @@ namespace C3DProTools.Features.Standards
             var revisions = new List<string>();
             foreach (SheetRecord s in sheets.Where(x => !x.TitleBlockId.IsNull))
             {
-                string stage = s.Attributes.FirstOrDefault(a => Regex.IsMatch(a.Key, "^STAGE$", RegexOptions.IgnoreCase)).Value;
-                string rev = s.Attributes.FirstOrDefault(a => Regex.IsMatch(a.Key, "^REV(_?NO)?$", RegexOptions.IgnoreCase)).Value;
+                // The tags set in Sheet Manager's profile (review finding), else the usual names.
+                string Attr(string tag, string fallback) =>
+                    !string.IsNullOrWhiteSpace(tag) && s.HasAttr(tag) ? s.Attr(tag) : s.Attributes.FirstOrDefault(a => Regex.IsMatch(a.Key, fallback, RegexOptions.IgnoreCase)).Value;
+                string stage = Attr(p.StageTag, "^STAGE$");
+                string rev = Attr(p.RevisionTag, "^REV(_?NO|ISION)?$");
                 string letter = NamePrefix.RevisionLetter(stage);
                 if (letter != null && !string.IsNullOrWhiteSpace(rev) && !NamePrefix.RevisionFits(rev, letter))
                     revisions.Add($"{s.Layout}: stage \"{stage}\", revision {rev} (should be {letter}1, {letter}2…)");
@@ -473,14 +476,17 @@ namespace C3DProTools.Features.Standards
             foreach (SheetRecord s in sheets)
             {
                 if (!(tr.GetObject(s.LayoutId, OpenMode.ForRead) is Layout lay)) continue;
-                // The blocks on the sheet and the blocks inside them (a north arrow often sits inside the title block).
+                // The blocks on the sheet and the blocks inside them (a north arrow often sits inside the title block); only those
+                // that plot: not on a layer that is off or frozen (review finding). Layer 0 inside a block takes the block's layer.
+                bool Shown(BlockReference br) =>
+                    !(tr.GetObject(br.LayerId, OpenMode.ForRead) is LayerTableRecord l) || (!l.IsOff && !l.IsFrozen && l.IsPlottable);
                 var names = new List<string>();
                 var seen = new HashSet<ObjectId>();
                 void Collect(ObjectId spaceId, int depth)
                 {
                     if (depth > 4 || !seen.Add(spaceId)) return;
                     foreach (ObjectId id in (BlockTableRecord)tr.GetObject(spaceId, OpenMode.ForRead))
-                        if (id.ObjectClass.IsDerivedFrom(RXObject.GetClass(typeof(BlockReference))) && tr.GetObject(id, OpenMode.ForRead) is BlockReference br)
+                        if (id.ObjectClass.IsDerivedFrom(RXObject.GetClass(typeof(BlockReference))) && tr.GetObject(id, OpenMode.ForRead) is BlockReference br && Shown(br))
                         {
                             var def = (BlockTableRecord)tr.GetObject(br.DynamicBlockTableRecord, OpenMode.ForRead);
                             names.Add(def.Name);

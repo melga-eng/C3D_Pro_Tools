@@ -115,3 +115,5 @@ Ideas from civil3dfactory (github.com/hellojessieluo-svg/civil3dfactory, Apache-
 - ICT and MV as templates (your request 2026-11-23): Rename name-pattern presets (ICT, MV) and numbering per name / across the network / per sheet, MV type codes T1-T4 and ALMH/VLMH; cover check with any duct types and ICT/MV presets; Split view From - To (one part, long view kept). Merged 2026-11-23; needs your try.
 
 - Drawing Standards > Layer names (your request 2026-11-23): each non-KSIA layer and the objects on layer 0 / Defpoints to a KSIA layer; frozen-in-viewport layers and block contents left; choices remembered. TEST DRAWING copy: 69 objects moved, a layer merged, one renamed, a frozen layer skipped. Merged; needs your try.
+
+- Drawing Standards (your rules 2026-11-24): Civil 3D objects on the base layer of their kind from the drawing's own object-layer settings (one layer per kind; settings to no suffix); KSIA_ prefix for blocks and styles; bound xref layers to XREF_[layer]; revision N# for IFC, C# for SDR; north arrow and scale bar per sheet (CRS). TEST DRAWING copy: 3,454 objects moved; IFC 462124 copy: 280 names renamed. Merged; needs your try.

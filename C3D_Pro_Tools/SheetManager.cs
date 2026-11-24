@@ -137,18 +137,21 @@ namespace C3DProTools
             }
 
             // The title block: the named one, else the block with the most attributes.
-            BlockReference title = null;
+            BlockReference title = null, renamed = null;
             foreach ((BlockReference br, int count) in blocks)
             {
                 if (count == 0) continue;
                 string name = BlockName(tr, br);
-                // The saved name still finds the block after Drawing Standards renamed its prefix (JCB-TTB_… -> KSIA_TTB_…).
-                if (!string.IsNullOrWhiteSpace(p.TitleBlock) ? Features.Standards.NamePrefix.SameIgnoringPrefix(name, p.TitleBlock) : title == null || count > title.AttributeCollection.Count)
+                if (!string.IsNullOrWhiteSpace(p.TitleBlock))
                 {
-                    title = br;
-                    if (!string.IsNullOrWhiteSpace(p.TitleBlock)) break;
+                    // The exact saved name first; else the same block after Drawing Standards renamed its prefix
+                    // (JCB-TTB_… -> KSIA_TTB_…), so a second prefix variant on the sheet never wins over the exact one (review finding).
+                    if (name.Equals(p.TitleBlock.Trim(), StringComparison.OrdinalIgnoreCase)) { title = br; break; }
+                    if (renamed == null && Features.Standards.NamePrefix.SameIgnoringPrefix(name, p.TitleBlock)) renamed = br;
                 }
+                else if (title == null || count > title.AttributeCollection.Count) title = br;
             }
+            title ??= renamed;
             if (title != null)
             {
                 s.TitleBlockId = title.ObjectId;

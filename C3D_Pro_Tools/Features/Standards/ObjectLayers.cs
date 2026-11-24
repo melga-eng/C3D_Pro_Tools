@@ -79,13 +79,15 @@ namespace C3DProTools.Features.Standards
             {
                 string baseLayer = bases[g.Key.setting];
                 List<(ObjectId id, string layer)> items = g.Value;
-                if (frozen.Contains(baseLayer))
+                // Also a base layer that is off or frozen everywhere: the objects would vanish from every view (review finding).
+                bool hidden = lt.Has(baseLayer) && tr.GetObject(lt[baseLayer], OpenMode.ForRead) is LayerTableRecord bl && (bl.IsFrozen || bl.IsOff);
+                if (frozen.Contains(baseLayer) || hidden)
                 {
                     // Moving onto a layer frozen in a viewport would make the objects vanish from that sheet: listed, no fix.
                     found.Add(new StandardFinding
                     {
                         Area = "Civil 3D objects", Rule = "Object layers",
-                        Text = $"{items.Count} {g.Key.kind} are not on {baseLayer}, but {baseLayer} is frozen in a viewport: not moved (they would disappear there).",
+                        Text = $"{items.Count} {g.Key.kind} are not on {baseLayer}, but {baseLayer} is {(hidden ? "off or frozen" : "frozen in a viewport")}: not moved (they would disappear).",
                         Items = items.GroupBy(x => x.layer).OrderByDescending(x => x.Count()).Select(x => $"{x.Count()} on {x.Key}").ToList(),
                     });
                     continue;
