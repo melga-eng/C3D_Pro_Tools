@@ -20,6 +20,9 @@ plot.log
 
 # Project drawings stay out of the repo (keep them in ..\C3D_Pro_Tools_Data)
 *.dwg
+*.dwt
+*.dxf
+*.pdf
 
 # Generated knowledge graph (rebuilt locally with `graphify update .`)
 graphify-out/
